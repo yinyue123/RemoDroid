@@ -50,6 +50,8 @@ fi
 [ -n "$URL" ] || die "no $KIND package for $ARCH in the release"
 
 if [ -n "${REMODROID_DRY_RUN:-}" ]; then echo "$KIND $URL"; exit 0; fi  # testing: show the choice only
+UPDATE=""
+[ -x /usr/bin/remodroid-server ] && UPDATE=1  # already installed: this run updates it
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 FILE="$TMP/$(basename "$URL")"
@@ -58,7 +60,7 @@ fetch "$URL" "$FILE"
 
 say "installing"
 case $KIND in
-    deb) DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$FILE" >/dev/null ;;
+    deb) DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$FILE" >/dev/null ;;  # keep your edited ini
     rpm) if command -v dnf >/dev/null 2>&1; then dnf install -y -q "$FILE" >/dev/null; else yum install -y -q "$FILE" >/dev/null; fi ;;
     apk) apk add -q --allow-untrusted "$FILE" ;;
     tar)
@@ -74,15 +76,19 @@ case $KIND in
         fi
         ;;
 esac
-ok "installed $(basename "$URL")"
+if [ -n "$UPDATE" ]; then ok "updated to $(basename "$URL")"; else ok "installed $(basename "$URL")"; fi
 
-say "starting the service"
+# restart, not just start: on an update the old version is still running
+say "${UPDATE:+re}starting the service"
 if [ -d /run/systemd/system ]; then
-    systemctl enable --now remodroid-server >/dev/null 2>&1 || systemctl restart remodroid-server
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable remodroid-server >/dev/null 2>&1 || true
+    systemctl restart remodroid-server
 elif command -v rc-service >/dev/null 2>&1; then
     rc-update add remodroid-server default >/dev/null 2>&1 || true
     rc-service remodroid-server restart >/dev/null 2>&1 || rc-service remodroid-server start
 else
+    pkill -x remodroid-serve 2>/dev/null && sleep 1  # the kernel keeps 15 characters of the name
     nohup /usr/bin/remodroid-server -c /etc/remodroid/server.ini >/var/log/remodroid-server.log 2>&1 &
 fi
 
@@ -105,7 +111,7 @@ if [ -s /var/lib/remodroid/setup-token ]; then
     printf '    \033[1mhttp://%s:%s/wizard.html?token=%s\033[0m\n' "$IP" "$PORT" "$(cat /var/lib/remodroid/setup-token)"
     echo
     echo "  Open TCP $PORT in the firewall / security group first. The wizard sets your"
-    echo "  domain (free HTTPS), login and STUN/TURN; then add routers on its Routers page."
+    echo "  domain (free HTTPS), login and STUN/TURN; then add agents on its Agents tab."
 else
     ok "the server is running (already set up): http://$IP:$PORT/"
 fi

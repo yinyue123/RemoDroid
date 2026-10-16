@@ -66,6 +66,8 @@ if [ -z "$URL" ]; then KIND=tar URL=$(pick "/remodroid-[0-9][^/]*-linux-${ARCH}\
 [ -n "$URL" ] || die "no package for this system ($ARCH) in the release"
 
 if [ -n "${REMODROID_DRY_RUN:-}" ]; then echo "$KIND $URL"; exit 0; fi  # testing: show the choice only
+UPDATE=""
+[ -x /usr/bin/remodroid-agent ] && UPDATE=1  # already installed: this run updates it
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 FILE="$TMP/$(basename "$URL")"
@@ -75,7 +77,7 @@ fetch "$URL" "$FILE"
 say "installing"
 case $KIND in
     ipk) opkg update >/dev/null 2>&1 || true; opkg install "$FILE" >/dev/null ;;
-    deb) DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$FILE" >/dev/null ;;
+    deb) DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$FILE" >/dev/null ;;  # keep your edited ini
     rpm) if command -v dnf >/dev/null 2>&1; then dnf install -y -q "$FILE" >/dev/null; else yum install -y -q "$FILE" >/dev/null; fi ;;
     apk) apk add -q --allow-untrusted "$FILE" ;;
     tar)
@@ -94,17 +96,21 @@ case $KIND in
         ;;
 esac
 [ -e /usr/bin/remodroid ] || ln -s remodroid-agent /usr/bin/remodroid
-ok "installed $(basename "$URL")"
+if [ -n "$UPDATE" ]; then ok "updated to $(basename "$URL")"; else ok "installed $(basename "$URL")"; fi
 
-say "starting the service"
+# restart, not just start: on an update the old version is still running
+say "${UPDATE:+re}starting the service"
 if [ -d /run/systemd/system ]; then
-    systemctl enable --now remodroid-agent >/dev/null 2>&1 || systemctl restart remodroid-agent
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable remodroid-agent >/dev/null 2>&1 || true
+    systemctl restart remodroid-agent
 elif [ -x /etc/init.d/remodroid-agent ] && [ -f /etc/rc.common ]; then
     /etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent restart
 elif command -v rc-service >/dev/null 2>&1; then
     rc-update add remodroid-agent default >/dev/null 2>&1 || true
     rc-service remodroid-agent restart >/dev/null 2>&1 || rc-service remodroid-agent start
 else
+    pkill -x remodroid-agent 2>/dev/null && sleep 1
     nohup /usr/bin/remodroid-agent -c /etc/remodroid/agent.ini >/var/log/remodroid-agent.log 2>&1 &
 fi
 sleep 1
@@ -114,8 +120,12 @@ if [ -n "$ENROLL" ]; then
     # shellcheck disable=SC2086
     exec /usr/bin/remodroid-agent enroll $ENROLL
 fi
+if [ -n "$UPDATE" ] && grep -q '^[[:space:]]*device_secret[[:space:]]*=[[:space:]]*[^[:space:];]' /etc/remodroid/agent.ini 2>/dev/null; then
+    ok "the agent is running the new version and reconnects to your panel by itself."
+    exit 0
+fi
 ok "the agent is running. Connect it to your panel with the command from"
-echo "  its Routers page → Add an agent, for example:"
+echo "  its Agents tab → Add, for example:"
 echo
 printf '    \033[1mremodroid enroll --panel https://your.panel --code XXXX-XXXX\033[0m\n'
 echo
