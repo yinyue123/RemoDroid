@@ -42,6 +42,7 @@ function start(name, cmd, args, env) {
   const file = path.join(dir, `${name}.log`), fd = fs.openSync(file, 'w');
   const p = spawn(cmd, args, { stdio: ['ignore', fd, fd], env: { ...process.env, ...env } });
   fs.closeSync(fd);
+  p.on('error', e => fs.appendFileSync(file, `spawn failed: ${e.message}\n`)); /* reported via the readiness timeout */
   Object.defineProperty(p, 'log', { get: () => fs.readFileSync(file, 'utf8') });
   p.name = name;
   procs.push(p);

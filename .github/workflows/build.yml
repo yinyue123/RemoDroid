@@ -46,6 +46,7 @@ jobs:
             echo "$sum  /tmp/$name.tgz" | sha256sum -c -
             tar -C "$RUNNER_TEMP/pebble" -xzf "/tmp/$name.tgz"
           done
+          chmod +x "$RUNNER_TEMP"/pebble/*/linux/amd64/*  # the release tarballs drop the execute bit
           echo "PEBBLE_DIR=$RUNNER_TEMP/pebble" >> "$GITHUB_ENV"
       - name: HTTPS, wss and ACME tests
         run: node tests/tls.mjs build/host
