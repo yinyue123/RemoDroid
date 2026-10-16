@@ -10,7 +10,7 @@ section: net
 priority: optional
 maintainer: yinyue123 <798523593@qq.com>
 homepage: https://github.com/yinyue123/RemoDroid
-description: RemoDroid control server: login, REST/WebSocket API, web client and built-in TURN relay. Static binary, no dependencies.
+description: "RemoDroid control server: login, REST/WebSocket API, web client and built-in TURN relay. Static binary, no dependencies."
 contents:
   - src: ${BIN}/remodroid-server
     dst: /usr/bin/remodroid-server

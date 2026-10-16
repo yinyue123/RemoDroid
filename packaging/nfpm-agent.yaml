@@ -10,7 +10,7 @@ section: net
 priority: optional
 maintainer: yinyue123 <798523593@qq.com>
 homepage: https://github.com/yinyue123/RemoDroid
-description: RemoDroid router agent: built-in ADB over USB, phone server supervisor, UDP relay to the RemoDroid server. Static binary, no dependencies.
+description: "RemoDroid router agent: built-in ADB over USB, phone server supervisor, UDP relay to the RemoDroid server. Static binary, no dependencies."
 contents:
   - src: ${BIN}/remodroid-agent
     dst: /usr/bin/remodroid-agent
