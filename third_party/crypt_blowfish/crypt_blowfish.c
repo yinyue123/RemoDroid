@@ -53,7 +53,7 @@
 /* Just to make sure the prototypes match the actual definitions */
 #include "crypt_blowfish.h"
 
-#ifdef __i386__
+#if defined(__i386__) && defined(BF_USE_ASM) /* RemoDroid: x86.S is not vendored; use the portable C code */
 #define BF_ASM				1
 #define BF_SCALE			1
 #elif defined(__x86_64__) || defined(__alpha__) || defined(__hppa__)
