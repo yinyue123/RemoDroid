@@ -1,0 +1,1240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RemoDroid">
+<title>RemoDroid Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --ground:#090B0E;
+  --surface:#13171C;
+  --surface-2:#1B2027;
+  --surface-3:#242A33;
+  --line:#2A313A;
+  --text:#E4E9EF;
+  --muted:#8A94A2;
+  --accent:#6CC8EE;
+  --accent-ink:#04202C;
+  --ok:#5CD08D;
+  --warn:#F1B64C;
+  --bad:#F0726B;
+  --glass:rgba(19,23,28,.78);
+  --sans:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ground);color:var(--text);font:15px/1.45 var(--sans);overflow:hidden;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- stream stage ---------- */
+#stage{position:fixed;inset:0;background:#000;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overflow:hidden}
+#screen{position:absolute;touch-action:none;background:#0d1426}
+
+.hud{position:fixed;z-index:20;top:calc(env(safe-area-inset-top,0px) + 10px);left:calc(env(safe-area-inset-left,0px) + 10px);
+  font:11px/1.45 var(--mono);font-variant-numeric:tabular-nums;color:#D7DEE6;background:rgba(8,10,13,.62);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:7px 9px;border-radius:9px;pointer-events:none;min-width:172px}
+.hud b{font-weight:500;color:#fff}
+.hud .dim{color:#8792A0}
+.hud .hex{display:block;margin-top:3px;color:var(--accent);max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.chip{position:fixed;z-index:21;top:calc(env(safe-area-inset-top,0px) + 10px);right:calc(env(safe-area-inset-right,0px) + 10px);
+  display:flex;align-items:center;gap:7px;padding:6px 10px 6px 8px;border-radius:999px;border:0;background:rgba(8,10,13,.62);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font:500 12px var(--sans);color:#DCE3EA}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(92,208,141,.18)}
+.dot.warn{background:var(--warn);box-shadow:0 0 0 3px rgba(241,182,76,.18)}
+
+.clipbar{position:fixed;z-index:26;top:calc(env(safe-area-inset-top,0px) + 50px);left:50%;transform:translateX(-50%);
+  width:min(560px,calc(100% - 24px));display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-radius:14px;
+  background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 10px 30px rgba(0,0,0,.45);animation:drop .2s ease-out}
+.clipbar .txt{flex:1;min-width:0;font-size:13px}
+.clipbar .txt small{display:block;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.clipbar .txt span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:12.5px}
+@keyframes drop{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}
+
+/* ---------- floating ball ---------- */
+#ball{position:fixed;z-index:30;width:58px;height:58px;border-radius:50%;border:0;padding:0;
+  background:rgba(24,28,34,.74);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  box-shadow:0 8px 22px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.09);touch-action:none;
+  transition:opacity .45s ease,left .22s ease,top .22s ease,transform .15s ease}
+#ball::before,#ball::after{content:"";position:absolute;border-radius:50%;inset:11px;border:2px solid rgba(228,233,239,.38)}
+#ball::after{inset:19px;background:rgba(228,233,239,.88);border:0}
+#ball.idle{opacity:.42}
+#ball.drag{transition:none;transform:scale(1.06)}
+#ball[aria-expanded="true"]{opacity:1}
+
+.menu{position:fixed;z-index:31;width:264px;padding:12px;border-radius:24px;background:var(--glass);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);
+  display:grid;grid-template-columns:repeat(3,1fr);gap:4px;animation:pop .16s ease-out}
+.menu button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 2px 9px;border:0;border-radius:16px;background:transparent;font-size:12px;color:#D9E0E8}
+.menu button:active{background:var(--surface-3)}
+.menu svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.menu button.on svg{color:var(--accent)}
+.menu .em{grid-column:span 1}
+@keyframes pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+
+/* ---------- sheets ---------- */
+#backdrop{position:fixed;inset:0;z-index:35;background:rgba(0,0,0,.42)}
+.sheet{position:fixed;z-index:40;left:0;right:0;bottom:0;margin-inline:auto;max-width:640px;max-height:88%;display:flex;flex-direction:column;
+  background:var(--surface);border-radius:22px 22px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom,0px);animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+.sheet>header{position:relative;display:flex;align-items:center;gap:12px;padding:18px 16px 10px}
+.sheet>header::before{content:"";position:absolute;top:7px;left:50%;width:38px;height:4px;margin-left:-19px;border-radius:2px;background:var(--line)}
+.sheet h2{margin:0;flex:1;font:600 17px/1.2 var(--sans);text-wrap:balance}
+.sheet h2 small{display:block;font:400 12px var(--sans);color:var(--muted);margin-top:2px}
+.x{width:32px;height:32px;border-radius:50%;border:0;background:var(--surface-2);color:var(--muted);font-size:18px;line-height:1}
+.sheet .body{overflow:auto;-webkit-overflow-scrolling:touch;padding:4px 16px 22px;display:flex;flex-direction:column;gap:14px}
+
+.tabs{display:flex;gap:4px;overflow-x:auto;padding:0 16px 10px;scrollbar-width:none;flex-shrink:0}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex-shrink:0;border:0;background:none;color:var(--muted);padding:7px 12px;border-radius:999px;font:500 13.5px var(--sans)}
+.tabs button[aria-selected="true"]{background:var(--surface-3);color:var(--text)}
+
+.group{display:flex;flex-direction:column}
+.group>h3{margin:4px 0 2px;font:600 11px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row.stack{flex-direction:column;align-items:stretch;gap:8px}
+.lbl{min-width:0}
+.lbl small{display:block;color:var(--muted);font-size:12.5px;margin-top:1px}
+.val{font:500 13px var(--mono);color:var(--accent);font-variant-numeric:tabular-nums}
+
+.seg{display:flex;background:var(--surface-2);border-radius:11px;padding:3px;gap:2px}
+.seg button{flex:1;border:0;background:none;color:var(--muted);padding:7px 6px;border-radius:8px;font:500 13px var(--sans);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+
+.sw{appearance:none;-webkit-appearance:none;flex-shrink:0;width:48px;height:29px;border-radius:999px;background:var(--surface-3);position:relative;margin:0;cursor:pointer;transition:background .18s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:23px;height:23px;border-radius:50%;background:#E9EEF3;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:transform .18s}
+.sw:checked{background:var(--accent)}
+.sw:checked::after{transform:translateX(19px)}
+
+input[type=range]{width:100%;accent-color:var(--accent)}
+.step{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.step button{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);font-size:18px;line-height:1}
+.step output{min-width:66px;text-align:center;font:500 14px var(--mono);font-variant-numeric:tabular-nums}
+
+input[type=text],textarea{width:100%;font:16px/1.4 var(--sans);color:var(--text);background:var(--surface-2);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+textarea{resize:vertical;min-height:88px;font-family:var(--mono);font-size:15px}
+input[type=text]:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.btn{min-height:42px;padding:0 15px;border-radius:11px;border:1px solid var(--line);background:var(--surface-2);font:500 14px var(--sans);display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.primary{background:var(--accent);border-color:transparent;color:var(--accent-ink)}
+.btn.danger{color:var(--bad)}
+.btn.wide{flex:1}
+.btn:disabled{opacity:.45}
+
+.card{background:var(--surface-2);border-radius:14px;padding:12px 14px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;margin:0;font-size:13px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;text-align:right;font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.pill{display:inline-block;font:600 11px/1 var(--sans);letter-spacing:.03em;padding:4px 8px;border-radius:999px;background:var(--surface-3);color:var(--muted);white-space:nowrap}
+.pill.ok{background:rgba(92,208,141,.14);color:var(--ok)}
+.pill.warn{background:rgba(241,182,76,.14);color:var(--warn)}
+.pill.bad{background:rgba(240,114,107,.14);color:var(--bad)}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+.note code,.mono{font-family:var(--mono);font-size:12px}
+
+pre.log{margin:0;height:230px;overflow:auto;background:#06080A;border:1px solid var(--line);border-radius:11px;padding:10px;
+  font:11.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all;color:#C9D1DA}
+.lv-E{color:var(--bad)}.lv-W{color:var(--warn)}.lv-D,.lv-V{color:#7D8794}.lv-out{color:var(--accent)}.lv-in{color:var(--ok)}
+
+/* photo queue */
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:118px;border:1.5px dashed var(--line);border-radius:16px;background:var(--surface-2);text-align:center;padding:14px}
+.drop svg{width:34px;height:34px;fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.drop b{font-weight:600}
+.drop input{position:absolute;width:1px;height:1px;opacity:0}
+.queue{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.qi{display:grid;grid-template-columns:52px 1fr auto;gap:10px;align-items:center;background:var(--surface-2);border-radius:13px;padding:8px}
+.qi img{width:52px;height:52px;object-fit:cover;border-radius:9px;background:var(--surface-3)}
+.qi .nm{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qi .meta{font:11px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:4px;border-radius:2px;background:var(--surface-3);margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s linear}
+
+.hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.hist button{width:100%;display:flex;gap:10px;align-items:center;text-align:left;border:0;background:var(--surface-2);border-radius:11px;padding:9px 11px}
+.hist span.t{flex:1;min-width:0;font:12.5px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.keys{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.keys button{min-height:42px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);font:500 13px var(--sans)}
+
+.files{list-style:none;margin:0;padding:0}
+.files li{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.files li:last-child{border-bottom:0}
+.files .nm{flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.files .meta{font:11px var(--mono);color:var(--muted)}
+
+.check{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.check:last-child{border-bottom:0}
+.check .lbl{flex:1}
+.check .lbl small{font-family:var(--mono);font-size:11.5px;overflow-wrap:anywhere}
+
+.confirm{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(240,114,107,.08);border:1px solid rgba(240,114,107,.3);border-radius:12px;padding:10px 12px;font-size:13px}
+
+/* overlays */
+.overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(5,6,8,.9);padding:24px}
+.overlay .box{max-width:340px;text-align:center;display:flex;flex-direction:column;gap:12px;align-items:center}
+.overlay h2{margin:0;font:600 20px var(--sans)}
+.overlay p{margin:0;color:var(--muted);font-size:14px}
+.count{font:500 44px/1 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums}
+
+#toasts{position:fixed;z-index:60;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 22px);display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:calc(100% - 32px)}
+.toast{background:rgba(228,233,239,.95);color:#0B0E12;font:500 13.5px var(--sans);padding:9px 14px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.4);max-width:100%;animation:up .18s ease-out}
+
+#copybuf{position:fixed;top:0;left:-9999px;width:10px;height:10px;opacity:0;font-size:16px}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="screen" aria-label="Phone screen (demo stream)"></canvas></div>
+
+<div class="hud" id="hud" aria-live="off"></div>
+<button class="chip" id="chip" type="button" aria-label="Connection status. Tap to toggle stats."><span class="dot" id="chipDot"></span><span id="chipText">router1 · Live</span></button>
+
+<div class="clipbar" id="clipbar" hidden role="status">
+  <div class="txt"><small>Android copied</small><span id="clipbarText"></span></div>
+  <button class="btn primary" id="clipbarCopy" type="button">Copy</button>
+  <button class="x" id="clipbarClose" type="button" aria-label="Dismiss">×</button>
+</div>
+
+<button id="ball" type="button" aria-label="Open RemoDroid menu" aria-haspopup="menu" aria-expanded="false"></button>
+
+<div class="menu" id="menu" role="menu" hidden>
+  <button type="button" role="menuitem" data-act="photo"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2.5"/><circle cx="12" cy="12.5" r="3.6"/><path d="M8.5 5l1.4-2h4.2l1.4 2"/></svg>Photo</button>
+  <button type="button" role="menuitem" data-act="clip"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2.2"/><path d="M9 4.5V3h6v1.5"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/></svg>Clipboard</button>
+  <button type="button" role="menuitem" data-act="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/><path d="M4 12h2M10 12h10"/><circle cx="8" cy="12" r="2.2"/></svg>Settings</button>
+  <button type="button" role="menuitem" data-act="back"><svg viewBox="0 0 24 24"><path d="M16 5L7 12l9 7z"/></svg>Back</button>
+  <button type="button" role="menuitem" data-act="home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>Home</button>
+  <button type="button" role="menuitem" data-act="recents"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>Recents</button>
+  <button type="button" role="menuitem" data-act="keys"><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/></svg>Keyboard</button>
+  <button type="button" role="menuitem" data-act="screen" id="menuScreen"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M4 4l16 16"/></svg><span>Screen off</span></button>
+  <button type="button" role="menuitem" data-act="stats" id="menuStats"><svg viewBox="0 0 24 24"><path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/></svg>Stats</button>
+</div>
+
+<div id="backdrop" hidden></div>
+
+<!-- Photo upload -->
+<section class="sheet" id="sheet-photo" hidden aria-labelledby="ph-title">
+  <header><h2 id="ph-title">Upload photos<small id="ph-dest">to /sdcard/DCIM/RemoDroid · added to Gallery</small></h2><button class="x" type="button" data-close aria-label="Close">×</button></header>
+  <div class="body">
+    <label class="drop" for="photoInput">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2.5"/><circle cx="12" cy="12.5" r="3.6"/><path d="M8.5 5l1.4-2h4.2l1.4 2"/></svg>
+      <b>Take a photo or choose from Library</b>
+      <span class="note">Sent straight to the phone over WebRTC · 16 KB chunks · SHA-256 checked</span>
+      <input type="file" id="photoInput" accept="image/*" multiple>
+    </label>
+    <ul class="queue" id="queue"></ul>
+    <p class="note" id="queueEmpty">No uploads yet. Example: a camera shot arrives as <code>IMG_20261016_142233.jpg</code>.</p>
+  </div>
+</section>
+
+<!-- Clipboard -->
+<section class="sheet" id="sheet-clip" hidden aria-labelledby="cl-title">
+  <header><h2 id="cl-title">Clipboard<small id="clipSyncState">Sync on · text both ways</small></h2><button class="x" type="button" data-close aria-label="Close">×</button></header>
+  <div class="body">
+    <div class="group">
+      <h3>Android clipboard</h3>
+      <div class="row stack">
+        <textarea id="clipAndroid" spellcheck="false" aria-label="Android clipboard text"></textarea>
+        <div class="btns">
+          <button class="btn primary wide" id="clipSend" type="button">Send to Android</button>
+          <button class="btn wide" id="clipSendPaste" type="button">Send &amp; paste</button>
+          <button class="btn wide" id="clipCopy" type="button">Copy to iPhone</button>
+        </div>
+      </div>
+    </div>
+    <div class="group">
+      <h3>From iPhone</h3>
+      <div class="row stack">
+        <textarea id="clipPaste" spellcheck="false" placeholder="Long-press here → Paste" aria-label="Paste iPhone clipboard here"></textarea>
+        <div class="btns">
+          <button class="btn primary wide" id="clipPasteSend" type="button">Send to Android</button>
+          <button class="btn wide" id="clipPasteEdit" type="button">Move to editor</button>
+        </div>
+        <p class="note">Safari only shares the clipboard on your tap, and plain <code>http://</code> pages can't read it directly, so paste here first.</p>
+      </div>
+    </div>
+    <div class="group">
+      <h3>Recent</h3>
+      <ul class="hist" id="clipHist"></ul>
+    </div>
+    <button class="btn" id="clipSim" type="button">Simulate a copy on Android</button>
+  </div>
+</section>
+
+<!-- Keyboard -->
+<section class="sheet" id="sheet-keys" hidden aria-labelledby="kb-title">
+  <header><h2 id="kb-title">Keyboard<small>Text goes into the focused field on the phone</small></h2><button class="x" type="button" data-close aria-label="Close">×</button></header>
+  <div class="body">
+    <div class="row stack">
+      <input type="text" id="kbText" placeholder="Type text for the phone" autocomplete="off" autocapitalize="off">
+      <button class="btn primary" id="kbSend" type="button">Send text</button>
+    </div>
+    <div class="keys" id="kbKeys"></div>
+  </div>
+</section>
+
+<!-- Settings -->
+<section class="sheet" id="sheet-settings" hidden aria-labelledby="st-title">
+  <header><h2 id="st-title">Settings<small>router1 · Pixel 8 · Android 14 (demo data)</small></h2><button class="x" type="button" data-close aria-label="Close">×</button></header>
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <div class="body" id="settingsBody"></div>
+</section>
+
+<div class="overlay" id="disc" hidden>
+  <div class="box">
+    <h2 id="discTitle">Disconnected</h2>
+    <div class="count" id="discCount">10</div>
+    <p id="discText">The phone locks when the grace period ends. Reconnect before then to continue where you left off.</p>
+    <button class="btn primary" id="reconnect" type="button">Reconnect</button>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<textarea id="copybuf" aria-hidden="true" tabindex="-1"></textarea>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const now = () => performance.now();
+
+/* ================= settings ================= */
+const KEY = 'remodroid-demo-v1';
+const DEFAULTS = {
+  mode: 'auto', preset: '720p', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: true,
+  screenOff: true, lockOnDisc: true, grace: 10, rotation: 'portrait', clipSync: true, autoPaste: false, overheat: 45,
+  destDir: '/sdcard/DCIM/RemoDroid', mediaScan: true, overwrite: false, maxMb: 2048,
+  route: 'auto', relay: false
+};
+let S = Object.assign({}, DEFAULTS);
+try { Object.assign(S, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+let ballPos = null;
+try { ballPos = JSON.parse(localStorage.getItem(KEY + '-ball') || 'null'); } catch (e) {}
+
+/* ================= mock device ================= */
+const SID = 's_' + Math.random().toString(16).slice(2, 10);
+const sessionSince = Date.now();
+const device = {
+  id: 'router1', model: 'Pixel 8', android: '14', sdk: 34, serial: '3A281FDH20017K',
+  battery: 82, charging: true, temp: 31.5, panel: S.screenOff ? 'off' : 'on', locked: false, server: 'running'
+};
+const adb = { usb: 'connected', auth: 'authorized', usb_speed: 'high', protocol_version: '0x01000001', max_payload: 262144, streams_open: 2, tx: 0, rx: 0 };
+let check = { h265hw: null, h264hw: null };
+
+/* ================= toasts ================= */
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  $('#toasts').appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+/* ================= protocol (Appendix A) ================= */
+let msgId = 0;
+const proto = [];
+let inputCount = 0, lastHex = '—';
+function logProto(dir, chan, text) {
+  const ts = new Date().toTimeString().slice(0, 8);
+  proto.push({ dir, line: `${ts} ${dir} ${chan.padEnd(5)} ${text}` });
+  if (proto.length > 120) proto.shift();
+  if (renderProto) renderProto();
+}
+function sendCtrl(t, d) {
+  const m = { t, id: ++msgId, sid: SID, d };
+  logProto('→', 'ctrl', JSON.stringify(m));
+  adb.tx += 80;
+  return m;
+}
+function recvCtrl(t, d) { logProto('←', 'ctrl', JSON.stringify({ t, sid: SID, d })); }
+function rest(method, path, body) { logProto('→', 'http', `${method} ${path}${body ? ' ' + JSON.stringify(body) : ''}`); }
+const hex = u8 => Array.from(u8, b => b.toString(16).padStart(2, '0')).join(' ');
+function encTouch(action, pid, flags, x, y, p, ts) {
+  const b = new ArrayBuffer(14), v = new DataView(b);
+  v.setUint8(0, 0x01); v.setUint8(1, action); v.setUint8(2, pid); v.setUint8(3, flags);
+  v.setUint16(4, x); v.setUint16(6, y); v.setUint16(8, p); v.setUint32(10, ts >>> 0);
+  return new Uint8Array(b);
+}
+const ACT = ['down', 'up', 'move', 'cancel'];
+function sendTouch(action, pid, nx, ny, pressure) {
+  const u8 = encTouch(action, pid, 1, Math.round(nx * 65535), Math.round(ny * 65535), Math.round(pressure * 65535), Math.floor(now()));
+  inputCount++; lastHex = hex(u8); adb.tx += 14;
+  if (action !== 2) logProto('→', 'input', `touch ${ACT[action]} p${pid} [${lastHex}]`);
+}
+
+/* ================= stream canvas ================= */
+const stage = $('#stage'), cv = $('#screen'), ctx = cv.getContext('2d');
+const PRESET = { '1080p': 1080, '720p': 720, '540p': 540, '360p': 360 };
+let reconfigUntil = 0;
+function landscape() { return S.rotation === 'landscape'; }
+function streamDims() {
+  const s = PRESET[S.preset] || 720, l = Math.round(s * 20 / 9 / 16) * 16;
+  return landscape() ? [l, s] : [s, l];
+}
+function layout() {
+  const [w, h] = streamDims();
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const W = stage.clientWidth, H = stage.clientHeight;
+  const sc = Math.min(W / w, H / h);
+  const cw = Math.floor(w * sc), ch = Math.floor(h * sc);
+  cv.style.width = cw + 'px'; cv.style.height = ch + 'px';
+  cv.style.left = Math.floor((W - cw) / 2) + 'px'; cv.style.top = Math.floor((H - ch) / 2) + 'px';
+}
+function reconfigure(reason) {
+  reconfigUntil = now() + 260;
+  layout();
+  const [w, h] = streamDims();
+  recvCtrl('screen.changed', { w, h, rotation: landscape() ? 1 : 0, reason });
+}
+window.addEventListener('resize', layout);
+window.addEventListener('orientationchange', () => setTimeout(layout, 120));
+
+const FONT = getComputedStyle(document.body).fontFamily;
+const stars = Array.from({ length: 90 }, () => ({ x: Math.random(), y: Math.random(), z: .2 + Math.random() * .8 }));
+const player = { x: .5, y: .62, tx: .5, ty: .62 };
+const touches = new Map();
+const ripples = [];
+let score = 1240, lastFrame = 0, frames = 0, fpsMeasured = 0, fpsClock = now();
+
+function codecName() {
+  if (S.codec === 'h264') return 'H.264';
+  if (S.codec === 'h265') return 'H.265';
+  return check.h265hw === false ? 'H.264' : 'H.265';
+}
+
+function draw(t) {
+  requestAnimationFrame(draw);
+  if (t - lastFrame < 1000 / S.fps - 2) return;
+  lastFrame = t; frames++;
+  if (t - fpsClock >= 1000) { fpsMeasured = Math.round(frames * 1000 / (t - fpsClock)); frames = 0; fpsClock = t; }
+  const W = cv.width, H = cv.height, u = Math.min(W, H);
+  if (t < reconfigUntil) {
+    ctx.fillStyle = '#1C2129'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#8A94A2'; ctx.font = `500 ${u * .04}px ${FONT}`;
+    ctx.textAlign = 'center'; ctx.fillText('Reconfiguring encoder…', W / 2, H / 2);
+    return;
+  }
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0B1430'); g.addColorStop(.55, '#22285A'); g.addColorStop(1, '#4A2B5E');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  ctx.fillStyle = '#E8ECFF';
+  for (const s of stars) {
+    if (!reduce) { s.y += s.z * .0016 * (60 / S.fps); if (s.y > 1) { s.y = 0; s.x = Math.random(); } }
+    ctx.globalAlpha = .35 + s.z * .6;
+    ctx.fillRect(s.x * W, s.y * H * .7, u * .004 * s.z + 1, u * .004 * s.z + 1);
+  }
+  ctx.globalAlpha = 1;
+  const hill = (base, amp, freq, phase, col) => {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += W / 40) ctx.lineTo(x, H * base + Math.sin(x / W * freq + phase) * H * amp);
+    ctx.lineTo(W, H); ctx.fill();
+  };
+  const ph = reduce ? 0 : t / 4000;
+  hill(.80, .025, 7, ph, '#2B1F48'); hill(.86, .02, 11, ph * 1.8, '#1A1430');
+
+  player.x += (player.tx - player.x) * .14; player.y += (player.ty - player.y) * .14;
+  ctx.save();
+  ctx.shadowColor = '#6CC8EE'; ctx.shadowBlur = u * .06;
+  ctx.fillStyle = '#6CC8EE'; ctx.beginPath(); ctx.arc(player.x * W, player.y * H, u * .045, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(108,200,238,.5)'; ctx.lineWidth = u * .004;
+  ctx.beginPath(); ctx.arc(player.tx * W, player.ty * H, u * .07, 0, Math.PI * 2); ctx.stroke();
+
+  const sb = H * .034, fs = u * .032;
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(0, 0, W, sb);
+  ctx.fillStyle = '#F1F4FA'; ctx.font = `600 ${fs}px ${FONT}`;
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const d = new Date(); ctx.fillText(d.toTimeString().slice(0, 5), u * .05, sb / 2);
+  ctx.textAlign = 'right'; ctx.fillText(`5G  ${device.battery}%`, W - u * .05, sb / 2);
+
+  if (!reduce && frames % 3 === 0) score += 7;
+  ctx.textAlign = 'left'; ctx.font = `500 ${u * .05}px 'IBM Plex Mono', monospace`;
+  ctx.fillText('SCORE ' + String(score).padStart(6, '0'), u * .05, sb + u * .08);
+  ctx.font = `400 ${u * .028}px 'IBM Plex Mono', monospace`; ctx.fillStyle = 'rgba(241,244,250,.6)';
+  ctx.textAlign = 'center'; ctx.fillText(`DEMO STREAM · ${codecName()} · ${W}×${H} · ${S.fps} fps`, W / 2, H - u * .05);
+
+  if (S.touches) {
+    for (const [, p] of touches) {
+      ctx.fillStyle = 'rgba(255,255,255,.28)'; ctx.beginPath(); ctx.arc(p.x * W, p.y * H, u * .055, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = u * .004; ctx.stroke();
+    }
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const r = ripples[i], k = (t - r.t) / 420;
+      if (k > 1) { ripples.splice(i, 1); continue; }
+      ctx.strokeStyle = `rgba(255,255,255,${.6 * (1 - k)})`; ctx.lineWidth = u * .004;
+      ctx.beginPath(); ctx.arc(r.x * W, r.y * H, u * (.05 + k * .09), 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+}
+
+/* ---- touch input on the stream (multi-touch via pointer events) ---- */
+const pidMap = new Map();
+function allocPid(pointerId) {
+  for (let i = 0; i < 10; i++) if (![...pidMap.values()].includes(i)) { pidMap.set(pointerId, i); return i; }
+  return 9;
+}
+function norm(e) {
+  const r = cv.getBoundingClientRect();
+  return [clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)];
+}
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault(); closeMenu();
+  try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  const pid = allocPid(e.pointerId), [x, y] = norm(e);
+  touches.set(pid, { x, y });
+  ripples.push({ x, y, t: now() });
+  player.tx = x; player.ty = clamp(y, .08, .95);
+  sendTouch(0, pid, x, y, e.pressure || 1);
+});
+cv.addEventListener('pointermove', e => {
+  if (!pidMap.has(e.pointerId)) return;
+  e.preventDefault();
+  const pid = pidMap.get(e.pointerId), [x, y] = norm(e);
+  touches.set(pid, { x, y });
+  if (pid === 0) { player.tx = x; player.ty = clamp(y, .08, .95); }
+  sendTouch(2, pid, x, y, e.pressure || 1);
+});
+function endPointer(e, action) {
+  if (!pidMap.has(e.pointerId)) return;
+  const pid = pidMap.get(e.pointerId), [x, y] = norm(e);
+  sendTouch(action, pid, x, y, 0);
+  touches.delete(pid); pidMap.delete(e.pointerId);
+}
+cv.addEventListener('pointerup', e => endPointer(e, 1));
+cv.addEventListener('pointercancel', e => endPointer(e, 3));
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => { if (e.target === cv) e.preventDefault(); });
+
+/* ================= HUD + chip ================= */
+let kbpsNow = 6200, rtt = 36;
+function tickStats() {
+  const cap = S.kbps;
+  if (S.mode === 'auto') kbpsNow = clamp(kbpsNow + (Math.random() - .45) * 900, 1500, cap);
+  else kbpsNow = cap * (.96 + Math.random() * .06);
+  rtt = clamp(rtt + (Math.random() - .5) * 6, 24, 58);
+  const loss = Math.max(0, (Math.random() - .7) * 1.4);
+  const path = S.relay ? 'relay' : (S.route === 'wifi' ? 'wifi' : 'tunnel');
+  adb.tx += Math.round(kbpsNow * 125); adb.rx += 2000;
+  const hud = $('#hud');
+  hud.hidden = !S.stats;
+  if (S.stats) {
+    const dec = check.h265hw === null ? 'checking' : ((codecName() === 'H.265' ? check.h265hw : check.h264hw) ? 'hardware' : 'unknown');
+    hud.innerHTML =
+      `<b>${fpsMeasured}</b> fps <span class="dim">/ ${S.fps}</span> · <b>${(kbpsNow / 1000).toFixed(1)}</b> Mbps<br>` +
+      `rtt <b>${Math.round(rtt)}</b> ms · loss <b>${loss.toFixed(1)}</b>%<br>` +
+      `${codecName()} · ${cv.width}×${cv.height} · ${S.mode}<br>` +
+      `<span class="dim">decoder</span> ${dec} · <span class="dim">path</span> ${path}<br>` +
+      `<span class="dim">panel</span> ${device.panel} · <span class="dim">input</span> ${inputCount}` +
+      `<span class="hex">${lastHex}</span>`;
+  }
+  $('#chipText').textContent = `${device.id} · ${Math.round(rtt)} ms`;
+  if (Math.random() < .12) recvCtrl('stats', { fps: fpsMeasured, kbps: Math.round(kbpsNow), rtt_ms: Math.round(rtt), loss_pct: +loss.toFixed(1), codec: codecName().toLowerCase().replace('.', ''), path });
+  if (statusRefresh) statusRefresh();
+}
+setInterval(tickStats, 1000);
+$('#chip').addEventListener('click', () => { S.stats = !S.stats; save(); tickStats(); syncMenuStates(); });
+
+/* ================= floating ball ================= */
+const ball = $('#ball'), menu = $('#menu');
+const MARGIN = 8;
+let idleTimer = 0;
+let B = { t: 0, r: 0, b: 0, l: 0 };
+function bounds() {
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;inset:0;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);visibility:hidden;pointer-events:none';
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const b = { t: parseFloat(cs.paddingTop), r: parseFloat(cs.paddingRight), b: parseFloat(cs.paddingBottom), l: parseFloat(cs.paddingLeft) };
+  probe.remove();
+  return b;
+}
+function placeBall(x, y, snap) {
+  const W = innerWidth, H = innerHeight, s = ball.offsetWidth;
+  const minX = B.l + MARGIN, maxX = W - B.r - MARGIN - s, minY = B.t + MARGIN, maxY = H - B.b - MARGIN - s;
+  if (snap) x = (x + s / 2 < W / 2) ? minX : maxX;
+  x = clamp(x, minX, maxX); y = clamp(y, minY, maxY);
+  ball.style.left = x + 'px'; ball.style.top = y + 'px';
+  return { x, y };
+}
+function settleBall() {
+  const r = ball.getBoundingClientRect();
+  const p = placeBall(r.left, r.top, true);
+  ballPos = { side: p.x < innerWidth / 2 ? 'l' : 'r', fy: p.y / innerHeight };
+  try { localStorage.setItem(KEY + '-ball', JSON.stringify(ballPos)); } catch (e) {}
+}
+function restoreBall() {
+  B = bounds();
+  const side = ballPos ? ballPos.side : 'r', fy = ballPos ? ballPos.fy : .58;
+  placeBall(side === 'l' ? 0 : innerWidth, fy * innerHeight, true);
+}
+function armIdle() {
+  ball.classList.remove('idle'); clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (menu.hidden) ball.classList.add('idle'); }, 3000);
+}
+let drag = null;
+ball.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  try { ball.setPointerCapture(e.pointerId); } catch (err) {}
+  B = bounds();
+  const r = ball.getBoundingClientRect();
+  drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, moved: false };
+  armIdle();
+});
+ball.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if (!drag.moved && Math.hypot(dx, dy) > 6) { drag.moved = true; ball.classList.add('drag'); closeMenu(); }
+  if (drag.moved) placeBall(drag.ox + dx, drag.oy + dy, false);
+});
+function ballUp(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const moved = drag.moved; drag = null; ball.classList.remove('drag');
+  if (moved) settleBall(); else toggleMenu();
+  armIdle();
+}
+ball.addEventListener('pointerup', ballUp);
+ball.addEventListener('pointercancel', ballUp);
+ball.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMenu(); } });
+window.addEventListener('resize', () => { restoreBall(); if (!menu.hidden) positionMenu(); });
+
+function positionMenu() {
+  const r = ball.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight, W = innerWidth, H = innerHeight;
+  let x = r.left < W / 2 ? r.right + 10 : r.left - 10 - mw;
+  if (x < B.l + 8 || x + mw > W - B.r - 8) x = (W - mw) / 2;
+  const y = clamp(r.top + r.height / 2 - mh / 2, B.t + 8, H - B.b - 8 - mh);
+  menu.style.left = x + 'px'; menu.style.top = y + 'px';
+}
+function toggleMenu() { menu.hidden ? openMenu() : closeMenu(); }
+function openMenu() {
+  syncMenuStates();
+  menu.hidden = false; ball.setAttribute('aria-expanded', 'true'); ball.classList.remove('idle');
+  positionMenu();
+  const first = menu.querySelector('button'); if (first) first.focus({ preventScroll: true });
+}
+function closeMenu() {
+  if (menu.hidden) return;
+  menu.hidden = true; ball.setAttribute('aria-expanded', 'false'); armIdle();
+}
+document.addEventListener('pointerdown', e => {
+  if (!menu.hidden && !menu.contains(e.target) && e.target !== ball) closeMenu();
+}, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); closeSheet(); } });
+
+function syncMenuStates() {
+  const sb = $('#menuScreen');
+  sb.classList.toggle('on', device.panel === 'off');
+  sb.querySelector('span').textContent = device.panel === 'off' ? 'Screen on' : 'Screen off';
+  $('#menuStats').classList.toggle('on', S.stats);
+}
+
+const NAV = { back: 4, home: 3, recents: 187 };
+menu.addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  const a = b.dataset.act;
+  if (a === 'photo') { closeMenu(); openSheet('photo'); }
+  else if (a === 'clip') { closeMenu(); openSheet('clip'); }
+  else if (a === 'settings') { closeMenu(); openSheet('settings'); }
+  else if (a === 'keys') { closeMenu(); openSheet('keys'); }
+  else if (a in NAV) { sendCtrl('nav', { button: a }); toast(a[0].toUpperCase() + a.slice(1)); closeMenu(); }
+  else if (a === 'screen') { setPanel(device.panel === 'off' ? 'on' : 'off'); syncMenuStates(); }
+  else if (a === 'stats') { S.stats = !S.stats; save(); tickStats(); syncMenuStates(); }
+});
+function setPanel(state) {
+  device.panel = state;
+  sendCtrl('screen.power', { on: state === 'on' });
+  recvCtrl('screen.state', { panel: state, locked: device.locked });
+  toast(state === 'off' ? 'Phone screen turned off — stream continues' : 'Phone screen turned on');
+}
+
+/* ================= sheets ================= */
+let openId = null;
+function openSheet(id) {
+  closeSheet();
+  openId = id;
+  $('#backdrop').hidden = false;
+  const sh = $('#sheet-' + id); sh.hidden = false;
+  if (id === 'clip') refreshClip();
+  if (id === 'settings') renderTab(currentTab);
+  if (id === 'photo') refreshPhotoDest();
+  ball.hidden = true;
+}
+function closeSheet() {
+  if (!openId) return;
+  $('#sheet-' + openId).hidden = true; $('#backdrop').hidden = true;
+  openId = null; ball.hidden = false; armIdle();
+  if (logcatTimer) stopLogcat();
+}
+$('#backdrop').addEventListener('click', closeSheet);
+$$('[data-close]').forEach(b => b.addEventListener('click', closeSheet));
+
+/* ================= copy helper (works on plain http) ================= */
+function copyText(text) {
+  const fallback = () => {
+    const ta = $('#copybuf');
+    ta.value = text; ta.readOnly = true;
+    ta.focus({ preventScroll: true }); ta.select(); ta.setSelectionRange(0, text.length);
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.blur();
+    return ok;
+  };
+  if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => fallback());
+  }
+  return Promise.resolve(fallback());
+}
+
+/* ================= clipboard ================= */
+let androidClip = 'Room code: 7Q4-XK2 · meet at the north gate';
+const clipHist = [
+  { dir: 'android', text: androidClip },
+  { dir: 'iphone', text: 'https://example.com/guide/boss-3' }
+];
+function pushHist(dir, text) {
+  if (!text) return;
+  const i = clipHist.findIndex(h => h.text === text); if (i >= 0) clipHist.splice(i, 1);
+  clipHist.unshift({ dir, text }); if (clipHist.length > 8) clipHist.pop();
+}
+function refreshClip() {
+  $('#clipAndroid').value = androidClip;
+  $('#clipSyncState').textContent = S.clipSync ? 'Sync on · text both ways' : 'Sync off · manual only';
+  const ul = $('#clipHist'); ul.textContent = '';
+  for (const h of clipHist) {
+    const li = document.createElement('li'), b = document.createElement('button');
+    b.type = 'button';
+    const p = document.createElement('span'); p.className = 'pill ' + (h.dir === 'android' ? 'ok' : ''); p.textContent = h.dir === 'android' ? 'Android' : 'iPhone';
+    const t = document.createElement('span'); t.className = 't'; t.textContent = h.text;
+    b.append(p, t);
+    b.addEventListener('click', () => { $('#clipAndroid').value = h.text; $('#clipAndroid').focus(); });
+    li.appendChild(b); ul.appendChild(li);
+  }
+}
+function sendClip(text, paste) {
+  if (!text.trim()) { toast('Nothing to send — the text is empty'); return; }
+  androidClip = text;
+  sendCtrl('clip.set', { text, paste: !!paste });
+  pushHist('iphone', text); refreshClip();
+  toast(paste ? 'Sent and pasted on Android' : 'Android clipboard updated');
+}
+$('#clipSend').addEventListener('click', () => sendClip($('#clipAndroid').value, S.autoPaste));
+$('#clipSendPaste').addEventListener('click', () => sendClip($('#clipAndroid').value, true));
+$('#clipCopy').addEventListener('click', () => {
+  copyText($('#clipAndroid').value).then(ok => toast(ok ? 'Copied to iPhone clipboard' : 'Copy blocked — select the text and copy it manually'));
+});
+$('#clipPaste').addEventListener('paste', () => setTimeout(() => toast('Pasted — tap Send to Android'), 0));
+$('#clipPasteSend').addEventListener('click', () => { sendClip($('#clipPaste').value, S.autoPaste); $('#clipPaste').value = ''; });
+$('#clipPasteEdit').addEventListener('click', () => { $('#clipAndroid').value = $('#clipPaste').value; $('#clipPaste').value = ''; });
+
+let clipbarTimer = 0;
+function androidCopied(text) {
+  androidClip = text; pushHist('android', text);
+  recvCtrl('clip.changed', { text });
+  if (openId === 'clip') refreshClip();
+  if (!S.clipSync) return;
+  $('#clipbarText').textContent = text; $('#clipbar').hidden = false;
+  clearTimeout(clipbarTimer); clipbarTimer = setTimeout(() => { $('#clipbar').hidden = true; }, 12000);
+}
+$('#clipbarCopy').addEventListener('click', () => {
+  copyText(androidClip).then(ok => { toast(ok ? 'Copied to iPhone clipboard' : 'Copy blocked — open Clipboard to copy manually'); $('#clipbar').hidden = true; });
+});
+$('#clipbarClose').addEventListener('click', () => { $('#clipbar').hidden = true; });
+const SAMPLE_CLIPS = ['Gift code: SPRING-26-QX9', 'Party invite: join lobby 4471', 'https://example.com/patch-notes/2.4', 'Order #A-55210 shipped'];
+let simIdx = 0;
+$('#clipSim').addEventListener('click', () => { closeSheet(); androidCopied(SAMPLE_CLIPS[simIdx++ % SAMPLE_CLIPS.length]); });
+setTimeout(() => androidCopied(SAMPLE_CLIPS[simIdx++]), 9000);
+
+/* ================= keyboard ================= */
+const QUICK = [['Enter', 66], ['Delete', 67], ['Tab', 61], ['Esc', 111], ['↑', 19], ['↓', 20], ['←', 21], ['→', 22], ['Vol −', 25], ['Vol +', 24], ['Power', 26], ['Menu', 82]];
+for (const [label, code] of QUICK) {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+  b.addEventListener('click', () => { sendCtrl('key', { action: 'press', code, meta: 0 }); toast(label + ' sent'); });
+  $('#kbKeys').appendChild(b);
+}
+$('#kbSend').addEventListener('click', () => {
+  const v = $('#kbText').value; if (!v) { toast('Type something first'); return; }
+  sendCtrl('text', { text: v }); $('#kbText').value = ''; toast('Text sent');
+});
+$('#kbText').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#kbSend').click(); } });
+
+/* ================= photo upload ================= */
+let xferId = 0;
+function refreshPhotoDest() { $('#ph-dest').textContent = `to ${S.destDir}${S.mediaScan ? ' · added to Gallery' : ''}`; }
+const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+function sha256js(bytes) {
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const l = bytes.length, n = ((l + 9 + 63) >> 6) << 6;
+  const m = new Uint8Array(n); m.set(bytes); m[l] = 0x80;
+  const dv = new DataView(m.buffer);
+  dv.setUint32(n - 8, Math.floor(l / 0x20000000)); dv.setUint32(n - 4, (l << 3) >>> 0);
+  const w = new Int32Array(64);
+  for (let o = 0; o < n; o += 64) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getInt32(o + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const a = w[i - 15], b = w[i - 2];
+      const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+      const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const t1 = (h + S1 + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+}
+async function sha256(buf) {
+  if (window.crypto && crypto.subtle && window.isSecureContext) {
+    try { const d = await crypto.subtle.digest('SHA-256', buf); return hex(new Uint8Array(d)).replace(/ /g, ''); } catch (e) {}
+  }
+  return sha256js(new Uint8Array(buf));
+}
+const uploadQ = [];
+let uploading = false;
+$('#photoInput').addEventListener('change', e => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for (const f of files) addUpload(f);
+  pumpUploads();
+});
+function addUpload(f) {
+  $('#queueEmpty').hidden = true;
+  const generic = /^image\.(jpe?g|heic|png)$/i.test(f.name) || !f.name;
+  const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
+  const name = generic ? `IMG_${stamp()}.${ext === 'heic' ? 'heic' : ext}` : f.name;
+  const li = document.createElement('li'); li.className = 'qi';
+  const img = document.createElement('img'); img.alt = '';
+  try { img.src = URL.createObjectURL(f); } catch (err) {}
+  const mid = document.createElement('div'); mid.style.minWidth = '0';
+  const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = name;
+  const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = `${fmtSize(f.size)} · ${f.type || 'image'} · waiting`;
+  const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.appendChild(fill);
+  mid.append(nm, meta, bar);
+  const st = document.createElement('span'); st.className = 'pill'; st.textContent = 'Queued';
+  li.append(img, mid, st);
+  $('#queue').prepend(li);
+  uploadQ.push({ f, name, meta, fill, st });
+}
+async function pumpUploads() {
+  if (uploading) return;
+  uploading = true;
+  while (uploadQ.length) {
+    const j = uploadQ.shift(), { f, name, meta, fill, st } = j;
+    if (f.size > S.maxMb * 1048576) { st.className = 'pill bad'; st.textContent = 'Too large'; meta.textContent = `${fmtSize(f.size)} · over the ${S.maxMb} MB limit`; continue; }
+    st.className = 'pill warn'; st.textContent = 'Hashing';
+    const buf = await f.arrayBuffer();
+    const sum = await sha256(buf);
+    const xfer = ++xferId, path = `${S.destDir.replace(/\/+$/, '')}/${name}`;
+    sendCtrl('file.push', { xfer, path, size: f.size, sha256: sum, overwrite: S.overwrite, media_scan: S.mediaScan });
+    recvCtrl('ack', { xfer });
+    st.textContent = 'Sending';
+    const chunks = Math.ceil(f.size / 16384) || 1;
+    meta.textContent = `${fmtSize(f.size)} · ${chunks} chunks · sha256 ${sum.slice(0, 12)}…`;
+    await new Promise(res => {
+      const rate = 3.5 * 1048576, t0 = now();
+      const iv = setInterval(() => {
+        const sent = Math.min(f.size, (now() - t0) / 1000 * rate);
+        fill.style.width = (sent / f.size * 100).toFixed(1) + '%';
+        if (sent >= f.size) { clearInterval(iv); res(); }
+      }, 80);
+    });
+    logProto('→', 'file', `xfer ${xfer}: ${chunks} chunks × ≤16 KB (u32 xfer | u32 seq | payload)`);
+    sendCtrl('file.done', { xfer });
+    recvCtrl('ack', { xfer, verified: true });
+    adb.tx += f.size;
+    st.className = 'pill ok'; st.textContent = S.mediaScan ? 'In Gallery' : 'Saved';
+    toast(`${name} saved to ${S.mediaScan ? 'the Android Gallery' : S.destDir}`);
+  }
+  uploading = false;
+}
+
+/* ================= settings (all of them) ================= */
+const TABS = [['stream', 'Stream'], ['phone', 'Phone'], ['files', 'Files'], ['logs', 'Logs'], ['check', 'Device check'], ['conn', 'Connection']];
+let currentTab = 'stream';
+let renderProto = null, statusRefresh = null, logcatTimer = 0;
+TABS.forEach(([id, label]) => {
+  const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab'); b.textContent = label; b.dataset.tab = id;
+  b.addEventListener('click', () => renderTab(id));
+  $('#tabs').appendChild(b);
+});
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in attrs || {}) {
+    if (k === 'class') e.className = attrs[k];
+    else if (k === 'text') e.textContent = attrs[k];
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), attrs[k]);
+    else e.setAttribute(k, attrs[k]);
+  }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+}
+function lbl(text, help) { return el('div', { class: 'lbl' }, text, help ? el('small', { text: help }) : null); }
+function changed(key) {
+  save();
+  if (['preset', 'rotation'].includes(key)) reconfigure(key);
+  if (['mode', 'preset', 'fps', 'kbps', 'codec'].includes(key)) {
+    sendCtrl('quality.set', quality());
+    if (key === 'codec') logProto('·', 'note', 'codec change → SDP renegotiation');
+  }
+  if (['screenOff', 'lockOnDisc', 'grace', 'clipSync', 'autoPaste', 'overheat', 'destDir', 'mediaScan', 'overwrite', 'maxMb', 'route', 'relay'].includes(key)) {
+    rest('POST', '/api/v1/devices/router1/cmd', { cmd: 'agent.config', args: { [key]: S[key] } });
+  }
+  if (key === 'stats') tickStats();
+  if (key === 'screenOff') setPanel(S.screenOff ? 'off' : 'on');
+}
+function quality() {
+  const [w, h] = streamDims();
+  return { mode: S.mode, preset: S.preset, width: w, height: h, fps: S.fps, kbps: S.kbps, codec: S.codec };
+}
+function seg(key, opts) {
+  const box = el('div', { class: 'seg', role: 'group' });
+  for (const o of opts) {
+    const [v, t] = Array.isArray(o) ? o : [o, String(o)];
+    const b = el('button', { type: 'button', 'aria-pressed': String(S[key] === v), text: t });
+    b.addEventListener('click', () => {
+      S[key] = v; box.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); changed(key);
+      if (key === 'mode') renderTab(currentTab);
+    });
+    box.appendChild(b);
+  }
+  return box;
+}
+function segRow(key, label, opts, help) { return el('div', { class: 'row stack' }, lbl(label, help), seg(key, opts)); }
+function toggleRow(key, label, help) {
+  const cb = el('input', { type: 'checkbox', class: 'sw', id: 'set-' + key, 'aria-label': label });
+  cb.checked = !!S[key];
+  cb.addEventListener('change', () => { S[key] = cb.checked; changed(key); });
+  return el('div', { class: 'row' }, lbl(label, help), cb);
+}
+function rangeRow(key, label, min, max, step, fmt, help) {
+  const out = el('span', { class: 'val', text: fmt(S[key]) });
+  const r = el('input', { type: 'range', min, max, step, id: 'set-' + key, 'aria-label': label });
+  r.value = S[key];
+  r.addEventListener('input', () => { S[key] = +r.value; out.textContent = fmt(S[key]); });
+  r.addEventListener('change', () => changed(key));
+  return el('div', { class: 'row stack' }, el('div', { class: 'row', style: 'padding:0;border:0' }, lbl(label, help), out), r);
+}
+function stepRow(key, label, min, max, step, unit, help) {
+  const out = el('output', { text: S[key] + unit });
+  const set = v => { S[key] = clamp(v, min, max); out.textContent = S[key] + unit; changed(key); };
+  return el('div', { class: 'row' }, lbl(label, help),
+    el('div', { class: 'step' },
+      el('button', { type: 'button', 'aria-label': 'Decrease ' + label, text: '−', onclick: () => set(S[key] - step) }),
+      out,
+      el('button', { type: 'button', 'aria-label': 'Increase ' + label, text: '+', onclick: () => set(S[key] + step) })));
+}
+function textRow(key, label, help) {
+  const i = el('input', { type: 'text', id: 'set-' + key, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+  i.value = S[key];
+  i.addEventListener('change', () => { S[key] = i.value.trim() || DEFAULTS[key]; i.value = S[key]; changed(key); refreshPhotoDest(); });
+  return el('div', { class: 'row stack' }, lbl(label, help), i);
+}
+function group(title, ...rows) { return el('div', { class: 'group' }, el('h3', { text: title }), ...rows); }
+function kv(pairs) {
+  const dl = el('dl', { class: 'kv' });
+  for (const [k, v] of pairs) dl.append(el('dt', { text: k }), v instanceof Node ? el('dd', {}, v) : el('dd', { text: String(v) }));
+  return dl;
+}
+function pill(text, cls) { return el('span', { class: 'pill ' + (cls || ''), text }); }
+
+function renderTab(id) {
+  currentTab = id;
+  if (id !== 'logs' && logcatTimer) stopLogcat();
+  renderProto = null; statusRefresh = null;
+  $$('#tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === id)));
+  const body = $('#settingsBody'); body.textContent = '';
+  const add = (...n) => body.append(...n);
+
+  if (id === 'stream') {
+    add(group('Quality',
+      segRow('mode', 'Quality mode', [['auto', 'Auto'], ['manual', 'Manual']], 'Auto adapts bitrate and resolution to the network, like YouTube.'),
+      segRow('preset', 'Resolution', ['1080p', '720p', '540p', '360p'], 'Changing it restarts the encoder for about 0.2 s.'),
+      segRow('fps', 'Frame rate', [[30, '30'], [60, '60'], [90, '90'], [120, '120']]),
+      rangeRow('kbps', S.mode === 'auto' ? 'Max bitrate' : 'Bitrate', 1000, 20000, 500, v => (v / 1000).toFixed(1) + ' Mbps'),
+      segRow('codec', 'Codec', [['auto', 'Auto'], ['h265', 'H.265'], ['h264', 'H.264']], 'Auto uses H.265 when this iPhone decodes it in hardware, otherwise H.264.')));
+    add(group('Overlay',
+      toggleRow('stats', 'Stats overlay', 'fps, bitrate, round-trip time, decoder, last input bytes'),
+      toggleRow('touches', 'Show touches', 'Draw your touch points on the stream')));
+  }
+
+  if (id === 'phone') {
+    const card = el('div', { class: 'card' });
+    statusRefresh = () => {
+      card.textContent = '';
+      card.append(kv([
+        ['Model', `${device.model} · Android ${device.android}`],
+        ['Battery', `${device.battery}% · ${device.charging ? 'charging' : 'on battery'} · ${device.temp} °C`],
+        ['Phone screen', pill(device.panel === 'off' ? 'Panel off' : 'Panel on', device.panel === 'off' ? 'ok' : '')],
+        ['Lock', pill(device.locked ? 'Locked' : 'Unlocked', device.locked ? 'warn' : '')],
+        ['Phone server', pill(device.server, device.server === 'running' ? 'ok' : 'bad')],
+        ['USB / ADB', pill(`${adb.usb} · ${adb.auth}`, adb.auth === 'authorized' ? 'ok' : 'warn')],
+        ['USB speed', `${adb.usb_speed} · v${adb.protocol_version} · ${adb.max_payload / 1024} KB`],
+        ['Streams / traffic', `${adb.streams_open} · ↑ ${fmtSize(adb.tx)} ↓ ${fmtSize(adb.rx)}`]
+      ]));
+    };
+    statusRefresh();
+    add(group('Status', card));
+    add(group('Screen & lock',
+      toggleRow('screenOff', 'Turn phone screen off while connected', 'The stream keeps running; only the physical panel goes dark.'),
+      toggleRow('lockOnDisc', 'Lock phone after disconnect'),
+      stepRow('grace', 'Lock grace period', 0, 60, 5, ' s', 'Reconnect within this time and nothing locks.'),
+      segRow('rotation', 'Rotation', [['auto', 'Auto'], ['portrait', 'Portrait'], ['landscape', 'Landscape']])));
+    add(group('Clipboard',
+      toggleRow('clipSync', 'Clipboard sync', 'Show copied Android text here, ready to copy with one tap'),
+      toggleRow('autoPaste', 'Paste into focused field after sending')));
+    add(group('Safety', stepRow('overheat', 'Overheat alert', 35, 60, 1, ' °C', 'Warn when the battery gets hotter than this.')));
+    const confirmBox = el('div', { class: 'confirm', hidden: '' },
+      el('span', { text: 'Reboot the phone? The stream drops for about a minute.', style: 'flex:1;min-width:180px' }),
+      el('button', { class: 'btn danger', type: 'button', text: 'Reboot', onclick: () => { cmd('phone.reboot', { mode: 'normal' }, 'Reboot requested'); confirmBox.hidden = true; } }),
+      el('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: () => { confirmBox.hidden = true; } }));
+    add(group('Actions',
+      el('div', { class: 'btns', style: 'padding-top:10px' },
+        el('button', { class: 'btn', type: 'button', text: 'Wake', onclick: () => cmd('phone.wake', {}, 'Wake sent') }),
+        el('button', { class: 'btn', type: 'button', text: 'Sleep & lock', onclick: () => { device.locked = true; cmd('phone.sleep', {}, 'Phone locked'); } }),
+        el('button', { class: 'btn', type: 'button', text: 'Restart phone server', onclick: () => cmd('server.restart', {}, 'Phone server restarting') }),
+        el('button', { class: 'btn', type: 'button', text: 'Reconnect USB', onclick: () => cmd('adb.reconnect', {}, 'Reconnecting ADB over USB') }),
+        el('button', { class: 'btn danger', type: 'button', text: 'Reboot phone…', onclick: () => { confirmBox.hidden = false; } })),
+      confirmBox));
+  }
+
+  if (id === 'files') {
+    add(group('Uploads',
+      textRow('destDir', 'Upload folder', 'Photos from the iPhone land here.'),
+      toggleRow('mediaScan', 'Add uploads to Gallery', 'Runs a media scan so photos show up in Android albums'),
+      toggleRow('overwrite', 'Overwrite existing files'),
+      stepRow('maxMb', 'Max file size', 100, 4096, 100, ' MB')));
+    const list = el('ul', { class: 'files' });
+    const FILES = [['Screenshot_20261015-221804.png', 1840221], ['savegame_backup.zip', 48210441], ['patch-notes.txt', 6120], ['DCIM/', null]];
+    for (const [n, sz] of FILES) {
+      const meta = el('div', { class: 'meta', text: sz == null ? 'folder' : fmtSize(sz) });
+      const btn = sz == null ? el('button', { class: 'btn', type: 'button', text: 'Open', onclick: () => { sendCtrl('file.list', { path: '/sdcard/Download/DCIM' }); toast('Folder listing requested'); } })
+        : el('button', { class: 'btn', type: 'button', text: 'Pull', onclick: () => pull(n, sz, meta) });
+      list.append(el('li', {}, el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 'nm', text: n }), meta), btn));
+    }
+    add(group('Browse /sdcard/Download', list,
+      el('p', { class: 'note', text: 'Pulled files arrive over the file channel; the real app then offers them to Files on the iPhone.' })));
+  }
+
+  if (id === 'logs') {
+    const lc = el('pre', { class: 'log', id: 'logcatOut', 'aria-label': 'Logcat output' });
+    const filt = el('input', { type: 'text', id: 'logcatFilter', placeholder: 'Filter text, e.g. MyGame', autocomplete: 'off', autocapitalize: 'off' });
+    const lvl = el('div', { class: 'seg' });
+    let minLvl = 'I';
+    for (const L of ['V', 'D', 'I', 'W', 'E']) {
+      const b = el('button', { type: 'button', text: L, 'aria-pressed': String(L === minLvl) });
+      b.addEventListener('click', () => { minLvl = L; lvl.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
+      lvl.appendChild(b);
+    }
+    const startBtn = el('button', { class: 'btn primary', type: 'button', text: logcatTimer ? 'Stop' : 'Start logcat' });
+    startBtn.addEventListener('click', () => {
+      if (logcatTimer) { stopLogcat(); startBtn.textContent = 'Start logcat'; return; }
+      sendCtrl('logcat.start', { filter: [`*:${minLvl}`], format: 'threadtime', tail: 200, buffers: ['main', 'system', 'crash'] });
+      startBtn.textContent = 'Stop';
+      logcatTimer = setInterval(() => {
+        const lines = [];
+        for (let i = 0; i < 1 + Math.floor(Math.random() * 3); i++) lines.push(fakeLog());
+        const order = 'VDIWE', f = filt.value.trim().toLowerCase();
+        for (const l of lines) {
+          if (order.indexOf(l.lv) < order.indexOf(minLvl)) continue;
+          if (f && !l.text.toLowerCase().includes(f)) continue;
+          lc.append(el('span', { class: 'lv-' + l.lv, text: l.text + '\n' }));
+        }
+        while (lc.childNodes.length > 300) lc.firstChild.remove();
+        lc.scrollTop = lc.scrollHeight;
+      }, 350);
+    });
+    add(group('Logcat', el('div', { class: 'row stack' }, filt, el('div', { style: 'display:flex;gap:8px;align-items:center' }, el('div', { style: 'flex:1' }, lvl), startBtn), lc)));
+
+    const shIn = el('input', { type: 'text', id: 'shellIn', placeholder: 'getprop ro.build.version.release', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    const shOut = el('pre', { class: 'log', style: 'height:150px', 'aria-label': 'Shell output' });
+    const run = () => {
+      const c = shIn.value.trim() || shIn.placeholder;
+      sendCtrl('shell.exec', { cmd: c, timeout_ms: 10000 });
+      const r = fakeShell(c);
+      recvCtrl('ack', { exit_code: r.code, truncated: false, ms: r.ms });
+      shOut.append(el('span', { class: 'lv-out', text: '$ ' + c + '\n' }), el('span', { text: r.out + '\n' }), el('span', { class: 'lv-D', text: `exit ${r.code} · ${r.ms} ms\n\n` }));
+      shOut.scrollTop = shOut.scrollHeight; shIn.value = '';
+    };
+    shIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+    add(group('Shell (runs on the phone as the shell user)', el('div', { class: 'row stack' },
+      el('div', { style: 'display:flex;gap:8px' }, shIn, el('button', { class: 'btn primary', type: 'button', text: 'Run', onclick: run })),
+      el('div', { class: 'btns' }, ...['wm size', 'dumpsys battery', 'pm list packages -3'].map(c => el('button', { class: 'btn', type: 'button', text: c, onclick: () => { shIn.value = c; run(); } }))),
+      shOut)));
+
+    const pr = el('pre', { class: 'log', 'aria-label': 'Protocol messages' });
+    renderProto = () => {
+      pr.textContent = '';
+      for (const p of proto.slice(-80)) pr.append(el('span', { class: p.dir === '→' ? 'lv-out' : (p.dir === '←' ? 'lv-in' : 'lv-D'), text: p.line + '\n' }));
+      pr.scrollTop = pr.scrollHeight;
+    };
+    renderProto();
+    add(group('Protocol messages (Appendix A)', el('div', { class: 'row stack' }, pr,
+      el('p', { class: 'note', text: 'Blue = sent by this page, green = replies from the phone. Touch moves are counted in the stats overlay instead of listed.' }))));
+  }
+
+  if (id === 'check') {
+    const box = el('div', { class: 'group' });
+    add(el('p', { class: 'note', text: 'Real checks of this iPhone and browser — these results are not demo data.' }), box,
+      el('button', { class: 'btn', type: 'button', text: 'Run checks again', onclick: () => runChecks(box) }));
+    runChecks(box);
+  }
+
+  if (id === 'conn') {
+    add(group('Route',
+      segRow('route', 'Media route', [['auto', 'Auto'], ['tunnel', 'Via router'], ['wifi', 'Phone Wi-Fi']], 'Auto picks whichever measured faster.'),
+      toggleRow('relay', 'Always relay through AWS', 'Forces TURN even when a direct path exists')));
+    add(group('Session', el('div', { class: 'card' }, kv([
+      ['Server', location.protocol === 'http:' ? location.host : '<aws-host> (plain http)'],
+      ['Device', 'router1'],
+      ['Session', SID],
+      ['Connected', new Date(sessionSince).toLocaleTimeString()],
+      ['Login expires', new Date(Date.now() + 30 * 864e5).toLocaleDateString() + ' (30 days)']
+    ]))));
+    add(el('div', { class: 'btns' },
+      el('button', { class: 'btn wide', type: 'button', text: 'Disconnect', onclick: () => { closeSheet(); disconnect(); } }),
+      el('button', { class: 'btn danger wide', type: 'button', text: 'Log out', onclick: () => { rest('POST', '/api/v1/logout'); toast('Logged out (demo) — the real app returns to the login prompt'); } })));
+  }
+  body.scrollTop = 0;
+}
+function cmd(name, args, msg) { rest('POST', '/api/v1/devices/router1/cmd', { cmd: name, args }); toast(msg); if (statusRefresh) statusRefresh(); }
+function stopLogcat() { clearInterval(logcatTimer); logcatTimer = 0; sendCtrl('logcat.stop', { stream: 3 }); }
+function pull(name, size, meta) {
+  const xfer = ++xferId;
+  sendCtrl('file.pull', { xfer, path: '/sdcard/Download/' + name });
+  recvCtrl('ack', { xfer, size });
+  const t0 = now();
+  const iv = setInterval(() => {
+    const got = Math.min(size, (now() - t0) / 1000 * 4 * 1048576);
+    meta.textContent = `${fmtSize(got)} / ${fmtSize(size)}`;
+    if (got >= size) { clearInterval(iv); meta.textContent = fmtSize(size) + ' · pulled'; toast(name + ' pulled (demo)'); }
+  }, 100);
+}
+const TAGS = [['I', 'ActivityManager', 'Displayed com.example.game/.MainActivity: +412ms'], ['D', 'MyGame', 'frame budget ok (14.2 ms)'], ['W', 'Unity', 'Texture streaming budget exceeded'], ['I', 'RemoDroid', 'encoder bitrate → %k kbps'], ['V', 'InputDispatcher', 'Delivering touch to window'], ['E', 'MyGame', 'Socket timeout, retrying (2/5)'], ['D', 'BatteryService', 'temp=315 level=82'], ['I', 'chatty', 'uid=10213 identical 4 lines']];
+function fakeLog() {
+  const [lv, tag, msg] = TAGS[Math.floor(Math.random() * TAGS.length)];
+  const d = new Date(), p = (n, k = 2) => String(n).padStart(k, '0');
+  const ts = `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+  return { lv, text: `${ts}  4127  ${4130 + Math.floor(Math.random() * 40)} ${lv} ${tag}: ${msg.replace('%k', Math.round(kbpsNow))}` };
+}
+function fakeShell(c) {
+  const ms = 30 + Math.floor(Math.random() * 120);
+  if (c === 'getprop ro.build.version.release') return { out: device.android, code: 0, ms };
+  if (c === 'wm size') return { out: 'Physical size: 1080x2400', code: 0, ms };
+  if (c === 'dumpsys battery') return { out: `Current Battery Service state:\n  AC powered: false\n  USB powered: true\n  level: ${device.battery}\n  temperature: ${Math.round(device.temp * 10)}`, code: 0, ms };
+  if (c.startsWith('pm list packages')) return { out: 'package:com.example.game\npackage:com.example.chat\npackage:org.example.notes', code: 0, ms };
+  if (c.startsWith('echo ')) return { out: c.slice(5), code: 0, ms };
+  return { out: `(demo) no mock output for: ${c}`, code: 127, ms };
+}
+
+/* ================= device check (real) ================= */
+async function runChecks(box) {
+  box.textContent = '';
+  const row = (label, detail, state, text) => box.append(el('div', { class: 'check' }, el('div', { class: 'lbl' }, label, detail ? el('small', { text: detail }) : null), pill(text, state)));
+  const sc = window.isSecureContext;
+  row('Page security', `${location.protocol}//… · secure context: ${sc}`, sc ? 'ok' : 'warn', sc ? 'HTTPS' : 'Plain HTTP');
+  const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+  row('Home Screen app', standalone ? 'Running full screen' : 'Share → Add to Home Screen for full screen', standalone ? 'ok' : '', standalone ? 'Yes' : 'No');
+  row('Multi-touch', `maxTouchPoints = ${navigator.maxTouchPoints || 0}`, (navigator.maxTouchPoints || 0) >= 5 ? 'ok' : 'warn', (navigator.maxTouchPoints || 0) + ' points');
+  row('Screen', `${screen.width}×${screen.height} pt @${devicePixelRatio}x`, 'ok', `${Math.round(screen.width * devicePixelRatio)}×${Math.round(screen.height * devicePixelRatio)}`);
+  const hasPC = typeof RTCPeerConnection === 'function';
+  row('WebRTC', hasPC ? 'RTCPeerConnection present' : 'RTCPeerConnection missing (blocked inside the artifact preview frame)', hasPC ? 'ok' : 'warn', hasPC ? 'Available' : 'Not here');
+  let codecs = null;
+  try { const c = RTCRtpReceiver.getCapabilities('video'); codecs = [...new Set(c.codecs.map(x => x.mimeType.replace('video/', '')))]; } catch (e) {}
+  row('WebRTC video codecs', codecs ? codecs.join(', ') : 'Not reported in this frame', codecs ? (codecs.includes('H265') ? 'ok' : 'warn') : '', codecs ? (codecs.includes('H265') ? 'H.265 ✓' : 'No H.265') : 'Unknown');
+  const mc = navigator.mediaCapabilities;
+  async function dec(label, rtcType, fileType) {
+    let r = null, how = '';
+    if (mc && mc.decodingInfo) {
+      try { r = await mc.decodingInfo({ type: 'webrtc', video: { contentType: rtcType, width: 1280, height: 720, bitrate: 8e6, framerate: 60 } }); how = 'webrtc'; } catch (e) {}
+      if (!r) try { r = await mc.decodingInfo({ type: 'file', video: { contentType: fileType, width: 1280, height: 720, bitrate: 8e6, framerate: 60 } }); how = 'file'; } catch (e) {}
+    }
+    if (!r) { row(label, 'mediaCapabilities not available', '', 'Unknown'); return null; }
+    const hw = !!(r.supported && r.powerEfficient);
+    row(label, `${how}: supported=${r.supported} smooth=${r.smooth} powerEfficient=${r.powerEfficient}`, hw ? 'ok' : (r.supported ? 'warn' : 'bad'), hw ? 'Hardware' : (r.supported ? 'Software' : 'No'));
+    return hw;
+  }
+  check.h265hw = await dec('H.265 decode (720p60)', 'video/H265', 'video/mp4; codecs="hvc1.1.6.L123.B0"');
+  check.h264hw = await dec('H.264 decode (720p60)', 'video/H264', 'video/mp4; codecs="avc1.640028"');
+  const clip = !!(navigator.clipboard && navigator.clipboard.writeText);
+  row('Clipboard API', clip ? 'navigator.clipboard available' : 'Not on plain HTTP → one-tap copy and paste-box fallback', clip ? 'ok' : 'warn', clip ? 'Modern' : 'Fallback');
+  const gp = typeof navigator.getGamepads === 'function';
+  row('Gamepad API', gp ? 'Bluetooth controllers can be read' : 'Not available', gp ? 'ok' : '', gp ? 'Available' : 'No');
+  row('Screen wake lock', 'wakeLock' in navigator ? 'Keeps the iPhone awake while streaming' : 'Not available', 'wakeLock' in navigator ? 'ok' : '', 'wakeLock' in navigator ? 'Available' : 'No');
+}
+
+/* ================= disconnect / lock ================= */
+let discTimer = 0;
+function disconnect() {
+  sendCtrl('session.end', {});
+  $('#disc').hidden = false; ball.hidden = true;
+  let left = S.lockOnDisc ? S.grace : 0;
+  const title = $('#discTitle'), count = $('#discCount'), text = $('#discText');
+  title.textContent = 'Disconnected';
+  if (!S.lockOnDisc) { count.textContent = '—'; text.textContent = 'Lock after disconnect is off, so the phone stays unlocked.'; return; }
+  const tick = () => {
+    count.textContent = left;
+    text.textContent = left > 0 ? 'The phone locks when this reaches zero. Reconnect before then to continue where you left off.' : '';
+    if (left <= 0) {
+      clearInterval(discTimer); device.locked = true; device.panel = 'on';
+      title.textContent = 'Phone locked'; count.textContent = '🔒';
+      text.textContent = 'The panel was restored and the phone went to sleep. After reconnecting, unlock it with your PIN on the stream.';
+      logProto('·', 'note', 'phone: restore panel → KEYCODE_SLEEP → locked');
+    }
+    left--;
+  };
+  tick(); discTimer = setInterval(tick, 1000);
+}
+$('#reconnect').addEventListener('click', () => {
+  clearInterval(discTimer); $('#disc').hidden = true; ball.hidden = false;
+  rest('GET', '/ws/viewer (upgrade)');
+  sendCtrl('session.request', { device: 'router1', quality: quality() });
+  if (S.screenOff) device.panel = 'off';
+  toast(device.locked ? 'Reconnected — phone is on the lock screen' : 'Reconnected');
+  device.locked = false;
+  armIdle();
+});
+
+/* ================= boot ================= */
+layout();
+restoreBall();
+armIdle();
+syncMenuStates();
+recvCtrl('session.ready', { proto: 1, screen: { w: 1080, h: 2400, rotation: 0 }, codec: 'h265', caps: { codecs: ['h265', 'h264'], max_fps: 120, audio: true } });
+if (S.screenOff) recvCtrl('screen.state', { panel: 'off', locked: false });
+tickStats();
+requestAnimationFrame(draw);
+runChecks(document.createElement('div'));
+})();
+</script>
+</body>
+</html>
