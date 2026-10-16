@@ -6,6 +6,27 @@ listen = 0.0.0.0:80
 web_root = /usr/share/remodroid/web
 allowed_origins =                  ; extra allowed Origins for /ws/viewer, comma separated
 
+[tls]
+; HTTPS. Simplest: set [acme] domains below and leave this section alone; HTTPS then
+; listens on 0.0.0.0:443 with a free, automatically renewed certificate.
+;listen = 0.0.0.0:443
+;cert = /etc/remodroid/fullchain.pem  ; your own certificate chain instead of ACME (PEM)
+;key = /etc/remodroid/privkey.pem     ; reloaded on SIGHUP (e.g. after certbot renews)
+plain_http = redirect              ; redirect: [http] only answers ACME challenges and redirects to
+                                   ; HTTPS, so agents must use wss://  |  allow: plain HTTP keeps working
+
+[acme]
+; Automatic certificates (Let's Encrypt by default). Needs: the domain's DNS pointing at
+; this server, and TCP 80 open to the internet (challenges arrive on [http] listen).
+; Setting domains means you accept the CA's terms of service.
+domains =                          ; e.g. remodroid.example.com (comma-separated; no wildcards)
+email =                            ; optional contact address for the CA
+;directory = https://acme-v02.api.letsencrypt.org/directory
+;            staging (for trying things out): https://acme-staging-v02.api.letsencrypt.org/directory
+;dir = /var/lib/remodroid/acme      ; account key, certificate and its key
+;ca_file =                          ; CAs trusted for the ACME server; empty = the system bundle
+;profile =                          ; CA certificate profile, e.g. shortlived (Let's Encrypt)
+
 [auth]
 session_days = 30                  ; how long a login stays valid
 cookie_name = rd_session
@@ -31,7 +52,7 @@ relay_min_port = 49152             ; open this UDP range plus 3478 in the securi
 relay_max_port = 49252
 realm = remodroid
 max_allocations = 32
-urls = turn:YOUR-AWS-HOST:3478?transport=udp
+urls = turn:YOUR-AWS-HOST:3478?transport=udp   ; TURN is plain UDP; its own credentials protect it
 shared_secret = CHANGE-ME          ; signs the short-lived TURN credentials
 credential_ttl_minutes = 60
 

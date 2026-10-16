@@ -32,6 +32,7 @@ static const char *status_text(int s)
     case 200: return "OK";
     case 204: return "No Content";
     case 302: return "Found";
+    case 308: return "Permanent Redirect";
     case 400: return "Bad Request";
     case 401: return "Unauthorized";
     case 403: return "Forbidden";
@@ -42,6 +43,7 @@ static const char *status_text(int s)
     case 429: return "Too Many Requests";
     case 500: return "Internal Server Error";
     case 501: return "Not Implemented";
+    case 503: return "Service Unavailable";
     case 504: return "Gateway Timeout";
     default:  return "Status";
     }
@@ -162,19 +164,55 @@ static void ws_send_raw(conn_t *c, int op, const void *data, size_t n)
     rd_buf_free(&fr);
 }
 
+static ssize_t conn_read(conn_t *c, void *buf, size_t n)
+{
+    if (c->ssl)
+        return tls_read(c, buf, n);
+    ssize_t r = read(c->fd, buf, n);
+    return r < 0 && (errno == EAGAIN || errno == EINTR) ? TLS_AGAIN : r;
+}
+
+static ssize_t conn_write(conn_t *c, const void *buf, size_t n)
+{
+    if (c->ssl)
+        return tls_write(c, buf, n);
+    ssize_t r = write(c->fd, buf, n);
+    return r < 0 && (errno == EAGAIN || errno == EINTR) ? TLS_AGAIN : r;
+}
+
+/* TLS can't use sendfile(): feed the file through the output buffer instead. */
+static void fill_from_file(conn_t *c)
+{
+    size_t want = (size_t)RD_MIN(c->file_end - c->file_off, (off_t)65536);
+    ssize_t n = want && rd_buf_reserve(&c->out, want) == 0 ? pread(c->file_fd, c->out.p + c->out.len, want, c->file_off)
+                                                           : 0;
+    if (n > 0) {
+        c->out.len += (size_t)n;
+        c->file_off += n;
+    }
+    if (n <= 0 || c->file_off >= c->file_end) {
+        close(c->file_fd);
+        c->file_fd = -1;
+    }
+}
+
 static void flush_out(conn_t *c)
 {
-    while (rd_buf_avail(&c->out)) {
-        ssize_t w = write(c->fd, rd_buf_data(&c->out), rd_buf_avail(&c->out));
-        if (w < 0) {
-            if (errno == EAGAIN || errno == EINTR)
-                break;
+    for (;;) {
+        if (c->ssl && !rd_buf_avail(&c->out) && c->file_fd >= 0)
+            fill_from_file(c);
+        if (!rd_buf_avail(&c->out))
+            break;
+        ssize_t w = conn_write(c, rd_buf_data(&c->out), rd_buf_avail(&c->out));
+        if (w == TLS_AGAIN)
+            break;
+        if (w <= 0) {
             conn_close(c);
             return;
         }
         rd_buf_consume(&c->out, (size_t)w);
     }
-    while (!rd_buf_avail(&c->out) && c->file_fd >= 0) {
+    while (!c->ssl && !rd_buf_avail(&c->out) && c->file_fd >= 0) {
         ssize_t w = sendfile(c->fd, c->file_fd, &c->file_off, (size_t)(c->file_end - c->file_off));
         if (w < 0 && (errno == EAGAIN || errno == EINTR))
             break;
@@ -183,13 +221,14 @@ static void flush_out(conn_t *c)
             c->file_fd = -1;
         }
     }
-    if (rd_buf_avail(&c->out) || c->file_fd >= 0) {
+    int pending = rd_buf_avail(&c->out) || c->file_fd >= 0;
+    /* a TLS write waiting for readability resumes from on_read, not on writability */
+    if ((pending && !c->ssl_wr_wants_r) || c->ssl_rd_wants_w)
         ev_io_start(S.loop, &c->wio);
-    } else {
+    else
         ev_io_stop(S.loop, &c->wio);
-        if (c->close_after_write)
-            conn_close(c);
-    }
+    if (!pending && c->close_after_write)
+        conn_close(c);
 }
 
 /* ---------------- static files ---------------- */
@@ -307,6 +346,36 @@ static int ws_upgrade(conn_t *c, const http_req_t *r, int role, const char *extr
 
 /* ---------------- routing ---------------- */
 
+/* Plain HTTP once a certificate is loaded ([tls] plain_http = redirect): send
+ * everything to the same host on the HTTPS port. WebSocket clients don't follow
+ * redirects, so agents must then use wss://. */
+static void redirect_https(conn_t *c, const http_req_t *r)
+{
+    size_t hl;
+    const char *h = req_header(r, "Host", &hl);
+    char host[256];
+    if (!h || hl == 0 || hl >= sizeof host || memchr(h, '/', hl) || memchr(h, '@', hl)) {
+        http_error(c, 400, "bad_request", "missing Host header");
+        return;
+    }
+    memcpy(host, h, hl);
+    host[hl] = 0;
+    char *colon = strrchr(host, ':'), *bracket = strrchr(host, ']');
+    if (colon && (!bracket || colon > bracket) && (bracket || colon == strchr(host, ':')))
+        *colon = 0; /* drop the plain HTTP port: "name:80", "[v6]:80" */
+    char port[16] = "";
+    if (S.tls_port && S.tls_port != 443)
+        snprintf(port, sizeof port, ":%d", S.tls_port);
+    const char *path = r->path; /* path and query are contiguous in the request line */
+    size_t pl = r->path_len + (r->query_len ? r->query_len + 1 : 0);
+    char extra[1024];
+    if ((size_t)snprintf(extra, sizeof extra, "Location: https://%s%s%.*s\r\n", host, port, (int)pl, path) >= sizeof extra) {
+        http_error(c, 400, "bad_request", "URL too long");
+        return;
+    }
+    http_respond(c, 308, "text/plain; charset=utf-8", "Use HTTPS\n", 10, extra);
+}
+
 static void handle_request(conn_t *c, const http_req_t *r)
 {
     char name[64] = "", cookie[256] = "";
@@ -315,13 +384,28 @@ static void handle_request(conn_t *c, const http_req_t *r)
                  (r->method_len == 4 && !memcmp(r->method, "HEAD", 4));
     LOGD("%s %.*s %.*s", c->ip, (int)r->method_len, r->method, (int)r->path_len, r->path);
 
+    /* ACME http-01 challenges: answered before any auth, on either listener. */
+    static const char WK[] = "/.well-known/acme-challenge/";
+    if (is_get && r->path_len > sizeof WK - 1 && !memcmp(r->path, WK, sizeof WK - 1)) {
+        char ka[300];
+        if (acme_challenge(r->path + sizeof WK - 1, r->path_len - (sizeof WK - 1), ka, sizeof ka) == 0)
+            http_respond(c, 200, "application/octet-stream", ka, strlen(ka), NULL);
+        else
+            http_error(c, 404, "not_found", "no such challenge");
+        return;
+    }
+    if (!c->tls && S.tls_redirect && tls_ready()) {
+        redirect_https(c, r);
+        return;
+    }
+
     if (req_is(r, "GET", "/ws/agent")) {
         const char *sid = auth_cookie_session(r, 1, name, sizeof name, NULL);
         if (!sid) {
             int a = auth_basic(r, c, 1, name, sizeof name);
             if (a == -2) { http_error(c, 429, "rate_limited", "too many failed logins"); return; }
             if (a != 1) { http_error(c, 401, "unauthorized", "device credentials required"); return; }
-            auth_cookie_header(auth_new_session(name, 1), cookie, sizeof cookie);
+            auth_cookie_header(auth_new_session(name, 1), c->tls, cookie, sizeof cookie);
         }
         snprintf(c->user, sizeof c->user, "%s", name);
         c->dev = hub_device(name);
@@ -361,7 +445,7 @@ static void handle_request(conn_t *c, const http_req_t *r)
                          "WWW-Authenticate: Basic realm=\"RemoDroid\", charset=\"UTF-8\"\r\n");
             return;
         }
-        auth_cookie_header(auth_new_session(name, 0), cookie, sizeof cookie);
+        auth_cookie_header(auth_new_session(name, 0), c->tls, cookie, sizeof cookie);
     }
     if (req_is(r, "GET", "/login")) {
         char extra[400];
@@ -477,25 +561,35 @@ static void on_read(struct ev_loop *loop, ev_io *w, int revents)
             conn_close(c);
             return;
         }
-        ssize_t n = read(c->fd, c->in.p + c->in.len, c->in.cap - c->in.len);
+        ssize_t n = conn_read(c, c->in.p + c->in.len, c->in.cap - c->in.len);
         if (n > 0) {
             c->in.len += (size_t)n;
-            if ((size_t)n < 16384)
+            if (!c->ssl && (size_t)n < 16384)
                 break;
-            continue;
+            continue; /* TLS: drain every decrypted record */
         }
-        if (n < 0 && (errno == EAGAIN || errno == EINTR))
+        if (n == TLS_AGAIN)
             break;
         conn_close(c);
         return;
     }
+    if (c->ssl_rd_wants_w) /* handshake or key update needs the socket writable */
+        ev_io_start(S.loop, &c->wio);
     if (c->kind == CONN_HTTP)
         process_http(c);
     else
         process_ws(c);
+    if (c->fd >= 0 && c->ssl_wr_wants_r) /* a TLS write waited for this readability */
+        flush_out(c);
 }
 
-static void on_write(struct ev_loop *loop, ev_io *w, int revents) { flush_out(w->data); }
+static void on_write(struct ev_loop *loop, ev_io *w, int revents)
+{
+    conn_t *c = w->data;
+    flush_out(c);
+    if (c->fd >= 0 && c->ssl_rd_wants_w)
+        on_read(loop, &c->rio, EV_READ);
+}
 
 /* ---------------- lifecycle ---------------- */
 
@@ -506,6 +600,7 @@ void conn_close(conn_t *c)
     LOGD("close %s (%s)", c->ip, c->user);
     ev_io_stop(S.loop, &c->rio);
     ev_io_stop(S.loop, &c->wio);
+    tls_conn_free(c);
     close(c->fd);
     c->fd = -1;
     if (c->file_fd >= 0)
@@ -540,12 +635,17 @@ static void reap(struct ev_loop *loop, ev_check *w, int revents)
 
 static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
 {
+    listener_t *l = w->data;
     for (;;) {
         struct sockaddr_storage ss;
         socklen_t sl = sizeof ss;
-        int fd = accept4(S.listen_fd, (struct sockaddr *)&ss, &sl, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        int fd = accept4(l->fd, (struct sockaddr *)&ss, &sl, SOCK_NONBLOCK | SOCK_CLOEXEC);
         if (fd < 0)
             return;
+        if (l->tls && !tls_ready()) { /* no certificate yet (ACME still running) */
+            close(fd);
+            continue;
+        }
         int one = 1;
         setsockopt(fd, IPPROTO_TCP, 1 /* TCP_NODELAY */, &one, sizeof one);
         conn_t *c = calloc(1, sizeof *c);
@@ -563,6 +663,12 @@ static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
         } else {
             inet_ntop(AF_INET, &((struct sockaddr_in *)&ss)->sin_addr, c->ip, sizeof c->ip);
         }
+        c->tls = l->tls;
+        if (c->tls && tls_conn_start(c) < 0) {
+            close(fd);
+            free(c);
+            continue;
+        }
         ev_io_init(&c->rio, on_read, fd, EV_READ);
         ev_io_init(&c->wio, on_write, fd, EV_WRITE);
         c->rio.data = c->wio.data = c;
@@ -574,10 +680,12 @@ static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
     }
 }
 
-int server_listen(const char *addr)
+int server_listen(const char *addr, int tls)
 {
     char host[128], port[16];
-    if (rd_split_hostport(addr, host, sizeof host, port, sizeof port, "80") < 0) {
+    if (S.nlisteners == (int)RD_ARRAY_LEN(S.listeners))
+        return -1;
+    if (rd_split_hostport(addr, host, sizeof host, port, sizeof port, tls ? "443" : "80") < 0) {
         LOGE("bad listen address: %s", addr);
         return -1;
     }
@@ -598,11 +706,18 @@ int server_listen(const char *addr)
         return -1;
     }
     freeaddrinfo(ai);
-    S.listen_fd = fd;
-    ev_check_init(&reaper, reap);
-    ev_io_init(&S.listen_io, on_accept, fd, EV_READ);
-    ev_io_start(S.loop, &S.listen_io);
-    LOGI("listening on http://%s", addr);
+    listener_t *l = &S.listeners[S.nlisteners++];
+    l->fd = fd;
+    l->tls = tls;
+    if (tls)
+        S.tls_port = atoi(port);
+    static int reaper_ready;
+    if (!reaper_ready++)
+        ev_check_init(&reaper, reap);
+    ev_io_init(&l->io, on_accept, fd, EV_READ);
+    l->io.data = l;
+    ev_io_start(S.loop, &l->io);
+    LOGI("listening on %s://%s", tls ? "https" : "http", addr);
     return 0;
 }
 

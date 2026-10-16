@@ -2,9 +2,11 @@
 ; Reload after editing:  /etc/init.d/remodroid-agent reload   (or kill -HUP)
 
 [server]
-url = ws://YOUR-AWS-HOST/ws/agent
+url = wss://YOUR-AWS-HOST/ws/agent ; wss:// when the server has HTTPS, ws:// when it doesn't
 device_id = router1
 device_secret = CHANGE-ME          ; remodroid-server gensecret
+ca_file =                          ; CAs trusted for wss://; empty = the system bundle
+                                   ; (OpenWrt: opkg install ca-bundle). The router's clock must be right.
 
 [keepalive]
 ping_seconds = 20

@@ -1,4 +1,4 @@
-# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v13)
+# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v14)
 
 > **v2 change:** the phone does all the heavy work (capture, encoding, WebRTC). The ARM device can be a weak OpenWrt router. Its only runtime job is a small C relay that reads framed packets from a TCP connection and sends them as UDP packets.
 >
@@ -9,6 +9,8 @@
 > **v5 change:** the router agent keeps a WebSocket connection to the AWS server, used only for control messages and keepalive (§4.2, §4.5). The agent is written in C and uses libev for all I/O.
 >
 > **v6 change:** no TLS. Plain HTTP and `ws://`, secured with HTTP Basic auth plus session cookies (§4.6).
+>
+> **v14 change:** optional HTTPS. Set `[acme] domains` and the server gets and renews a Let's Encrypt certificate itself; agents then connect with `wss://`. Everything stays mbedTLS (§4.6, §13).
 >
 > **v7 change:** logins last 30 days by default; this and other settings live in ini files (§4.7).
 >
@@ -212,6 +214,12 @@ As requested, **no TLS** is used for the web page, the API or the WebSockets: ev
    The login lasts **30 days by default**; change `session_days` in `server.ini` (§4.7).
 3. Every later request, including the `ws://…/ws/viewer` upgrade, is authenticated by that cookie. A cookie is needed here because browsers can't add an `Authorization` header to a WebSocket, but they do send cookies with it automatically.
 4. On the WebSocket upgrade the server also checks the `Origin` header, so other websites can't open a connection with your cookie.
+
+**Optional HTTPS (v14).** Plain HTTP stays the default. Two ways to turn HTTPS on in `server.ini`:
+- `[acme] domains = remo.example.com`: the server gets a free certificate from Let's Encrypt (ACME, RFC 8555, http-01 challenge on port 80) and renews it when a third of its lifetime is left; HTTPS listens on 443.
+- `[tls] listen`, `cert`, `key`: your own certificate files, reloaded on SIGHUP.
+
+With HTTPS on, plain HTTP only answers ACME challenges and redirects everything else (`[tls] plain_http = redirect`, or `allow` to keep plain HTTP working), cookies get `Secure`, and agents use `url = wss://…` (TLS 1.2 via mbedTLS, checked against the system CA bundle or `[server] ca_file`).
 
 **Agent (router)**
 1. The agent opens `ws://<aws-host>/ws/agent` with `Authorization: Basic base64(<device-id>:<device-secret>)`.
@@ -517,7 +525,7 @@ remodroid/
   - The **control messages can be read and changed in transit.** That includes the WebRTC setup messages, which carry the DTLS fingerprint. An attacker who can modify traffic could swap the fingerprint and intercept the video.
   - Passive eavesdroppers still **can't see the video, audio, input or photos**: WebRTC's DTLS-SRTP encryption covers those regardless.
   - Mitigations included: hashed passwords, rate limiting, `HttpOnly` + `SameSite` cookies, `Origin` checks, revocable sessions, short-lived TURN credentials, and the agent accepts tunnel frames only from the phone.
-  - **If this changes later:** TLS could be added to the browser side only, using a reverse proxy on AWS, without touching the router agent. The browser side is where an untrusted network like public Wi-Fi is most likely.
+  - **Now optional (v14):** set `[acme] domains` (or `[tls] cert`/`key`) and the page, API and both WebSockets use HTTPS/`wss://`, which closes all three gaps above.
 
 ## 11. Decisions
 
@@ -525,7 +533,7 @@ remodroid/
 - The ARM device can be a weak OpenWrt router; the phone does all capture, encoding and WebRTC work.
 - The router runs one agent **written in C, using libev** for all I/O: **built-in ADB client over USB** (no adb program installed), TCP-frame → UDP relay, and a WebSocket client to AWS.
 - The agent's WebSocket carries **only control messages and keepalives**; media, input and photos go over WebRTC.
-- **No TLS:** the web page, API and WebSockets use plain HTTP/`ws://`, secured with HTTP Basic auth plus session cookies (§4.6). WebRTC's built-in media encryption stays.
+- **No TLS by default:** the web page, API and WebSockets use plain HTTP/`ws://`, secured with HTTP Basic auth plus session cookies (§4.6). WebRTC's built-in media encryption stays. **v14:** HTTPS with automatic ACME certificates is available as an option.
 - The **AWS control server is written in C with libev**, sharing WebSocket, JSON and ini code with the agent.
 - **Login lasts 30 days** by default, configurable in `server.ini`. Server and agent settings are plain ini files (§4.7).
 - The Java part is written from scratch. scrcpy is a reference only and is not used directly.
@@ -911,6 +919,8 @@ These work **without a WebRTC session and without AWS**, which is useful on the 
 | Phone files | The agent pushes `files_dir/<abi>/libremodroid.so` matching `ro.product.cpu.abi` | arm64 and armv7 phones |
 | Java build | Java 8 bytecode, d8 `--min-api 26`, no anonymous/inner classes | JDK 21 javac output for inner classes crashes d8 8.2 |
 | Cleanup process | Started with `setsid` | Survives the SIGHUP adbd sends when the shell stream closes |
+| HTTPS / ACME (v14) | mbedTLS for the server's HTTPS listener, its ACME client and the agent's `wss://` (TLS 1.2); the ACME exchange runs on a worker thread, the event loop only serves `/.well-known/acme-challenge/` and loads the result; ECDSA P-256 keys; renewal at ⅓ of the lifetime left | One crypto library everywhere; no OpenSSL build for six architectures; short-lived certificates renew correctly |
+| mbedTLS config | `common/rd_mbedtls_config.h` (unique name) | `MBEDTLS_CONFIG_FILE="mbedtls_config.h"` silently picked mbedTLS's own default file, so the agent and server were built with the full config; fixing it halved their size |
 
 **Verified on the build machine:** control plane (48 end-to-end checks, also on static MIPS binaries under QEMU), the phone WebRTC stack against aiortc (direct, through the agent's tunnel, and TURN-only), bit-exact H.265/H.264 packetization, and the real web client in headless Chrome against the whole chain.
 **Needs hardware (M0):** the Java phone server on a real phone, USB ADB on the router, Safari/iOS specifics, real-network congestion behaviour. **Not started:** audio (M4).

@@ -21,7 +21,7 @@ typedef struct {
     ev_signal sig_hup, sig_term, sig_int;
     ev_timer status_debounce;
     /* [server] */
-    char url[256], device_id[64], device_secret[128];
+    char url[256], device_id[64], device_secret[128], ca_file[256];
     int ping_s, timeout_s, heartbeat_s, reconnect_max_s;
     /* [agent] */
     char files_dir[256], phone_dir[128], sock_path[128];

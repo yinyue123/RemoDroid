@@ -10,7 +10,14 @@ section: net
 priority: optional
 maintainer: yinyue123 <798523593@qq.com>
 homepage: https://github.com/yinyue123/RemoDroid
-description: "RemoDroid control server: login, REST/WebSocket API, web client and built-in TURN relay. Static binary, no dependencies."
+description: "RemoDroid control server: login, REST/WebSocket API, web client, built-in TURN relay, HTTPS with automatic ACME (Let's Encrypt) certificates. Static binary."
+# CA certificates for ACME and HTTPS to the CA (the binary is static and reads the system bundle)
+recommends:
+  - ca-certificates
+overrides:
+  ipk:
+    depends:
+      - ca-bundle
 contents:
   - src: ${BIN}/remodroid-server
     dst: /usr/bin/remodroid-server

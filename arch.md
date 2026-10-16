@@ -347,8 +347,9 @@ Safari → every later request carries Cookie: rd_session=3f9c…e1
 - **Lockout:** after `max_failed_logins` failures from one IP, that IP is locked out for `lockout_minutes`
   (HTTP 429).
 - **Sessions are in memory only:** if the server restarts, everyone logs in again.
-- **No TLS:** Basic credentials and the cookie travel in clear text on plain HTTP. That is the trade-off you
-  chose. `webrtc.md` §2 explains why HTTPS matters, including the WebRTC fingerprint.
+- **Plain HTTP by default:** Basic credentials and the cookie travel in clear text. Setting `[acme] domains`
+  turns on HTTPS with an automatic certificate (§11.5); cookies then get `Secure`. `webrtc.md` §2 explains why
+  HTTPS matters, including the WebRTC fingerprint.
 
 ### 4.2 The viewer WebSocket (`web/app.js: connectWs`)
 
@@ -804,6 +805,8 @@ in the phone's framework at runtime, so `Hidden` and `Device` look them up by na
 
 | Route | Auth | Handler |
 |---|---|---|
+| `GET /.well-known/acme-challenge/*` | None (checked first, on either listener) | `acme_challenge` (§11.5) |
+| anything on plain HTTP while HTTPS is up | None | 308 redirect to `https://` (`[tls] plain_http = redirect`) |
 | `GET /ws/agent` | Device cookie, or Basic against `[devices]` | `ws_upgrade` → `hub_agent_open` |
 | `GET /ws/viewer` | User cookie + Origin check | `ws_upgrade` → `hub_viewer_open` |
 | `/api/v1/*` | User cookie (else 401 JSON) | `api_handle` (`api.c`): `me`, `logout`, `devices`, `devices/{id}`, `/adb`, `/cmd`, `/diag` |
@@ -885,6 +888,38 @@ STUN Binding requests on port 3478 are answered too, which gives the phone its s
 - The nonce rotates every hour, and an old nonce gets `438 Stale Nonce`.
 - `max_allocations` limits abuse.
 
+### 11.5 HTTPS and automatic certificates (`tls.c`, `acme.c`)
+
+**HTTPS** (`tls.c`): a second listener (`[tls] listen`, default `0.0.0.0:443` when ACME is on). Each accepted
+connection gets an mbedTLS context; `conn_read` / `conn_write` in `http.c` go through `tls_read` / `tls_write`
+instead of `read` / `write`, so HTTP, the API and both WebSockets work unchanged on top. Static files go through
+the output buffer instead of `sendfile()`. A new certificate replaces the config for new connections, and open
+connections keep the old one until they close.
+
+**ACME** (`acme.c`, RFC 8555), from `[acme] domains = remo.example.com`:
+
+```
+worker thread                                   Let's Encrypt                     event loop
+ GET  directory ─────────────────────────────►  newNonce, newAccount, newOrder URLs
+ HEAD newNonce  ─────────────────────────────►  Replay-Nonce
+ POST newAccount {termsOfServiceAgreed}  (JWS signed with account.key, "jwk")  → account URL ("kid")
+ POST newOrder {identifiers:[dns names]}  ───►  order: authorizations[], finalize URL
+ for each authorization:
+   POST-as-GET authz ────────────────────────►  http-01 challenge: token, url
+   publish token → keyAuthorization = token + "." + base64url(SHA-256(JWK))  ──►  challenge table
+   POST challenge {} ────────────────────────►  CA fetches http://<domain>/.well-known/acme-challenge/<token>
+                                                 ─────────────────────────────────►  served from the table
+   poll authz until "valid"
+ new key.pem (P-256), CSR with the names  ───►  POST finalize {csr}
+ poll order until "valid", download chain ───►  cert.pem
+ write files, ev_async ─────────────────────────────────────────────────────────►  tls_load(): new certificate
+```
+
+Every POST is a JWS: `{"protected": b64url({"alg":"ES256","nonce","url","jwk"|"kid"}), "payload": b64url(json),
+"signature": b64url(r‖s)}`. A `badNonce` answer is retried with the fresh nonce. On start, a stored certificate
+that covers the domains is loaded straight away. A check runs every 6 hours, and renewal starts when a third of the
+lifetime is left. Failures retry after 10 minutes, doubling up to 12 hours.
+
 ---
 
 ## 12. Third-party libraries: what each one is for
@@ -898,7 +933,7 @@ All of them are vendored in `third_party/` and compiled into the binaries (stati
 | **inih** | `.ini` file parser | ✓ | ✓ | | `server.ini`, `agent.ini` (`common/conf.c`) |
 | **picohttpparser** | Fast, zero-copy HTTP header parser | ✓ | ✓ | | Server: every request. Agent: the WebSocket upgrade response (`wsc.c`) |
 | **crypt_blowfish** | bcrypt (`$2b$`) password hashing from Openwall | ✓ | | | `auth.c`: checking user and device passwords; `hashpw` |
-| **mbedTLS** 3.6.2 | Crypto and (D)TLS library | ✓ | ✓ | ✓ | All: SHA-1, SHA-256, HMAC, MD5, base64 (`common/util.c`) for WebSocket accept keys, TURN credentials and STUN integrity. Agent: RSA-2048 key generation and signing for ADB auth. Phone: DTLS 1.2 with `use_srtp`, ECDSA P-256 self-signed certificate, key export, random numbers |
+| **mbedTLS** 3.6.2 | Crypto and (D)TLS library | ✓ | ✓ | ✓ | All: SHA-1, SHA-256, HMAC, MD5, base64 (`common/util.c`) for WebSocket accept keys, TURN credentials and STUN integrity. Server: HTTPS (TLS 1.2), and the ACME client (ECDSA P-256 keys, ES256 signatures, certificate requests, HTTPS to the CA). Agent: RSA-2048 key generation and signing for ADB auth, `wss://` client. Phone: DTLS 1.2 with `use_srtp`, ECDSA P-256 self-signed certificate, key export, random numbers. Config: `common/rd_mbedtls_config.h` (agent, server), `android/native/mbedtls_rtc_config.h` (phone) |
 | **libsrtp** 2.6.0 | Cisco's SRTP library | | | ✓ | Encrypting every RTP/RTCP packet (`srtp_protect`, `srtp_protect_rtcp`) and decrypting incoming RTCP; uses its own built-in AES and HMAC |
 | **usrsctp** 0.9.5.0 | The FreeBSD SCTP stack as a user-space library | | | ✓ | Data channels. Run with `usrsctp_init_nothreads`: we feed it packets (`usrsctp_conninput`), it gives packets back through a callback (`conn_output` → DTLS), and our libev timer drives its timers (`usrsctp_handle_timers`) |
 
@@ -919,7 +954,7 @@ headless Chrome, OpenSSL in the fake adbd, and FFmpeg to check decoded frames.
 
 | Program | Threads | Notes |
 |---|---|---|
-| `remodroid-server` | 1 | One libev loop. The CPU-heavy part is bcrypt (cost 10 takes tens of milliseconds, more on a small CPU), which briefly blocks the loop; cookies avoid repeating it |
+| `remodroid-server` | 1 (+1 during ACME) | One libev loop. The CPU-heavy part is bcrypt (cost 10 takes tens of milliseconds, more on a small CPU), which briefly blocks the loop; cookies avoid repeating it. A certificate order runs on a short-lived worker thread so the loop never waits for the CA |
 | `remodroid-agent` | 1 | One libev loop for USB, ADB streams, the tunnel, UDP sockets, the WebSocket and the CLI. `getaddrinfo` for TURN host names is the one blocking call |
 | Phone process | Several | **main** (Looper, idle) · **native loop** (pthread with its own libev: all WebRTC, all `Native.on*` callbacks, so `Controller.handle` runs here) · **encoder** (MediaCodec drain → `Native.video`) · **Server.sched** (status, lock timer, clipboard) · **Session.exec** (ctrl commands, encoder (re)configuration, stats) · logcat and shell readers · Binder threads (clipboard listener) |
 | `CleanUp` process | 1 | Blocks on stdin |

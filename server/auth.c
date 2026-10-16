@@ -117,13 +117,14 @@ void auth_sweep(void)
     }
 }
 
-void auth_cookie_header(const char *id, char *out, size_t cap)
+void auth_cookie_header(const char *id, int secure, char *out, size_t cap)
 {
+    const char *sec = secure ? "; Secure" : ""; /* HTTPS: never sent back over plain HTTP */
     if (id)
-        snprintf(out, cap, "Set-Cookie: %s=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=%llu\r\n", S.cookie_name, id,
-                 (unsigned long long)session_ttl_ms() / 1000);
+        snprintf(out, cap, "Set-Cookie: %s=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=%llu%s\r\n", S.cookie_name, id,
+                 (unsigned long long)session_ttl_ms() / 1000, sec);
     else
-        snprintf(out, cap, "Set-Cookie: %s=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0\r\n", S.cookie_name);
+        snprintf(out, cap, "Set-Cookie: %s=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0%s\r\n", S.cookie_name, sec);
 }
 
 const char *auth_cookie_session(const http_req_t *r, int want_device, char *name_out, size_t name_cap,

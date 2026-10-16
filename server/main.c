@@ -46,6 +46,23 @@ static int load_config(void)
     set_str(&S.turn_urls, rd_conf_get(c, "turn", "urls", ""));
     set_str(&S.turn_secret, rd_conf_get(c, "turn", "shared_secret", ""));
     S.turn_ttl_min = (int)rd_conf_int(c, "turn", "credential_ttl_minutes", 60);
+    /* [tls]: HTTPS turns on with a listen address, or by default when [acme] domains is set */
+    int acme = *rd_conf_get(c, "acme", "domains", "") != 0;
+    set_str(&S.tls_listen, rd_conf_get(c, "tls", "listen", acme ? "0.0.0.0:443" : ""));
+    set_str(&S.tls_cert, rd_conf_get(c, "tls", "cert", ""));
+    set_str(&S.tls_key, rd_conf_get(c, "tls", "key", ""));
+    const char *plain = rd_conf_get(c, "tls", "plain_http", "redirect");
+    if (strcmp(plain, "redirect") && strcmp(plain, "allow")) {
+        LOGE("[tls] plain_http must be redirect or allow (got %s)", plain);
+        return -1;
+    }
+    S.tls_redirect = !strcmp(plain, "redirect");
+    if (*S.tls_listen && !acme && (!*S.tls_cert || !*S.tls_key)) {
+        LOGE("[tls] listen is set: also set [acme] domains, or [tls] cert and key");
+        return -1;
+    }
+    if (acme && *S.tls_cert)
+        LOGW("[tls] cert is ignored because [acme] domains is set");
     if (S.session_days < 1)
         S.session_days = 1;
     if (S.ping_s < 1)
@@ -62,7 +79,11 @@ static void on_hup(struct ev_loop *loop, ev_signal *w, int revents)
     if (load_config() == 0) {
         ev_timer_set(&S.ping_timer, S.ping_s, S.ping_s);
         ev_timer_again(loop, &S.ping_timer);
-        LOGI("reloaded (session_days=%d; device list changes need a restart)", S.session_days);
+        if (*rd_conf_get(S.conf, "acme", "domains", ""))
+            acme_reload();
+        else if (*S.tls_cert && S.nlisteners > 1)
+            tls_load(S.tls_cert, S.tls_key); /* e.g. renewed by certbot */
+        LOGI("reloaded (session_days=%d; device list and listen address changes need a restart)", S.session_days);
     }
 }
 
@@ -96,7 +117,7 @@ static int read_password(char *buf, size_t cap)
 static void usage(void)
 {
     fprintf(stderr,
-            "usage: remodroid-server [-c server.ini] [-v]\n"
+            "usage: remodroid-server [-c server.ini] [-v] [-t]     -t: check the configuration and exit\n"
             "       remodroid-server hashpw [password]   bcrypt hash for [users]/[devices]\n"
             "       remodroid-server gensecret           random device secret\n");
 }
@@ -128,10 +149,11 @@ int main(int argc, char **argv)
         printf("%s\n", out);
         return 0;
     }
-    int opt;
-    while ((opt = getopt(argc, argv, "c:vh")) != -1) {
+    int opt, test_only = 0;
+    while ((opt = getopt(argc, argv, "c:tvh")) != -1) {
         switch (opt) {
         case 'c': S.conf_path = optarg; break;
+        case 't': test_only = 1; break;
         case 'v': rd_log_level++; break;
         default: usage(); return opt == 'h' ? 0 : 2;
         }
@@ -139,12 +161,28 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
     if (load_config() < 0)
         return 1;
+    if (test_only) { /* like nginx -t: no sockets, no ACME */
+        if (*S.tls_cert && !*rd_conf_get(S.conf, "acme", "domains", "") && tls_load(S.tls_cert, S.tls_key) < 0)
+            return 1;
+        printf("%s: configuration OK\n", S.conf_path);
+        return 0;
+    }
     hub_init_devices();
     if (S.ndevices == 0)
         LOGW("no [devices] configured; agents cannot log in");
     S.loop = EV_DEFAULT;
-    if (server_listen(rd_conf_get(S.conf, "http", "listen", "0.0.0.0:80")) < 0)
+    if (server_listen(rd_conf_get(S.conf, "http", "listen", "0.0.0.0:80"), 0) < 0)
         return 1;
+    if (*S.tls_listen) {
+        if (server_listen(S.tls_listen, 1) < 0)
+            return 1;
+        if (*rd_conf_get(S.conf, "acme", "domains", "")) {
+            if (acme_start() < 0)
+                return 1;
+        } else if (tls_load(S.tls_cert, S.tls_key) < 0) {
+            return 1;
+        }
+    }
     if (turn_start() < 0)
         return 1;
     ev_timer_init(&S.ping_timer, on_ping, S.ping_s, S.ping_s);

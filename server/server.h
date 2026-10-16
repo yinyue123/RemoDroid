@@ -27,9 +27,12 @@ struct conn {
     int close_after_write;
     int busy;          /* waiting on an async reply; stop parsing new requests */
     unsigned gen;      /* changes when the conn is freed, to detect stale refs */
-    int file_fd;       /* static file being sent with sendfile() */
+    int file_fd;       /* static file being sent (sendfile(), or read into out on TLS) */
     off_t file_off, file_end;
     ws_asm_t wsa;
+    void *ssl;         /* TLS state on HTTPS connections (tls.c), else NULL */
+    int tls;           /* accepted on the HTTPS listener */
+    int ssl_rd_wants_w, ssl_wr_wants_r; /* TLS read blocked on writability / write on readability */
     ev_tstamp last_rx;
     char user[64];     /* viewer user name or agent device id */
     device_t *dev;     /* agent: its device */
@@ -54,11 +57,16 @@ struct vsession {
 };
 
 typedef struct {
+    int fd, tls;
+    ev_io io;
+} listener_t;
+
+typedef struct {
     struct ev_loop *loop;
     rd_conf_t *conf;
     const char *conf_path;
-    int listen_fd;
-    ev_io listen_io;
+    listener_t listeners[2]; /* [http] listen, [tls] listen */
+    int nlisteners;
     ev_timer ping_timer, sweep_timer;
     ev_signal sig_hup, sig_term, sig_int;
     conn_t *conns;
@@ -69,6 +77,10 @@ typedef struct {
     char cookie_name[64];
     char *web_root, *turn_urls, *turn_secret, *origins;
     int turn_ttl_min;
+    /* [tls] */
+    char *tls_listen, *tls_cert, *tls_key;
+    int tls_port;      /* for redirects */
+    int tls_redirect;  /* plain_http = redirect */
 } server_t;
 
 extern server_t S;
@@ -80,7 +92,7 @@ void    http_respond(conn_t *c, int status, const char *ctype, const void *body,
 void    http_json(conn_t *c, int status, cJSON *body, const char *extra_headers); /* frees body */
 void    http_error(conn_t *c, int status, const char *code, const char *text);
 void    ws_send_json(conn_t *c, cJSON *m); /* frees m */
-int     server_listen(const char *addr);
+int     server_listen(const char *addr, int tls);
 void    server_tick_ping(void);
 
 /* request view passed to handlers */
@@ -109,7 +121,7 @@ const char *auth_cookie_session(const http_req_t *r, int want_device, char *name
 int         auth_basic(const http_req_t *r, conn_t *c, int device, char *name_out, size_t name_cap);
 const char *auth_new_session(const char *name, int device); /* returns session id */
 void        auth_drop_session(const char *id);
-void        auth_cookie_header(const char *id, char *out, size_t cap);
+void        auth_cookie_header(const char *id, int secure, char *out, size_t cap);
 void        auth_sweep(void);
 const char *user_hash(const char *name);
 
@@ -123,6 +135,22 @@ void      hub_on_message(conn_t *c, cJSON *m);
 void      hub_conn_closed(conn_t *c);
 /* REST: forwards a request to the agent and answers c when the agent replies. */
 void      hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *d_payload);
+
+/* tls.c: HTTPS on the [tls] listener (mbedTLS) */
+enum { TLS_AGAIN = -2 };
+int     tls_load(const char *cert_file, const char *key_file); /* (re)loads; 0 ok, keeps the old one on error */
+int     tls_ready(void);                                       /* a certificate is loaded */
+int     tls_conn_start(conn_t *c);                             /* -1: no certificate yet */
+/* > 0 bytes, 0 = closed, TLS_AGAIN = wait (sets c->ssl_rd_wants_w / c->ssl_wr_wants_r), -1 = error */
+ssize_t tls_read(conn_t *c, void *buf, size_t n);
+ssize_t tls_write(conn_t *c, const void *buf, size_t n);
+void    tls_conn_free(conn_t *c);
+
+/* acme.c: automatic certificates ([acme] domains) */
+int  acme_start(void);    /* loads an existing certificate and schedules issuance/renewal */
+void acme_reload(void);   /* after SIGHUP */
+/* http-01: copies the key authorization for token; returns 0 if the token is pending */
+int  acme_challenge(const char *token, size_t token_len, char *out, size_t cap);
 
 /* turn.c: built-in TURN relay ([turn] listen); 0 when disabled or started */
 int turn_start(void);

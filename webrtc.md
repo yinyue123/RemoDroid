@@ -348,7 +348,7 @@ Open the `workers.dev` URL on the iPhone, log in, then Share → Add to Home Scr
 
 | Change | Why | Status |
 |---|---|---|
-| **TLS in the agent's WebSocket client** (`wss://` URLs in `agent.ini`) | Cloudflare terminates TLS; the agent must connect with `wss://`. mbedTLS is already vendored, so this adds roughly 100–150 KB to the agent binary. | **Not implemented yet** |
+| **TLS in the agent's WebSocket client** (`wss://` URLs in `agent.ini`) | Cloudflare terminates TLS; the agent must connect with `wss://` (TLS 1.2 via mbedTLS; CA bundle or `[server] ca_file`) | Done |
 | Web client: `wss://` on HTTPS pages | Already handled: `web/app.js` picks `wss://` when the page is HTTPS | Done |
 | Web client: `?device=` on `/ws/viewer` | Selects the Durable Object when you have several phones | Small change |
 | REST admin commands (`/api/v1/devices/{id}/cmd`) | The Worker sketch doesn't forward them. Add them in the hub by sending `cmd` to the agent and waiting for its `ack`, the same way `remodroid-server` does. | Not in the sketch |
@@ -811,10 +811,10 @@ to add.
 | Choice | Effect |
 |---|---|
 | Plain `ws://` / `http://` (current `remodroid-server` default) | Works anywhere; fingerprint and credentials exposed |
-| `wss://` / `https://` (Cloudflare Worker, or a reverse proxy in front of `remodroid-server`) | Meets RFC 8827; enables Safari's secure-context APIs |
+| `wss://` / `https://` (Cloudflare Worker, or `remodroid-server` with `[acme] domains`) | Meets RFC 8827; enables Safari's secure-context APIs |
 
 **Recommendation:** HTTPS whenever users other than you are involved. It costs nothing in stream latency.
-**Key:** `[server] url = ws://…|wss://…` (`wss://` needs the agent TLS change in §6).
+**Keys:** `[acme] domains` (server: automatic Let's Encrypt certificate) or `[tls] cert`/`key`; `[server] url = ws://…|wss://…` (agent).
 
 ### 11.2 Who offers
 
@@ -1244,9 +1244,9 @@ Fill in the last column. Each row is either a setting that exists today or a cha
 
 | # | Decision | Options | Now | Recommended | Your choice |
 |---|---|---|---|---|---|
-| 1 | Signaling security (§11.1) | ws / wss | ws (own server) | wss for anything shared | |
+| 1 | Signaling security (§11.1) | ws / wss | ws, or wss with `[acme] domains` | wss for anything shared | |
 | 2 | Signaling host | own server / Cloudflare Worker | own server | Worker if you have no server | |
-| 3 | Agent TLS (`wss://`) (§6) | implement / not | not implemented | implement (required for 2 = Worker) | |
+| 3 | Agent TLS (`wss://`) (§6) | implement / not | implemented | — | done |
 | 4 | DTLS role (§11.7) | active / actpass + mbedTLS fix | active | active now, fix later | |
 | 5 | Relay policy (§11.4) | all / relay only | all | all | |
 | 6 | Host candidates to viewer | on / off | on | on (home Wi-Fi speed) | |

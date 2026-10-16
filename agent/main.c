@@ -62,6 +62,7 @@ int agent_reload(void)
     snprintf(A.url, sizeof A.url, "%s", agent_conf("server", "url", ""));
     snprintf(A.device_id, sizeof A.device_id, "%s", agent_conf("server", "device_id", ""));
     snprintf(A.device_secret, sizeof A.device_secret, "%s", agent_conf("server", "device_secret", ""));
+    snprintf(A.ca_file, sizeof A.ca_file, "%s", agent_conf("server", "ca_file", ""));
     A.ping_s = (int)agent_conf_int("keepalive", "ping_seconds", 20);
     A.timeout_s = (int)agent_conf_int("keepalive", "timeout_seconds", 60);
     A.heartbeat_s = (int)agent_conf_int("keepalive", "heartbeat_seconds", 30);

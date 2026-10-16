@@ -22,7 +22,7 @@ EV_DEFS := -DEV_STANDALONE=1 -DEV_USE_EPOLL=1 -DEV_USE_POLL=1 -DEV_USE_SELECT=1 
 
 INCS    := -Icommon -Ithird_party/libev -Ithird_party/inih -Ithird_party/cjson \
            -Ithird_party/picohttpparser -Ithird_party/crypt_blowfish -Ithird_party/mbedtls/include
-DEFS    := -D_GNU_SOURCE $(EV_DEFS) -DMBEDTLS_CONFIG_FILE='"mbedtls_config.h"' \
+DEFS    := -D_GNU_SOURCE $(EV_DEFS) -DMBEDTLS_CONFIG_FILE='"rd_mbedtls_config.h"' \
            -DINI_ALLOW_INLINE_COMMENTS=1 -DINI_STOP_ON_FIRST_ERROR=1 -DINI_MAX_LINE=1024
 OPT     ?= -Os -g
 CFLAGS  += $(OPT) -std=c11 -fno-strict-aliasing -ffunction-sections -fdata-sections $(INCS) $(DEFS)
@@ -32,6 +32,7 @@ ifeq ($(STATIC),1)
 LDFLAGS += -static
 endif
 LIBS    := -lm
+
 
 # ---- third party ----
 MBED_SRC := $(wildcard third_party/mbedtls/library/*.c)
@@ -57,12 +58,15 @@ $(OUT)/obj/third_party/%.o: third_party/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -w -c $< -o $@
 
+# mbedTLS struct layouts follow its config: rebuild the library when it changes
+$(filter $(OUT)/obj/third_party/mbedtls/%,$(TP_OBJ)): common/rd_mbedtls_config.h
+
 $(OUT)/obj/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(WARN) -MMD -MP -c $< -o $@
 
 $(OUT)/remodroid-server: $(SERVER_OBJ) $(COMMON_OBJ) $(OUT)/libthird.a
-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS) -lpthread
 
 $(OUT)/remodroid-agent: $(AGENT_OBJ) $(COMMON_OBJ) $(OUT)/libthird.a
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
@@ -76,6 +80,7 @@ strip: all
 
 test: all
 	node tests/run.mjs $(OUT)
+	node tests/tls.mjs $(OUT)   # PEBBLE_DIR=<pebble binaries> adds the ACME tests
 
 # WebRTC suites (need python with aiortc; the browser test also needs playwright + chromium)
 PY ?= python3

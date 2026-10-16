@@ -17,7 +17,7 @@ iPhone Safari ──WebRTC (UDP)──► AWS: remodroid-server (HTTP, WebSocket
 
 | Path | What | Language |
 |---|---|---|
-| `server/` | Control server: Basic auth + cookies, REST API, viewer/agent WebSockets, built-in TURN relay | C + libev |
+| `server/` | Control server: Basic auth + cookies, REST API, viewer/agent WebSockets, built-in TURN relay, optional HTTPS with automatic Let's Encrypt (ACME) certificates | C + libev + mbedTLS |
 | `agent/` | Router agent: built-in ADB client (usbfs), phone supervisor, UDP relay, WebSocket client, CLI | C + libev |
 | `android/native/` | Phone WebRTC stack: ICE + TURN client, DTLS-SRTP, SCTP data channels, H.265/H.264 RTP, congestion control | C |
 | `android/java/` | Phone server: screen capture, MediaCodec, input injection, clipboard, screen power, files, logcat | Java (app_process) |
@@ -64,6 +64,7 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | `python android/native/test/rtp_depack.py` | H.265 and H.264 packetizers: bit-exact round trip through an independent depacketizer + FFmpeg |
 | `python tests/e2e_webrtc.py [--relay]` | Full Path A: viewer → server → agent → tunnel → phone stack; `--relay` forces the built-in TURN |
 | `python tests/e2e_browser.py` | The real web client in headless Chrome against the full stack: video, touch, menu, protocol |
+| `node tests/tls.mjs build/host` | HTTPS, redirect, `Secure` cookies, viewer and agent over `wss://` (trusted and untrusted CA), certificate reload on SIGHUP; with `PEBBLE_DIR` set, ACME issuance, reuse and automatic renewal against Pebble (Let's Encrypt's test CA) |
 
 The Python tests need `aiortc` (and `playwright` + Chromium for the browser test).
 
@@ -89,13 +90,16 @@ package whose arch matches `opkg print-architecture` on your router.
 1. **AWS**: install the `remodroid-server` package (or copy the binary, `web/` and `deploy/server.ini.example` →
    `/etc/remodroid/server.ini`); hash passwords with `remodroid-server hashpw`, make a device secret
    with `remodroid-server gensecret`. Open TCP 80 and UDP 3478 + the relay port range. Install
-   `deploy/remodroid-server.service`.
+   `deploy/remodroid-server.service`. For HTTPS, point a domain at the server, set `[acme] domains =
+   your.domain` in `server.ini` and open TCP 443 too: the server gets and renews its certificate itself
+   (`remodroid-server -t` checks the file without starting anything).
 2. **Router**: copy `remodroid-agent` for the router's CPU to `/usr/bin/`, the phone files to
    `/usr/share/remodroid/` (`remodroid-server.jar`, `<abi>/libremodroid.so`), `deploy/agent.ini.example`
    → `/etc/remodroid/agent.ini`, and `deploy/remodroid-agent.init` → `/etc/init.d/remodroid-agent`;
-   `enable` + `start` (or just `opkg install` the remodroid-agent ipk).
+   `enable` + `start` (or just `opkg install` the remodroid-agent ipk). With HTTPS on the server, use
+   `url = wss://your.domain/ws/agent` (needs the CA bundle: `ca-bundle` on OpenWrt, and a correct clock).
 3. **Phone**: enable USB debugging, plug it into the router, accept "Allow USB debugging" once.
-4. **iPhone**: open `http://<aws-host>/`, log in, then Share → Add to Home Screen.
+4. **iPhone**: open `https://your.domain/` (or `http://<aws-host>/` without HTTPS), log in, then Share → Add to Home Screen.
 
 On the router, `remodroid-agent devices | status | shell … | push | pull | logcat | key | restart-server`
 talk to the running agent (no adb needed).

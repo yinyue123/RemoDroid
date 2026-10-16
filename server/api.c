@@ -51,7 +51,7 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
     if (req_is(r, "POST", "/api/v1/logout")) {
         char cookie[256];
         auth_drop_session(sess_id);
-        auth_cookie_header(NULL, cookie, sizeof cookie);
+        auth_cookie_header(NULL, c->tls, cookie, sizeof cookie);
         http_respond(c, 204, NULL, "", 0, cookie);
         return;
     }

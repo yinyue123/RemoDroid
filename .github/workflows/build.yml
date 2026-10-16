@@ -18,6 +18,9 @@ permissions:
 env:
   ZIG_VERSION: 0.17.0
   ZIG_SHA256: 1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026
+  PEBBLE_VERSION: v2.10.1 # Let's Encrypt's ACME test server, for tests/tls.mjs
+  PEBBLE_SHA256: 4f2fcb5bca8c85c9cf73ad140fccfc0d2be40bd81ab99879c79b7b8a0b4f70ed
+  CHALLTESTSRV_SHA256: e93a5aa25ecdf3af2f9fbb2de32b0173e64a2eae81002a4ccfe35fa6f4f60b92
   NFPM_VERSION: 2.48.0
   NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
 
@@ -34,6 +37,18 @@ jobs:
         run: make -j"$(nproc)"
       - name: End-to-end control plane tests
         run: node tests/run.mjs build/host
+      - name: Install Pebble (ACME test CA)
+        run: |
+          mkdir -p "$RUNNER_TEMP/pebble"
+          for n in pebble:PEBBLE_SHA256 pebble-challtestsrv:CHALLTESTSRV_SHA256; do
+            name=${n%%:*}; sum=$(printenv "${n##*:}")
+            curl -fsSL -o "/tmp/$name.tgz" "https://github.com/letsencrypt/pebble/releases/download/${PEBBLE_VERSION}/$name-linux-amd64.tar.gz"
+            echo "$sum  /tmp/$name.tgz" | sha256sum -c -
+            tar -C "$RUNNER_TEMP/pebble" -xzf "/tmp/$name.tgz"
+          done
+          echo "PEBBLE_DIR=$RUNNER_TEMP/pebble" >> "$GITHUB_ENV"
+      - name: HTTPS, wss and ACME tests
+        run: node tests/tls.mjs build/host
 
   binaries:
     name: binaries (${{ matrix.arch }})
