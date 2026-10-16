@@ -239,7 +239,7 @@ async function save() {
   }
   out.innerHTML += `<div class="k">✓ saved — your panel is at ${esc(o)}/</div>`;
   if (f.mode === 'domain' && !w) out.innerHTML += `<div class="d">  the certificate takes a minute; meanwhile use http://${esc(location.hostname)}:${esc(f.http_port)}/</div>`;
-  btn.outerHTML = `<a class="btn wide" href="${esc(o)}/agent.html">Add a router →</a>`;
+  btn.outerHTML = `<a class="btn wide" href="${esc(o)}/agent.html">Add an agent →</a>`;
   $('#foot').hidden = true;
 }
 

@@ -115,7 +115,7 @@ if [ -n "$ENROLL" ]; then
     exec /usr/bin/remodroid-agent enroll $ENROLL
 fi
 ok "the agent is running. Connect it to your panel with the command from"
-echo "  its Routers page → Add a router, for example:"
+echo "  its Routers page → Add an agent, for example:"
 echo
 printf '    \033[1mremodroid enroll --panel https://your.panel --code XXXX-XXXX\033[0m\n'
 echo

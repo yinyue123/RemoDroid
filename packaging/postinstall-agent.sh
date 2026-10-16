@@ -8,6 +8,6 @@ RemoDroid agent installed.
   Start it:   systemctl enable --now remodroid-agent
               (OpenWrt/Alpine: /etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent start)
   Connect it: remodroid enroll --panel https://your.panel --code XXXX-XXXX
-              (your panel → Routers → Add a router shows this command with a fresh code)
+              (your panel → Routers → Add an agent shows this command with a fresh code)
 MSG
 exit 0

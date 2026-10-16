@@ -15,7 +15,7 @@
   <a class="link" href="/wizard.html">Server ↗</a>
   <a class="link" href="/">Panel ↗</a>
 </header>
-<nav class="steps" id="steps" aria-label="Add a router" hidden></nav>
+<nav class="steps" id="steps" aria-label="Add an agent" hidden></nav>
 <main id="main" aria-live="polite"></main>
 <footer class="foot" id="foot" hidden>
   <button class="back" id="back" type="button">← Back</button>
@@ -84,7 +84,7 @@ function renderList() {
   main.innerHTML = `<p class="eyebrow">Routers</p><h1>Your <em>routers</em></h1>
     <p class="lede">Each router runs the agent, holds a phone on USB and connects out to this panel. No open ports at home.</p>
     <div class="routers" id="routers">${devices.length ? devices.map(card).join('') : '<div class="empty">No routers yet.</div>'}</div>
-    <p style="margin-top:22px"><button class="btn" id="add" type="button">+ Add a router</button></p>`;
+    <p style="margin-top:22px"><button class="btn" id="add" type="button">+ Add an agent</button></p>`;
   $('#add').onclick = () => startAdd();
   main.querySelectorAll('[data-act]').forEach(b => b.onclick = () => act(b.dataset.act, b.dataset.id, b));
 }
@@ -178,7 +178,7 @@ async function act(what, id, btn) {
   }
 }
 
-/* ---------- add a router: install → connect → phone ---------- */
+/* ---------- add an agent: install → connect → phone ---------- */
 const ADD = [{ label: 'Agent', sub: 'Install' }, { label: 'Connect', sub: 'Enroll' }, { label: 'Phone', sub: 'USB' }];
 const OS = {
   openwrt: { name: 'OpenWrt', cmd: `wget -qO- ${INSTALL}/install_agent.sh | sh`, pkg: 'ipk', install: 'opkg install ./remodroid-agent_*.ipk', note: 'Run it in an SSH session on the router. Pulls in ca-bundle for HTTPS.' },

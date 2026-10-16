@@ -18,7 +18,7 @@ static void usage(void)
 {
     fprintf(stderr, "usage: remodroid-agent [-c agent.ini] enroll --panel https://your.panel/ --code XXXX-XXXX\n"
                     "                       [--name NAME] [--ca-file FILE]\n"
-                    "Get the command with its code on the panel: Routers → Add a router.\n");
+                    "Get the command with its code on the panel: Routers → Add an agent.\n");
 }
 
 int enroll_main(int argc, char **argv)

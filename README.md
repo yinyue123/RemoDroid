@@ -92,7 +92,7 @@ through the same steps with copy buttons.
      Worker is the same panel (login, routers, signaling) on a Durable Object with built-in storage.
 2. **Agent** on the router: `wget -qO- https://remodroid.pages.dev/install_agent.sh | sh` (OpenWrt),
    or `curl … | sudo sh` (Debian, Ubuntu, CentOS).
-3. **Connect:** on the panel, open **Routers → Add a router** (`web/agent.html`). Paste the command it shows
+3. **Connect:** on the panel, open **Routers → Add an agent** (`web/agent.html`). Paste the command it shows
    on the router: `remodroid enroll --panel https://your.panel --code X5SX-K3M7`. The code is single-use and
    valid for 10 minutes. The router then shows as online, and its settings are edited on that page.
 4. **Phone:** enable USB debugging, plug it into the router, and accept "Allow USB debugging" once.
