@@ -1,0 +1,48 @@
+; /etc/remodroid/agent.ini — router agent (plan §4.7).
+; Reload after editing:  /etc/init.d/remodroid-agent reload   (or kill -HUP)
+
+[server]
+url = ws://YOUR-AWS-HOST/ws/agent
+device_id = router1
+device_secret = CHANGE-ME          ; remodroid-server gensecret
+
+[keepalive]
+ping_seconds = 20
+timeout_seconds = 60
+heartbeat_seconds = 30
+reconnect_max_seconds = 30
+
+[agent]
+files_dir = /usr/share/remodroid   ; remodroid-server.jar + libremodroid.so for the phone
+phone_dir = /data/local/tmp/remodroid
+adbkey = /etc/remodroid/adbkey     ; created on first start; the phone asks to trust it once
+socket = /var/run/remodroid.sock
+log_level = info                   ; error | warn | info | debug | trace
+
+[phone]
+adb = usb                          ; usb | tcp:HOST:5555 (adb tcpip mode)
+serial =                           ; empty = first phone found on USB
+link = adb                         ; adb | tcp:HOST:PORT (development only)
+path = auto                        ; auto | tunnel (Path A) | wifi (Path B)
+force_relay = false
+screen_off_on_connect = true
+lock_on_disconnect = true
+lock_grace_seconds = 10
+clipboard_sync = true
+auto_paste = false
+overheat_c = 45                    ; phone.overheat event above this battery temperature
+rotation = auto
+log_level = info
+
+[video]
+mode = auto                        ; auto | manual
+preset = 720p                      ; 1080p | 720p | 540p | 360p
+codec = auto                       ; auto | h265 | h264
+max_bitrate_kbps = 20000
+max_fps = 60
+
+[files]
+upload_dir = /sdcard/DCIM/RemoDroid
+media_scan = true
+overwrite = false
+max_mb = 2048                      ; largest file for push/pull

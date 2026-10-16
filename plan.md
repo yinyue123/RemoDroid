@@ -1,4 +1,4 @@
-# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v12)
+# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v13)
 
 > **v2 change:** the phone does all the heavy work (capture, encoding, WebRTC). The ARM device can be a weak OpenWrt router. Its only runtime job is a small C relay that reads framed packets from a TCP connection and sends them as UDP packets.
 >
@@ -21,6 +21,8 @@
 > **v11 change:** adb is built into the agent: a small C ADB client talks to the phone over USB directly, so no adb program is installed on the router (§4.2).
 >
 > **v12 change:** full API definition (Appendix A): REST, viewer and agent WebSockets, DataChannel control, input and file protocols, tunnel control, and the agent CLI.
+>
+> **v13 change:** implementation started; decisions taken while building are recorded in §13. See `README.md` for build, test and deploy.
 
 ## 1. Short answer
 
@@ -155,7 +157,8 @@ remodroid-agent logcat                  # stream the phone's logcat
 ```
 u16 len | u8 type | u8 sock_id | u8 af | addr (4 or 16 bytes) | u16 port | payload
 type: 0x01 UDP_OPEN   0x02 UDP_SEND (phone→router)   0x03 UDP_RECV (router→phone)
-      0x04 UDP_CLOSE  0x20 PING   0x21 PONG
+      0x04 UDP_CLOSE  0x05 UDP_BOUND (router→phone: a LAN address + port of the socket)
+      0x20 PING       0x21 PONG
       0x30 CTRL       (payload = one JSON control message; sock_id/af/addr/port unused)
 ```
 The phone no longer needs its own TCP connection to AWS: all of its signaling goes through the agent's WebSocket.
@@ -683,6 +686,7 @@ All endpoints except `/login` require the `rd_session` cookie (§4.6). Bodies ar
 | `adb.reconnect` | — | Drop and redo the USB/ADB connection |
 | `agent.reload` | — | Reload `agent.ini` |
 | `quality.default` | `QualitySettings` (A.6) | Default quality for new sessions |
+| `agent.config` | `{"screenOff": false, "grace": 25, "files.upload_dir": "…"}` | Change `agent.ini` settings from the iPhone; the agent rewrites the file (keeping comments), reloads it and pushes the new config to the phone |
 
 ### A.4 Viewer WebSocket (browser ⇄ server, `ws://…/ws/viewer`)
 
@@ -890,3 +894,23 @@ The CLI talks to the running agent through `/var/run/remodroid.sock`. Each reque
 | `remodroid-agent reload` | Reload `agent.ini` (same as `SIGHUP`) |
 
 These work **without a WebRTC session and without AWS**, which is useful on the router while setting things up.
+
+## 13. Implementation notes (decisions taken while building)
+
+| Topic | Decision | Why |
+|---|---|---|
+| WebRTC stack (decision 2) | Pure C, option B, with **our own ICE agent and TURN client** instead of libjuice | Our code owns the sockets, so the tunnel needs no library patches; STUN code is shared with the server's TURN relay |
+| DTLS role | The phone offers `a=setup:active` and is always the **DTLS client** | Chrome/Safari send a fragmented ClientHello (large post-quantum key shares) that mbedTLS cannot reassemble as a DTLS server; found by the headless-Chrome test |
+| coturn (decision 4) | **Built-in TURN relay** in `remodroid-server` (UDP, TURN REST credentials) | One file on AWS, nothing to install |
+| Media route (decision 1) | Both paths implemented: tunnel (default) and the phone's own Wi-Fi (`[phone] path = wifi`) | Pick by measurement |
+| Tunnel | New frame `UDP_BOUND` (0x05): the agent reports its LAN addresses for each socket | Gives the phone host candidates, so an iPhone at home connects directly without AWS |
+| Phone DNS | The agent resolves `turn:`/`stun:` host names before forwarding `session.start` | In Path A the phone may have no network of its own |
+| Congestion control | GCC-style delay trendline on transport-cc + loss bound; REMB only without transport-cc; an idle (app-limited) screen never drags the target below the start rate | Found with Chrome feedback: otherwise a still screen starves the encoder when action starts |
+| Events while offline | The agent queues up to 32 events while the WebSocket is down and sends them after `hello` | e.g. `adb.unauthorized` happened before the first connection |
+| bcrypt cost | 10 (~80 ms) | The server is single-threaded; cookies and the per-IP lockout keep logins rare |
+| Phone files | The agent pushes `files_dir/<abi>/libremodroid.so` matching `ro.product.cpu.abi` | arm64 and armv7 phones |
+| Java build | Java 8 bytecode, d8 `--min-api 26`, no anonymous/inner classes | JDK 21 javac output for inner classes crashes d8 8.2 |
+| Cleanup process | Started with `setsid` | Survives the SIGHUP adbd sends when the shell stream closes |
+
+**Verified on the build machine:** control plane (48 end-to-end checks, also on static MIPS binaries under QEMU), the phone WebRTC stack against aiortc (direct, through the agent's tunnel, and TURN-only), bit-exact H.265/H.264 packetization, and the real web client in headless Chrome against the whole chain.
+**Needs hardware (M0):** the Java phone server on a real phone, USB ADB on the router, Safari/iOS specifics, real-network congestion behaviour. **Not started:** audio (M4).

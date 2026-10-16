@@ -1,0 +1,44 @@
+; /etc/remodroid/server.ini — control server on AWS (plan §4.7).
+; Reload after editing:  systemctl reload remodroid-server   (or kill -HUP)
+
+[http]
+listen = 0.0.0.0:80
+web_root = /usr/share/remodroid/web
+allowed_origins =                  ; extra allowed Origins for /ws/viewer, comma separated
+
+[auth]
+session_days = 30                  ; how long a login stays valid
+cookie_name = rd_session
+max_failed_logins = 5              ; per IP, then a temporary lockout
+lockout_minutes = 15
+
+[users]
+; username = bcrypt hash          (remodroid-server hashpw)
+me = $2b$10$REPLACE-WITH-HASH
+
+[devices]
+; device id = bcrypt hash of the device secret
+router1 = $2b$10$REPLACE-WITH-HASH
+
+[device_names]
+router1 = Living room phone
+
+[turn]
+; Built-in relay (no coturn needed). Leave listen empty to use an external TURN server.
+listen = 0.0.0.0:3478
+public_ip = YOUR-AWS-PUBLIC-IP     ; the address phones and iPhones can reach (EC2 private IPs are NATed)
+relay_min_port = 49152             ; open this UDP range plus 3478 in the security group
+relay_max_port = 49252
+realm = remodroid
+max_allocations = 32
+urls = turn:YOUR-AWS-HOST:3478?transport=udp
+shared_secret = CHANGE-ME          ; signs the short-lived TURN credentials
+credential_ttl_minutes = 60
+
+[keepalive]
+ping_seconds = 20
+timeout_seconds = 60
+heartbeat_seconds = 30
+
+[log]
+level = info

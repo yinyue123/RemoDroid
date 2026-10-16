@@ -1,0 +1,16 @@
+# systemd unit for the RemoDroid router agent (installed by the deb/rpm packages).
+#   edit /etc/remodroid/agent.ini, then: systemctl enable --now remodroid-agent
+[Unit]
+Description=RemoDroid agent (phone over USB, relay to the server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/remodroid-agent -c /etc/remodroid/agent.ini
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+RuntimeDirectory=remodroid
+
+[Install]
+WantedBy=multi-user.target

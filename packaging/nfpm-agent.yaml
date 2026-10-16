@@ -1,0 +1,48 @@
+# nFPM definition for remodroid-agent (deb, rpm, apk, ipk). Used by packaging/package.sh:
+#   PKG_ARCH=<distro arch> VERSION=<x.y> BIN=<dir with binaries> PHONE=<dir with phone files>
+name: remodroid-agent
+arch: ${PKG_ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: "1"
+section: net
+priority: optional
+maintainer: yinyue123 <798523593@qq.com>
+homepage: https://github.com/yinyue123/RemoDroid
+description: RemoDroid router agent: built-in ADB over USB, phone server supervisor, UDP relay to the RemoDroid server. Static binary, no dependencies.
+contents:
+  - src: ${BIN}/remodroid-agent
+    dst: /usr/bin/remodroid-agent
+    file_info:
+      mode: 0755
+  # phone files the agent pushes over ADB (the jar and a native library per Android ABI)
+  - src: ${PHONE}/remodroid-server.jar
+    dst: /usr/share/remodroid/remodroid-server.jar
+  - src: ${PHONE}/arm64-v8a/libremodroid.so
+    dst: /usr/share/remodroid/arm64-v8a/libremodroid.so
+  - src: ${PHONE}/armeabi-v7a/libremodroid.so
+    dst: /usr/share/remodroid/armeabi-v7a/libremodroid.so
+  - src: ./deploy/agent.ini.example
+    dst: /etc/remodroid/agent.ini
+    type: config|noreplace
+    file_info:
+      mode: 0600
+  - src: ./deploy/remodroid-agent.service
+    dst: /lib/systemd/system/remodroid-agent.service
+    packager: deb
+  - src: ./deploy/remodroid-agent.service
+    dst: /usr/lib/systemd/system/remodroid-agent.service
+    packager: rpm
+  - src: ./deploy/openrc/remodroid-agent
+    dst: /etc/init.d/remodroid-agent
+    packager: apk
+    file_info:
+      mode: 0755
+  - src: ./deploy/remodroid-agent.init
+    dst: /etc/init.d/remodroid-agent
+    packager: ipk
+    file_info:
+      mode: 0755
+scripts:
+  postinstall: ./packaging/postinstall.sh

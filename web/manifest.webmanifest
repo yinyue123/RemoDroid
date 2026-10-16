@@ -1,0 +1,10 @@
+{
+  "name": "RemoDroid",
+  "short_name": "RemoDroid",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#090B0E",
+  "theme_color": "#090B0E",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# Alpine OpenRC service for remodroid-agent (installed by the apk).
+#   rc-update add remodroid-agent && rc-service remodroid-agent start
+name="remodroid-agent"
+command="/usr/bin/remodroid-agent"
+command_args="-c /etc/remodroid/agent.ini"
+command_background=true
+pidfile="/run/remodroid-agent.pid"
+output_log="/var/log/remodroid-agent.log"
+error_log="/var/log/remodroid-agent.log"
+extra_started_commands="reload"
+
+depend() {
+    need net
+    after firewall
+}
+
+reload() {
+    ebegin "Reloading $name"
+    start-stop-daemon --signal HUP --pidfile "$pidfile"
+    eend $?
+}

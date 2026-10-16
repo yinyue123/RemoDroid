@@ -1,0 +1,7 @@
+# build outputs (build/Dockerfile and build/dist.sh are tracked)
+/build/*
+!/build/Dockerfile
+!/build/dist.sh
+.DS_Store
+__pycache__/
+*.pyc

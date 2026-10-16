@@ -1,0 +1,44 @@
+# nFPM definition for remodroid-server (deb, rpm, apk, ipk). Used by packaging/package.sh:
+#   PKG_ARCH=<distro arch> VERSION=<x.y> BIN=<dir with binaries> PHONE=<dir with phone files>
+name: remodroid-server
+arch: ${PKG_ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: "1"
+section: net
+priority: optional
+maintainer: yinyue123 <798523593@qq.com>
+homepage: https://github.com/yinyue123/RemoDroid
+description: RemoDroid control server: login, REST/WebSocket API, web client and built-in TURN relay. Static binary, no dependencies.
+contents:
+  - src: ${BIN}/remodroid-server
+    dst: /usr/bin/remodroid-server
+    file_info:
+      mode: 0755
+  - src: ./web
+    dst: /usr/share/remodroid/web
+    type: tree
+  - src: ./deploy/server.ini.example
+    dst: /etc/remodroid/server.ini
+    type: config|noreplace
+    file_info:
+      mode: 0640
+  - src: ./deploy/remodroid-server.service
+    dst: /lib/systemd/system/remodroid-server.service
+    packager: deb
+  - src: ./deploy/remodroid-server.service
+    dst: /usr/lib/systemd/system/remodroid-server.service
+    packager: rpm
+  - src: ./deploy/openrc/remodroid-server
+    dst: /etc/init.d/remodroid-server
+    packager: apk
+    file_info:
+      mode: 0755
+  - src: ./deploy/remodroid-server.init
+    dst: /etc/init.d/remodroid-server
+    packager: ipk
+    file_info:
+      mode: 0755
+scripts:
+  postinstall: ./packaging/postinstall.sh

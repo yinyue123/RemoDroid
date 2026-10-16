@@ -1,0 +1,24 @@
+#!/bin/sh /etc/rc.common
+# OpenWrt procd service for the RemoDroid router agent.
+#   cp remodroid-agent.init /etc/init.d/remodroid-agent
+#   /etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent start
+
+START=95
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/remodroid-agent
+CONF=/etc/remodroid/agent.ini
+
+start_service() {
+    procd_open_instance
+    procd_set_param command "$PROG" -c "$CONF"
+    procd_set_param respawn 3600 5 0     # restart forever, 5 s apart
+    procd_set_param stderr 1             # log to logread
+    procd_set_param file "$CONF"
+    procd_close_instance
+}
+
+reload_service() {
+    procd_send_signal remodroid-agent '*' HUP
+}

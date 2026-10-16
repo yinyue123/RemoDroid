@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# Alpine OpenRC service for remodroid-server (installed by the apk).
+#   rc-update add remodroid-server && rc-service remodroid-server start
+name="remodroid-server"
+command="/usr/bin/remodroid-server"
+command_args="-c /etc/remodroid/server.ini"
+command_background=true
+pidfile="/run/remodroid-server.pid"
+output_log="/var/log/remodroid-server.log"
+error_log="/var/log/remodroid-server.log"
+extra_started_commands="reload"
+
+depend() {
+    need net
+    after firewall
+}
+
+reload() {
+    ebegin "Reloading $name"
+    start-stop-daemon --signal HUP --pidfile "$pidfile"
+    eend $?
+}

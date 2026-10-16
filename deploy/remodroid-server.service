@@ -1,0 +1,19 @@
+# systemd unit for the RemoDroid control server (installed by the deb/rpm packages).
+#   edit /etc/remodroid/server.ini, then: systemctl enable --now remodroid-server
+[Unit]
+Description=RemoDroid control server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/remodroid-server -c /etc/remodroid/server.ini
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/remodroid /usr/share/remodroid
+
+[Install]
+WantedBy=multi-user.target
