@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -281,4 +282,19 @@ int rd_split_hostport(const char *in, char *host, size_t hostcap, char *port, si
         return -1;
     strcpy(port, ps);
     return 0;
+}
+
+int rd_mkdirs(const char *path, unsigned mode)
+{
+    char tmp[512];
+    snprintf(tmp, sizeof tmp, "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            if (mkdir(tmp, 0755) < 0 && errno != EEXIST)
+                return -1;
+            *p = '/';
+        }
+    }
+    return mkdir(tmp, (mode_t)mode) < 0 && errno != EEXIST ? -1 : 0;
 }

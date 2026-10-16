@@ -81,6 +81,11 @@ strip: all
 test: all
 	node tests/run.mjs $(OUT)
 	node tests/tls.mjs $(OUT)   # PEBBLE_DIR=<pebble binaries> adds the ACME tests
+	node tests/setup.mjs $(OUT)
+
+# the Cloudflare Worker under wrangler dev (needs: cd worker && npm install)
+test-worker: all
+	node tests/worker.mjs $(OUT)
 
 # WebRTC suites (need python with aiortc; the browser test also needs playwright + chromium)
 PY ?= python3
@@ -102,4 +107,4 @@ clean:
 
 include android/native/rtc.mk
 
-.PHONY: all strip test test-webrtc dist clean
+.PHONY: all strip test test-worker test-webrtc dist clean

@@ -1,4 +1,4 @@
-# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v14)
+# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v15)
 
 > **v2 change:** the phone does all the heavy work (capture, encoding, WebRTC). The ARM device can be a weak OpenWrt router. Its only runtime job is a small C relay that reads framed packets from a TCP connection and sends them as UDP packets.
 >
@@ -9,6 +9,8 @@
 > **v5 change:** the router agent keeps a WebSocket connection to the AWS server, used only for control messages and keepalive (§4.2, §4.5). The agent is written in C and uses libev for all I/O.
 >
 > **v6 change:** no TLS. Plain HTTP and `ws://`, secured with HTTP Basic auth plus session cookies (§4.6).
+>
+> **v15 change:** guided install. A fresh server starts a setup wizard on port 5580 (`web/wizard.html`). Routers join with a one-time code: `remodroid enroll --panel … --code …` (`web/agent.html`). The same panel also runs on Cloudflare Workers (`worker/`) with Cloudflare TURN, for people without a server. The install site is in `wizard/` (remodroid.pages.dev).
 >
 > **v14 change:** optional HTTPS. Set `[acme] domains` and the server gets and renews a Let's Encrypt certificate itself; agents then connect with `wss://`. Everything stays mbedTLS (§4.6, §13).
 >
@@ -920,6 +922,9 @@ These work **without a WebRTC session and without AWS**, which is useful on the 
 | Java build | Java 8 bytecode, d8 `--min-api 26`, no anonymous/inner classes | JDK 21 javac output for inner classes crashes d8 8.2 |
 | Cleanup process | Started with `setsid` | Survives the SIGHUP adbd sends when the shell stream closes |
 | HTTPS / ACME (v14) | mbedTLS for the server's HTTPS listener, its ACME client and the agent's `wss://` (TLS 1.2); the ACME exchange runs on a worker thread, the event loop only serves `/.well-known/acme-challenge/` and loads the result; ECDSA P-256 keys; renewal at ⅓ of the lifetime left | One crypto library everywhere; no OpenSSL build for six architectures; short-lived certificates renew correctly |
+| Setup wizard (v15) | No `[users]` = setup mode: only `wizard.html` + `/api/v1/setup`, unlocked by a token in `<state_dir>/setup-token`; saving writes `server.ini` (comments kept, `rd_conf_write`) and the server re-execs on the new ports | No hand-edited ini for a first install; the token stops a scanner from claiming a fresh server |
+| Enrollment (v15) | One-time codes (8 chars, no look-alike letters, 10 min, single use, per-IP lockout); `POST /api/v1/enroll` returns a device id + random secret (stored as bcrypt in `[devices]`, as SHA-256 in the Worker) | One line on the router instead of copying secrets; router settings then live on the panel (`agent.config.get` / `agent.config`) |
+| Cloudflare version (v15) | `worker/`: one Durable Object (SQLite storage, hibernating WebSockets) speaking the server's protocol; PBKDF2 passwords; Cloudflare Realtime TURN credentials per session | No server needed; the same web client and agent |
 | mbedTLS config | `common/rd_mbedtls_config.h` (unique name) | `MBEDTLS_CONFIG_FILE="mbedtls_config.h"` silently picked mbedTLS's own default file, so the agent and server were built with the full config; fixing it halved their size |
 
 **Verified on the build machine:** control plane (48 end-to-end checks, also on static MIPS binaries under QEMU), the phone WebRTC stack against aiortc (direct, through the agent's tunnel, and TURN-only), bit-exact H.265/H.264 packetization, and the real web client in headless Chrome against the whole chain.

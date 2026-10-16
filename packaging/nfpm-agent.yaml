@@ -23,6 +23,10 @@ contents:
     dst: /usr/bin/remodroid-agent
     file_info:
       mode: 0755
+  # short name for the enroll command shown on the panel: remodroid enroll --panel … --code …
+  - src: /usr/bin/remodroid-agent
+    dst: /usr/bin/remodroid
+    type: symlink
   # phone files the agent pushes over ADB (the jar and a native library per Android ABI)
   - src: ${PHONE}/remodroid-server.jar
     dst: /usr/share/remodroid/remodroid-server.jar
@@ -52,4 +56,4 @@ contents:
     file_info:
       mode: 0755
 scripts:
-  postinstall: ./packaging/postinstall.sh
+  postinstall: ./packaging/postinstall-agent.sh

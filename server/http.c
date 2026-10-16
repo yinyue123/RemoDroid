@@ -249,7 +249,7 @@ static const char *mime_type(const char *path)
     return "application/octet-stream";
 }
 
-static void serve_static(conn_t *c, const http_req_t *r, const char *extra)
+void http_serve_static(conn_t *c, const http_req_t *r, const char *extra)
 {
     char rel[512];
     if (r->path_len == 0 || r->path_len >= sizeof rel - 16) {
@@ -398,6 +398,14 @@ static void handle_request(conn_t *c, const http_req_t *r)
         redirect_https(c, r);
         return;
     }
+    if (S.setup) { /* fresh install: only the wizard (setup.c) */
+        setup_request(c, r);
+        return;
+    }
+    if (req_is(r, "POST", "/api/v1/enroll")) { /* a router redeeming a code: no login */
+        enroll_public(c, r);
+        return;
+    }
 
     if (req_is(r, "GET", "/ws/agent")) {
         const char *sid = auth_cookie_session(r, 1, name, sizeof name, NULL);
@@ -447,13 +455,17 @@ static void handle_request(conn_t *c, const http_req_t *r)
         }
         auth_cookie_header(auth_new_session(name, 0), c->tls, cookie, sizeof cookie);
     }
-    if (req_is(r, "GET", "/login")) {
-        char extra[400];
-        snprintf(extra, sizeof extra, "Location: /\r\n%s", cookie);
+    if (req_is(r, "GET", "/login")) { /* ?next=/agent.html: back to the page that needed the login */
+        char extra[600], next[200] = "/";
+        if (r->query_len > 5 && !memcmp(r->query, "next=/", 6) && r->query[6] != '/' && r->query_len < 150) {
+            snprintf(next, sizeof next, "%.*s", (int)r->query_len - 5, r->query + 5);
+            next[strcspn(next, "&\r\n\\ ")] = 0;
+        }
+        snprintf(extra, sizeof extra, "Location: %s\r\n%s", next, cookie);
         http_respond(c, 302, NULL, "", 0, extra);
         return;
     }
-    serve_static(c, r, cookie);
+    http_serve_static(c, r, cookie);
 }
 
 /* ---------------- input ---------------- */
@@ -497,7 +509,7 @@ static void process_http(conn_t *c)
             return;
         r.body = rd_buf_data(&c->in) + n;
         r.body_len = body;
-        if (minor == 0 && !header_has_token(&r, "Connection", "keep-alive"))
+        if ((minor == 0 && !header_has_token(&r, "Connection", "keep-alive")) || header_has_token(&r, "Connection", "close"))
             c->close_after_write = 1;
         handle_request(c, &r);
         if (c->fd < 0)

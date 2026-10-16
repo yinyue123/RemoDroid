@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>RemoDroid Setup</title>
+<meta name="description" content="Set up your RemoDroid server: address, HTTPS, admin account and STUN/TURN.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="setup.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/"><i>RD</i>RemoDroid</a>
+  <span class="spacer"></span>
+  <a class="link" href="/agent.html" id="toRouters" hidden>Routers ↗</a>
+  <a class="link" href="/" id="toPanel" hidden>Panel ↗</a>
+</header>
+<nav class="steps" id="steps" aria-label="Setup steps"></nav>
+<main id="main" aria-live="polite"></main>
+<footer class="foot" id="foot">
+  <button class="back" id="back" type="button">← Back</button>
+  <span class="left" id="left"></span>
+  <button class="btn" id="next" type="button">Next →</button>
+</footer>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const main = $('#main');
+
+/* The setup code from the link the installer printed (…/wizard.html?token=…), kept for this tab only. */
+const qs = new URLSearchParams(location.search);
+let token = '';
+try {
+  token = qs.get('token') || sessionStorage.getItem('rd-setup-token') || '';
+  if (qs.get('token')) { sessionStorage.setItem('rd-setup-token', token); history.replaceState(null, '', location.pathname); }
+} catch (_) { token = qs.get('token') || ''; }
+
+async function api(method, path, body) {
+  const headers = {};
+  if (token) headers['X-Setup-Token'] = token;
+  if (body) headers['Content-Type'] = 'application/json';
+  const r = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+  let j = {};
+  try { j = await r.json(); } catch (_) {}
+  return { status: r.status, ok: r.ok, j };
+}
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 3200);
+}
+
+let cfg = null, f = {}, step = 0, steps = [], saving = false;
+
+/* ---------- steps ---------- */
+const STEPS = {
+  server: [
+    { id: 'address', label: 'Address', sub: 'Domain' },
+    { id: 'account', label: 'Account', sub: 'Login' },
+    { id: 'connect', label: 'Connect', sub: 'STUN/TURN' },
+    { id: 'save', label: 'Save', sub: 'Apply' },
+  ],
+  worker: [
+    { id: 'account', label: 'Account', sub: 'Login' },
+    { id: 'turn', label: 'Connect', sub: 'TURN' },
+    { id: 'save', label: 'Save', sub: 'Apply' },
+  ],
+};
+
+function renderSteps() {
+  $('#steps').innerHTML = steps.map((s, i) => `${i ? `<span class="bar${i <= step ? ' done' : ''}"></span>` : ''}
+    <button class="st${i === step ? ' on' : i < step ? ' done' : ''}" type="button" data-i="${i}" ${i > step ? 'disabled' : ''}>
+      <span class="n">${i < step ? '✓' : i + 1}</span><span><b>${s.label}</b><small>${s.sub}</small></span></button>`).join('');
+  $('#steps').querySelectorAll('.st').forEach(b => b.onclick = () => { if (+b.dataset.i < step) go(+b.dataset.i); });
+  $('#back').disabled = step === 0;
+  const left = steps.length - 1 - step;
+  $('#left').textContent = left ? `${left} step${left > 1 ? 's' : ''} to go` : 'last step';
+  $('#next').hidden = steps[step].id === 'save';
+}
+function go(i) { step = i; renderSteps(); render(); window.scrollTo(0, 0); }
+$('#back').onclick = () => go(Math.max(0, step - 1));
+$('#next').onclick = () => { if (validate()) go(step + 1); };
+
+function eyebrow(i, name) { return `<p class="eyebrow">${String(i + 1).padStart(2, '0')} — ${name}</p>`; }
+function field(id, label, input, hint) { return `<div class="field"><label for="${id}">${label}</label>${input}${hint ? `<div class="hint">${hint}</div>` : ''}</div>`; }
+function bind(id, key, num) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', () => { f[key] = el.type === 'checkbox' ? el.checked : num ? Number(el.value) : el.value.trim(); el.removeAttribute('aria-invalid'); });
+}
+function bad(id, msg) { const el = document.getElementById(id); if (el) { el.setAttribute('aria-invalid', 'true'); el.focus(); } toast(msg); return false; }
+
+/* ---------- pages ---------- */
+function render() {
+  const s = steps[step].id;
+  const ev = eyebrow(step, s === 'turn' ? 'connect' : s);
+  if (s === 'address') {
+    const dom = f.mode === 'domain';
+    main.innerHTML = `${ev}<h1>Where will you <em>reach it</em>?</h1>
+      <p class="lede">With a domain the server gets a free HTTPS certificate from Let's Encrypt and renews it itself. Without one, it is plain HTTP on the server's IP address.</p>
+      <div class="choices">
+        <button class="choice" type="button" data-m="domain" aria-pressed="${dom}"><small>Recommended</small><b>I have a domain</b><span>HTTPS with an automatic certificate. Needed for one-tap clipboard on iPhone.</span></button>
+        <button class="choice" type="button" data-m="ip" aria-pressed="${!dom}"><small>Quick start</small><b>Just the IP address</b><span>Plain HTTP. Passwords travel unencrypted.</span></button>
+      </div>
+      <div class="form" style="margin-top:22px">
+        ${dom ? `
+          ${field('domain', 'Domain', `<input id="domain" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="remodroid.example.com" value="${esc(f.domain)}">`,
+            `Point its DNS <b>A record</b> at this server${cfg.host_hint && /^\d+\.\d+\.\d+\.\d+$/.test(cfg.host_hint) ? ` (<code>${esc(cfg.host_hint)}</code>)` : ''} before saving.`)}
+          ${field('email', 'Email for the certificate (optional)', `<input id="email" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(f.email)}">`, 'Let\'s Encrypt may use it for important notices.')}
+          <div class="row2">
+            ${field('http_port', 'Web port (HTTP)', `<input id="http_port" type="number" min="1" max="65535" value="${esc(f.http_port)}">`, 'Must be <b>80</b> for the certificate check.')}
+            ${field('tls_port', 'HTTPS port', `<input id="tls_port" type="number" min="1" max="65535" value="${esc(f.tls_port)}">`, 'Usually 443.')}
+          </div>
+          <label class="check"><input id="redirect_http" type="checkbox" ${f.redirect_http ? 'checked' : ''}><span>Send plain HTTP to HTTPS<small>Routers then connect with <code>wss://</code>; new enrollments do this by themselves.</small></span></label>
+          ${f.http_port !== 80 ? '<div class="callout warn">Let\'s Encrypt checks the domain on <b>port 80</b>. Use 80 unless something else proxies it to this port.</div>' : ''}
+        ` : `
+          ${field('http_port', 'Web port', `<input id="http_port" type="number" min="1" max="65535" value="${esc(f.http_port)}">`,
+            `The panel will be at <code>http://${esc(cfg.host_hint || 'your-server-ip')}:${esc(f.http_port)}/</code>. Open this port (TCP) in the firewall.`)}
+        `}
+      </div>`;
+    main.querySelectorAll('.choice').forEach(b => b.onclick = () => {
+      f.mode = b.dataset.m;
+      if (f.mode === 'domain' && f.http_port === cfg.http_port && !cfg.configured) f.http_port = 80;
+      render();
+    });
+    bind('domain', 'domain'); bind('email', 'email'); bind('http_port', 'http_port', 1); bind('tls_port', 'tls_port', 1); bind('redirect_http', 'redirect_http');
+    const hp = $('#http_port');
+    if (hp) hp.addEventListener('change', () => render());
+  } else if (s === 'account') {
+    const edit = cfg.configured;
+    main.innerHTML = `${ev}<h1>Your <em>login</em></h1>
+      <p class="lede">${edit ? 'Change the admin name or password. Leave the password empty to keep it.' : 'The panel asks for this name and password, then remembers you for 30 days.'}</p>
+      <div class="form">
+        ${field('username', 'Username', `<input id="username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" value="${esc(f.username)}">`)}
+        ${field('password', edit ? 'New password (optional)' : 'Password', `<input id="password" type="password" autocomplete="new-password" value="${esc(f.password)}">`, 'At least 8 characters.')}
+        ${field('password2', 'Repeat the password', `<input id="password2" type="password" autocomplete="new-password" value="${esc(f.password2)}">`)}
+      </div>`;
+    bind('username', 'username'); bind('password', 'password'); bind('password2', 'password2');
+  } else if (s === 'connect') {
+    main.innerHTML = `${ev}<h1>How the video <em>gets through</em></h1>
+      <p class="lede">The phone and your iPhone connect directly when they can. When a network blocks that (many mobile networks do), the stream is relayed through this server's TURN service. STUN on the same port tells each side its public address.</p>
+      <div class="form">
+        <label class="check"><input id="turn_enabled" type="checkbox" ${f.turn_enabled ? 'checked' : ''}><span>Run STUN and TURN on this server<small>Built in; nothing else to install.</small></span></label>
+        ${f.turn_enabled ? `<div class="row2">
+          ${field('turn_port', 'STUN/TURN port (UDP)', `<input id="turn_port" type="number" min="1" max="65535" value="${esc(f.turn_port)}">`, 'Usually 3478.')}
+          ${field('public_ip', 'Public IPv4 address', `<input id="public_ip" type="text" inputmode="decimal" spellcheck="false" placeholder="203.0.113.10" value="${esc(f.public_ip)}">`, 'On AWS/GCP this is the elastic/external IP, not the private one.')}
+        </div>
+        <div class="callout">Open <b>UDP ${esc(f.turn_port)}</b> and <b>UDP 49152–49252</b> (relay ports) in the firewall / security group.</div>` : ''}
+        ${field('ice_extra', 'Other STUN/TURN servers (optional)', `<textarea id="ice_extra" spellcheck="false" placeholder="stun:stun.cloudflare.com:3478&#10;turn:turn.example.com:3478?transport=udp username credential">${esc(f.ice_extra)}</textarea>`,
+          'One per line: the URL, then the username and credential for TURN. Phones use UDP TURN (<code>turn:…?transport=udp</code>).')}
+      </div>`;
+    bind('turn_enabled', 'turn_enabled'); bind('turn_port', 'turn_port', 1); bind('public_ip', 'public_ip'); bind('ice_extra', 'ice_extra');
+    $('#turn_enabled').addEventListener('change', () => render());
+  } else if (s === 'turn') {
+    const cf = f.cf;
+    main.innerHTML = `${ev}<h1>How the video <em>gets through</em></h1>
+      <p class="lede">The phone and your iPhone connect directly when they can. When a network blocks that, the stream is relayed through a TURN server. Cloudflare runs one for you: 1,000 GB a month free.</p>
+      <div class="choices">
+        <button class="choice" type="button" data-c="1" aria-pressed="${cf}"><small>Recommended</small><b>Cloudflare TURN</b><span>Make a TURN key in your Cloudflare dashboard and paste it here.</span></button>
+        <button class="choice" type="button" data-c="0" aria-pressed="${!cf}"><small>Your own</small><b>Other servers</b><span>STUN/TURN servers you run or rent.</span></button>
+      </div>
+      <div class="form" style="margin-top:22px">
+        ${cf ? `
+          <div class="callout">Dashboard → <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>. Copy the <b>Turn Token ID</b> and the <b>API Token</b>.</div>
+          ${field('cf_key_id', 'Turn Token ID', `<input id="cf_key_id" type="text" spellcheck="false" autocomplete="off" value="${esc(f.cf_key_id)}">`)}
+          ${field('cf_api_token', cfg.turn && cfg.turn.has_token ? 'API Token (saved; leave empty to keep)' : 'API Token', `<input id="cf_api_token" type="password" autocomplete="off" value="${esc(f.cf_api_token)}">`,
+            'Kept in this Worker\'s storage. Each session gets short-lived credentials made from it.')}` : ''}
+        ${field('ice_extra', cf ? 'More STUN/TURN servers (optional)' : 'STUN/TURN servers', `<textarea id="ice_extra" spellcheck="false" placeholder="stun:stun.cloudflare.com:3478&#10;turn:turn.example.com:3478?transport=udp username credential">${esc(f.ice_extra)}</textarea>`,
+          'One per line: the URL, then the username and credential for TURN. Phones use UDP TURN (<code>turn:…?transport=udp</code>).')}
+      </div>`;
+    main.querySelectorAll('.choice').forEach(b => b.onclick = () => { f.cf = b.dataset.c === '1'; render(); });
+    bind('cf_key_id', 'cf_key_id'); bind('cf_api_token', 'cf_api_token'); bind('ice_extra', 'ice_extra');
+  } else if (s === 'save') {
+    renderSave();
+  }
+  renderSteps();
+}
+
+function origin() {
+  if (cfg.platform === 'worker') return location.origin;
+  if (f.mode === 'domain') return `https://${f.domain}${f.tls_port !== 443 ? ':' + f.tls_port : ''}`;
+  return `http://${location.hostname.includes(':') ? `[${location.hostname}]` : location.hostname}${f.http_port !== 80 ? ':' + f.http_port : ''}`;
+}
+
+function renderSave() {
+  const w = cfg.platform === 'worker';
+  const rows = [];
+  if (!w) {
+    rows.push(['Panel', `<code>${esc(origin())}/</code>`]);
+    if (f.mode === 'domain') rows.push(['HTTPS', `Let's Encrypt certificate for <code>${esc(f.domain)}</code>${f.redirect_http ? ', HTTP redirects to it' : ''}`]);
+  }
+  rows.push(['Admin', `<code>${esc(f.username)}</code>${f.password ? ' · new password' : ''}`]);
+  if (w) rows.push(['TURN', f.cf ? 'Cloudflare TURN' : 'your own servers']);
+  else rows.push(['STUN/TURN', f.turn_enabled ? `built in, UDP ${esc(f.turn_port)} on ${esc(f.public_ip)}` : 'off']);
+  const extra = (f.ice_extra || '').split('\n').filter(Boolean);
+  if (extra.length) rows.push(['Also', extra.map(x => `<code>${esc(x.split(/\s+/)[0])}</code>`).join('<br>')]);
+  const ports = w ? [] : [`TCP ${f.http_port}`].concat(f.mode === 'domain' ? [`TCP ${f.tls_port}`] : [], f.turn_enabled ? [`UDP ${f.turn_port}`, 'UDP 49152–49252'] : []);
+  main.innerHTML = `${eyebrow(step, 'save')}<h1>Ready to <em>${cfg.configured ? 'update' : 'go'}</em></h1>
+    <p class="lede">${w ? 'Saved in this Worker\'s storage.' : `Written to <code>${esc(cfg.config_file || '/etc/remodroid/server.ini')}</code>. The server restarts itself with the new settings; you then log in with your new account.`}</p>
+    <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    ${ports.length ? `<div class="chips"><small>Open</small>${ports.map(p => `<span class="chip">${p}</span>`).join('')}</div>` : ''}
+    <div class="term" id="out"><div class="d">ready</div></div>
+    <button class="btn wide" id="save" type="button">${cfg.configured ? 'Save changes' : 'Save and start'} →</button>`;
+  $('#save').onclick = save;
+}
+
+function iceLine() { return (f.ice_extra || '').split('\n').map(x => x.trim()).filter(Boolean).join(', '); }
+
+async function save() {
+  if (saving) return;
+  saving = true;
+  const out = $('#out'), btn = $('#save');
+  btn.disabled = true;
+  out.innerHTML = '<div><span class="p">$</span> saving…</div>';
+  const w = cfg.platform === 'worker';
+  const body = w ? {
+    username: f.username, password: f.password,
+    turn: f.cf ? { cloudflare: true, key_id: f.cf_key_id, api_token: f.cf_api_token } : { cloudflare: false },
+    ice_extra: iceLine(),
+  } : {
+    http_port: f.http_port, domain: f.mode === 'domain' ? f.domain : '', email: f.mode === 'domain' ? f.email : '',
+    tls_port: f.tls_port, redirect_http: f.redirect_http, username: f.username, password: f.password,
+    turn_enabled: f.turn_enabled, turn_port: f.turn_port, public_ip: f.public_ip, ice_extra: iceLine(),
+  };
+  let r;
+  try { r = await api('POST', '/api/v1/setup', body); } catch (e) { r = { ok: false, j: { msg: e.message } }; }
+  if (!r.ok) {
+    out.innerHTML += `<div class="x">✗ ${esc(r.j.msg || 'failed (' + r.status + ')')}</div>`;
+    btn.disabled = false; saving = false;
+    return;
+  }
+  try { sessionStorage.removeItem('rd-setup-token'); } catch (_) {}
+  const o = origin();
+  if (r.j.restart_ms) {
+    out.innerHTML += `<div class="d">▸ written to ${esc(cfg.config_file || 'server.ini')}</div><div class="d">▸ restarting on ${esc(o)}…</div>`;
+    await new Promise(res => setTimeout(res, r.j.restart_ms + 600));
+  }
+  out.innerHTML += `<div class="k">✓ saved — your panel is at ${esc(o)}/</div>`;
+  if (f.mode === 'domain' && !w) out.innerHTML += `<div class="d">  the certificate takes a minute; meanwhile use http://${esc(location.hostname)}:${esc(f.http_port)}/</div>`;
+  btn.outerHTML = `<a class="btn wide" href="${esc(o)}/agent.html">Add a router →</a>`;
+  $('#foot').hidden = true;
+}
+
+function validate() {
+  const s = steps[step].id;
+  if (s === 'address') {
+    if (!(f.http_port >= 1 && f.http_port <= 65535)) return bad('http_port', 'Choose a port between 1 and 65535');
+    if (f.mode === 'domain') {
+      if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(f.domain || '')) return bad('domain', 'Enter a domain such as remodroid.example.com');
+      if (!(f.tls_port >= 1 && f.tls_port <= 65535) || f.tls_port === f.http_port) return bad('tls_port', 'The HTTPS port must differ from the web port');
+    }
+  } else if (s === 'account') {
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(f.username || '')) return bad('username', 'Letters, digits, . _ - (up to 32)');
+    const need = !cfg.configured || f.username !== cfg.username;
+    if ((need || f.password) && (f.password || '').length < 8) return bad('password', 'At least 8 characters');
+    if ((f.password || '') !== (f.password2 || '')) return bad('password2', 'The passwords differ');
+  } else if (s === 'connect') {
+    if (f.turn_enabled && !(f.turn_port >= 1 && f.turn_port <= 65535)) return bad('turn_port', 'Choose a port between 1 and 65535');
+    if (f.turn_enabled && !/^\d{1,3}(\.\d{1,3}){3}$/.test(f.public_ip || '')) return bad('public_ip', 'Enter the public IPv4 address');
+  } else if (s === 'turn') {
+    if (f.cf && !f.cf_key_id) return bad('cf_key_id', 'Paste the Turn Token ID');
+    if (f.cf && !f.cf_api_token && !(cfg.turn && cfg.turn.has_token)) return bad('cf_api_token', 'Paste the API Token');
+    if (!f.cf && !iceLine()) return bad('ice_extra', 'Add at least one STUN or TURN server');
+  }
+  return true;
+}
+
+/* ---------- start ---------- */
+function askToken(msg) {
+  steps = [{ id: 'code', label: 'Setup code', sub: 'Unlock' }];
+  step = 0; renderSteps(); $('#foot').hidden = true;
+  main.innerHTML = `<p class="eyebrow">00 — unlock</p><h1>Enter the <em>setup code</em></h1>
+    <p class="lede">${esc(msg)} The installer printed a link with it; it is also in <code>/var/lib/remodroid/setup-token</code> on the server, and in its log.</p>
+    <div class="form">${field('tok', 'Setup code', '<input id="tok" type="text" autocomplete="one-time-code" autocapitalize="off" spellcheck="false">')}
+    <button class="btn" id="unlock" type="button">Continue →</button></div>`;
+  $('#unlock').onclick = () => { token = $('#tok').value.trim(); try { sessionStorage.setItem('rd-setup-token', token); } catch (_) {} start(); };
+}
+
+async function start() {
+  let r;
+  try { r = await api('GET', '/api/v1/setup'); } catch (e) { main.innerHTML = `<div class="callout bad">Cannot reach the server: ${esc(e.message)}</div>`; return; }
+  if (r.status === 401) { location.href = '/login?next=/wizard.html'; return; }
+  if (r.status === 403) { askToken(token ? 'That code did not work.' : 'This server is not set up yet.'); return; }
+  if (r.status === 429) { askToken('Too many wrong codes; wait a few minutes.'); return; }
+  if (!r.ok) { main.innerHTML = `<div class="callout bad">${esc(r.j.msg || 'Error ' + r.status)}</div>`; return; }
+  cfg = r.j;
+  $('#foot').hidden = false;
+  $('#toRouters').hidden = $('#toPanel').hidden = !cfg.configured;
+  document.title = cfg.configured ? 'RemoDroid Settings' : 'RemoDroid Setup';
+  f = {
+    mode: cfg.domain ? 'domain' : 'ip', domain: cfg.domain || '', email: cfg.email || '',
+    http_port: cfg.http_port || 80, tls_port: cfg.tls_port || 443, redirect_http: cfg.redirect_http !== false,
+    username: cfg.username || 'admin', password: '', password2: '',
+    turn_enabled: cfg.configured ? !!cfg.turn_enabled : true, turn_port: cfg.turn_port || 3478,
+    public_ip: cfg.public_ip || (/^\d+\.\d+\.\d+\.\d+$/.test(cfg.host_hint || '') && !/^(127|10|192\.168)\./.test(cfg.host_hint) ? cfg.host_hint : ''),
+    ice_extra: (cfg.ice_extra || '').split(',').map(x => x.trim()).filter(Boolean).join('\n'),
+    cf: cfg.turn ? cfg.turn.cloudflare !== false : true, cf_key_id: cfg.turn && cfg.turn.key_id || '', cf_api_token: '',
+  };
+  steps = STEPS[cfg.platform === 'worker' ? 'worker' : 'server'];
+  go(0);
+}
+start();
+})();
+</script>
+</body>
+</html>

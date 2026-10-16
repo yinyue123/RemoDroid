@@ -155,6 +155,7 @@ function onWs(m) {
   const d = m.d || {};
   switch (m.t) {
   case 'devices':
+    st.listed = true;
     st.devices = d.devices || [];
     st.device = pickDevice();
     deviceChanged();
@@ -168,6 +169,11 @@ function onWs(m) {
     maybeStart();
     break;
   }
+  case 'device.removed':
+    st.devices = st.devices.filter(x => x.id !== d.id);
+    if (st.device && st.device.id === d.id) { st.device = pickDevice(); deviceChanged(); }
+    maybeStart();
+    break;
   case 'device.event':
     if (st.device && d.id === st.device.id) {
       const msgs = { 'adb.unauthorized': 'Allow USB debugging on the phone', 'phone.detached': 'Phone unplugged',
@@ -199,6 +205,7 @@ function request(t, d) {
 /* ================= session / WebRTC ================= */
 let wantSession = true;
 function maybeStart() {
+  if (!DEMO && st.listed && !st.device && !st.devices.length) { setOverlay('No routers yet', 'Install the agent on the router the phone is plugged into, then enroll it with a code.'); return; }
   if (DEMO || !wantSession || st.sid || !st.device) return;
   const ph = st.device.phone || {};
   if (!st.device.online) { setOverlay('Router offline', `${st.device.name} isn't connected to the server.`); return; }
@@ -303,6 +310,7 @@ function setOverlay(title, text, showReconnect) {
   $('#discText').textContent = text;
   $('#discCount').textContent = '';
   $('#reconnect').hidden = !showReconnect;
+  $('#discLink').hidden = title !== 'No routers yet';
   ball.hidden = true;
 }
 $('#reconnect').addEventListener('click', () => {
@@ -600,6 +608,7 @@ menu.addEventListener('click', e => {
     sendCtrl('screen.power', { on }, true).then(() => { st.panel = on ? 'on' : 'off'; syncMenuStates();
       toast(on ? 'Phone screen turned on' : 'Phone screen turned off — stream continues'); }).catch(e => toast(e.message));
   } else if (a === 'stats') { S.stats = !S.stats; save(); tickStats(); syncMenuStates(); }
+  else if (a === 'routers') { location.href = '/agent.html'; }
 });
 
 /* ================= sheets ================= */

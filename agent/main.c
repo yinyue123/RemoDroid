@@ -76,89 +76,12 @@ int agent_reload(void)
     return 0;
 }
 
-static char *trim(char *s)
-{
-    while (*s == ' ' || *s == '\t')
-        s++;
-    char *e = s + strlen(s);
-    while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r' || e[-1] == '\n'))
-        *--e = 0;
-    return s;
-}
-
 /* Line-based edit that keeps comments, order and inline comments. */
 int agent_conf_set(const char *sec, const char *key, const char *val)
 {
-    FILE *f = fopen(A.conf_path, "r");
-    if (!f)
+    if (rd_conf_write(A.conf_path, sec, key, val) < 0)
         return -1;
-    rd_buf_t out;
-    rd_buf_init(&out);
-    char line[1024], cur[64] = "";
-    int done = 0, in_sec = 0, sec_seen = 0;
-    long insert_at = -1; /* offset in out after the last line of the section */
-    while (fgets(line, sizeof line, f)) {
-        char copy[1024];
-        snprintf(copy, sizeof copy, "%s", line);
-        char *t = trim(copy);
-        if (*t == '[') {
-            char *e = strchr(t, ']');
-            if (e) {
-                *e = 0;
-                snprintf(cur, sizeof cur, "%s", t + 1);
-                in_sec = !strcmp(cur, sec);
-                sec_seen |= in_sec;
-            }
-        } else if (in_sec && !done && *t && *t != ';' && *t != '#') {
-            char *eq = strchr(t, '=');
-            if (eq) {
-                *eq = 0;
-                if (!strcmp(trim(t), key)) {
-                    /* keep an inline comment (" ; ..."), if any */
-                    const char *cm = strstr(line, " ;");
-                    if (cm) {
-                        char c2[1024];
-                        snprintf(c2, sizeof c2, "%s", cm);
-                        rd_buf_printf(&out, "%s = %s   %s\n", key, val, trim(c2));
-                    } else {
-                        rd_buf_printf(&out, "%s = %s\n", key, val);
-                    }
-                    done = 1;
-                    continue;
-                }
-            }
-        }
-        rd_buf_printf(&out, "%s", line);
-        if (in_sec && *t)
-            insert_at = (long)out.len;
-    }
-    fclose(f);
-    if (!done) {
-        char add[512];
-        int n = snprintf(add, sizeof add, "%s = %s\n", key, val);
-        if (sec_seen && insert_at >= 0) {
-            rd_buf_reserve(&out, (size_t)n);
-            memmove(out.p + insert_at + n, out.p + insert_at, out.len - (size_t)insert_at);
-            memcpy(out.p + insert_at, add, (size_t)n);
-            out.len += (size_t)n;
-        } else {
-            if (out.len && out.p[out.len - 1] != '\n')
-                rd_buf_printf(&out, "\n");
-            rd_buf_printf(&out, "\n[%s]\n%s", sec, add);
-        }
-    }
-    char tmp[300];
-    snprintf(tmp, sizeof tmp, "%s.tmp", A.conf_path);
-    FILE *w = fopen(tmp, "w");
-    int ok = w && fwrite(out.p, 1, out.len, w) == out.len;
-    if (w && fclose(w) != 0)
-        ok = 0;
-    rd_buf_free(&out);
-    if (!ok || rename(tmp, A.conf_path) < 0) {
-        unlink(tmp);
-        return -1;
-    }
-    LOGI("agent.ini: [%s] %s = %s", sec, key, val);
+    LOGI("agent.ini: [%s] %s = %s", sec, key, !strcmp(key, "device_secret") ? "…" : val);
     return 0;
 }
 
@@ -231,19 +154,26 @@ void agent_status_changed(void)
 
 static void on_adb_state(adb_t *a, int state, void *ud) { phone_adb_state(state); }
 
-static void on_hup(struct ev_loop *loop, ev_signal *w, int revents)
+/* Re-reads agent.ini and applies it: a new server URL or device credentials (e.g.
+ * after `remodroid enroll`) reconnect, phone settings go to the phone. */
+int agent_reload_apply(void)
 {
-    char old_url[256], old_id[64], old_secret[128];
+    char old_url[256], old_id[64], old_secret[128], old_ca[256];
     snprintf(old_url, sizeof old_url, "%s", A.url);
     snprintf(old_id, sizeof old_id, "%s", A.device_id);
     snprintf(old_secret, sizeof old_secret, "%s", A.device_secret);
+    snprintf(old_ca, sizeof old_ca, "%s", A.ca_file);
     if (agent_reload() < 0)
-        return;
+        return -1;
     LOGI("reloaded %s", A.conf_path);
-    if (strcmp(old_url, A.url) || strcmp(old_id, A.device_id) || strcmp(old_secret, A.device_secret))
+    if (strcmp(old_url, A.url) || strcmp(old_id, A.device_id) || strcmp(old_secret, A.device_secret) ||
+        strcmp(old_ca, A.ca_file))
         wsc_restart();
     phone_config_changed();
+    return 0;
 }
+
+static void on_hup(struct ev_loop *loop, ev_signal *w, int revents) { agent_reload_apply(); }
 
 static void on_term(struct ev_loop *loop, ev_signal *w, int revents)
 {
@@ -258,7 +188,9 @@ static void usage(void)
             "usage: remodroid-agent [-c agent.ini] [-v]\n"
             "       remodroid-agent [-c agent.ini] devices | status | shell \"cmd\" | push LOCAL REMOTE |\n"
             "                       pull REMOTE LOCAL | logcat [args] | key CODE | restart-server |\n"
-            "                       reconnect | reload\n");
+            "                       reconnect | reload\n"
+            "       remodroid-agent [-c agent.ini] enroll --panel https://your.panel/ --code XXXX-XXXX\n"
+            "                       (the command shown on the panel's Routers page)\n");
 }
 
 int main(int argc, char **argv)
@@ -273,6 +205,8 @@ int main(int argc, char **argv)
         default: usage(); return opt == 'h' ? 0 : 2;
         }
     }
+    if (optind < argc && !strcmp(argv[optind], "enroll")) /* may run before agent.ini exists */
+        return enroll_main(argc - optind, argv + optind);
     if (agent_reload() < 0)
         return 1;
     if (optind < argc)

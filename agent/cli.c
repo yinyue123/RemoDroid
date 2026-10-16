@@ -388,6 +388,45 @@ done:
 usage:
     cJSON_Delete(m);
     fprintf(stderr, "usage: remodroid-agent devices | status | shell CMD... | push LOCAL REMOTE | pull REMOTE LOCAL |\n"
-                    "                       logcat [ARGS...] | key CODE | restart-server | reconnect | reload\n");
+                    "                       logcat [ARGS...] | key CODE | restart-server | reconnect | reload |\n"
+                    "                       enroll --panel URL --code CODE\n");
     return 2;
+}
+
+cJSON *cli_call(const char *type)
+{
+    struct sockaddr_un sa = { .sun_family = AF_UNIX };
+    snprintf(sa.sun_path, sizeof sa.sun_path, "%s", A.sock_path);
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0 || connect(fd, (struct sockaddr *)&sa, sizeof sa) < 0) {
+        if (fd >= 0)
+            close(fd);
+        return NULL;
+    }
+    cJSON *m = msg_new(type, 0, NULL);
+    char *s = msg_print(m);
+    cJSON_Delete(m);
+    dprintf(fd, "%s\n", s);
+    free(s);
+    rd_buf_t in;
+    rd_buf_init(&in);
+    cJSON *res = NULL;
+    for (;;) {
+        rd_buf_reserve(&in, 4096);
+        ssize_t n = read(fd, in.p + in.len, in.cap - in.len);
+        if (n <= 0)
+            break;
+        in.len += (size_t)n;
+        uint8_t *nl = memchr(in.p, '\n', in.len);
+        if (nl) {
+            cJSON *r = cJSON_ParseWithLength((const char *)in.p, (size_t)(nl - in.p));
+            if (!strcmp(msg_type(r), "ack"))
+                res = cJSON_Duplicate(msg_d(r), 1);
+            cJSON_Delete(r);
+            break;
+        }
+    }
+    rd_buf_free(&in);
+    close(fd);
+    return res;
 }

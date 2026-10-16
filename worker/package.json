@@ -1,0 +1,13 @@
+{
+  "name": "remodroid-worker",
+  "private": true,
+  "description": "RemoDroid panel on Cloudflare Workers + Durable Objects",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

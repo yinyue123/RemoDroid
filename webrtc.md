@@ -135,8 +135,15 @@ DTLS client (`a=setup:active`).
 
 ## 5. Reference Worker
 
-A compact implementation, for a single user and any number of devices. It's a sketch: test it
-before relying on it.
+> **The finished version is in [`worker/`](worker/)**, tested by `tests/worker.mjs`:
+> - one Durable Object holds every WebSocket, with its own SQLite storage;
+> - setup wizard, Basic login + cookies, router enrollment codes, rename/remove;
+> - command forwarding to agents;
+> - Cloudflare TURN (or other STUN/TURN servers) handed out per session;
+> - the same `web/` pages as `remodroid-server`.
+>
+> Deploy it with `cd worker && npm install && npx wrangler deploy`. The sketch below shows the shape
+> of the idea in fewer lines.
 
 ### 5.1 `wrangler.toml`
 
@@ -350,8 +357,8 @@ Open the `workers.dev` URL on the iPhone, log in, then Share → Add to Home Scr
 |---|---|---|
 | **TLS in the agent's WebSocket client** (`wss://` URLs in `agent.ini`) | Cloudflare terminates TLS; the agent must connect with `wss://` (TLS 1.2 via mbedTLS; CA bundle or `[server] ca_file`) | Done |
 | Web client: `wss://` on HTTPS pages | Already handled: `web/app.js` picks `wss://` when the page is HTTPS | Done |
-| Web client: `?device=` on `/ws/viewer` | Selects the Durable Object when you have several phones | Small change |
-| REST admin commands (`/api/v1/devices/{id}/cmd`) | The Worker sketch doesn't forward them. Add them in the hub by sending `cmd` to the agent and waiting for its `ack`, the same way `remodroid-server` does. | Not in the sketch |
+| Several phones | `worker/` keeps all routers in one Durable Object, so the web client needs no `?device=` | Done |
+| REST admin commands (`/api/v1/devices/{id}/cmd`) | `worker/` forwards them to the agent and waits for its `ack`, as `remodroid-server` does | Done |
 
 Nothing changes on the phone. The phone stack only sees `session.start`, `signal` and
 `session.end` arriving through the agent, whatever the agent is connected to.

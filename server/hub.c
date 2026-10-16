@@ -20,16 +20,21 @@ static long next_id = 1;
 
 /* ---------------- devices ---------------- */
 
+device_t *hub_add_device(const char *id, const char *name, const char *hash)
+{
+    device_t *d = calloc(1, sizeof *d);
+    d->id = rd_strdup(id);
+    d->hash = rd_strdup(hash);
+    d->name = rd_strdup(name && *name ? name : id);
+    S.devices = realloc(S.devices, sizeof *S.devices * (size_t)(S.ndevices + 1));
+    S.devices[S.ndevices++] = d;
+    return d;
+}
+
 static void add_device(const char *key, const char *val, void *ud)
 {
-    S.devices = realloc(S.devices, sizeof *S.devices * (size_t)(S.ndevices + 1));
-    device_t *d = &S.devices[S.ndevices++];
-    memset(d, 0, sizeof *d);
-    d->id = rd_strdup(key);
-    d->hash = rd_strdup(val);
-    char k[96];
-    snprintf(k, sizeof k, "%s", key);
-    d->name = rd_strdup(rd_conf_get(S.conf, "device_names", k, key));
+    if (!hub_device(key))
+        hub_add_device(key, rd_conf_get(S.conf, "device_names", key, key), val);
 }
 
 void hub_init_devices(void) { rd_conf_each(S.conf, "devices", add_device, NULL); }
@@ -37,8 +42,8 @@ void hub_init_devices(void) { rd_conf_each(S.conf, "devices", add_device, NULL);
 device_t *hub_device(const char *id)
 {
     for (int i = 0; i < S.ndevices; i++)
-        if (!strcmp(S.devices[i].id, id))
-            return &S.devices[i];
+        if (!strcmp(S.devices[i]->id, id))
+            return S.devices[i];
     return NULL;
 }
 
@@ -75,6 +80,47 @@ cJSON *hub_device_json(device_t *d)
     return j;
 }
 
+static void broadcast(cJSON *m);
+static void end_session(vsession_t *vs, const char *reason, int tell_agent, int tell_viewer);
+
+void hub_rename_device(device_t *d, const char *name)
+{
+    free(d->name);
+    d->name = rd_strdup(name);
+    cJSON *m = msg_new("device.update", 0, NULL);
+    cJSON_AddStringToObject(msg_d(m), "id", d->id);
+    cJSON_AddItemToObject(msg_d(m), "patch", hub_device_json(d));
+    broadcast(m);
+}
+
+/* Disconnects the agent, ends its session and forgets the device. */
+void hub_remove_device(device_t *d)
+{
+    if (d->vs)
+        end_session(d->vs, "device_removed", 0, 1);
+    conn_t *agent = d->agent;
+    if (agent) {
+        conn_close(agent); /* hub_conn_closed clears d->agent */
+        agent->dev = NULL;
+    }
+    for (int i = 0; i < S.ndevices; i++) {
+        if (S.devices[i] == d) {
+            memmove(&S.devices[i], &S.devices[i + 1], sizeof *S.devices * (size_t)(S.ndevices - i - 1));
+            S.ndevices--;
+            break;
+        }
+    }
+    cJSON *m = msg_new("device.removed", 0, NULL);
+    cJSON_AddStringToObject(msg_d(m), "id", d->id);
+    broadcast(m);
+    cJSON_Delete(d->hello);
+    cJSON_Delete(d->status);
+    free(d->id);
+    free(d->name);
+    free(d->hash);
+    free(d);
+}
+
 static void broadcast(cJSON *m)
 {
     for (conn_t *c = S.conns; c; c = c->next)
@@ -83,7 +129,7 @@ static void broadcast(cJSON *m)
     cJSON_Delete(m);
 }
 
-static void broadcast_device(device_t *d)
+void hub_device_changed(device_t *d)
 {
     cJSON *m = msg_new("device.update", 0, NULL);
     cJSON *dd = msg_d(m);
@@ -126,14 +172,36 @@ static void end_session(vsession_t *vs, const char *reason, int tell_agent, int 
         vs->viewer->vs = NULL;
     d->vs = NULL;
     free(vs);
-    broadcast_device(d);
+    hub_device_changed(d);
+}
+
+/* [ice] extra = stun:stun.example.com:3478, turn:turn.example.com:3478?transport=udp user secret
+ * (comma-separated; each entry is a URL, optionally followed by its username and credential) */
+static void extra_ice(cJSON *arr)
+{
+    char *list = rd_strdup(rd_conf_get(S.conf, "ice", "extra", "")), *save = NULL;
+    for (char *e = strtok_r(list, ",", &save); e; e = strtok_r(NULL, ",", &save)) {
+        char *s2 = NULL, *url = strtok_r(e, " \t", &s2), *u = strtok_r(NULL, " \t", &s2), *pw = strtok_r(NULL, " \t", &s2);
+        if (!url || (strncmp(url, "stun:", 5) && strncmp(url, "turn:", 5) && strncmp(url, "turns:", 6)))
+            continue;
+        cJSON *srv = cJSON_CreateObject();
+        cJSON_AddItemToObject(srv, "urls", cJSON_CreateStringArray((const char *[]){ url }, 1));
+        if (u && pw) {
+            cJSON_AddStringToObject(srv, "username", u);
+            cJSON_AddStringToObject(srv, "credential", pw);
+        }
+        cJSON_AddItemToArray(arr, srv);
+    }
+    free(list);
 }
 
 static cJSON *ice_servers(const char *user)
 {
     cJSON *arr = cJSON_CreateArray();
-    if (!S.turn_urls || !*S.turn_urls)
+    if (!S.turn_urls || !*S.turn_urls) {
+        extra_ice(arr);
         return arr;
+    }
     cJSON *srv = cJSON_CreateObject();
     cJSON *urls = cJSON_AddArrayToObject(srv, "urls");
     char *list = rd_strdup(S.turn_urls), *save = NULL;
@@ -152,6 +220,7 @@ static cJSON *ice_servers(const char *user)
         cJSON_AddStringToObject(srv, "credential", cred);
     }
     cJSON_AddItemToArray(arr, srv);
+    extra_ice(arr);
     return arr;
 }
 
@@ -195,7 +264,7 @@ static void viewer_session_request(conn_t *c, cJSON *m)
     cJSON_AddItemToObject(msg_d(im), "ice_servers", ice);
     ws_send_json(c, im);
     LOGI("session %s: %s -> %s", vs->sid, c->user, dev->id);
-    broadcast_device(dev);
+    hub_device_changed(dev);
 }
 
 /* ---------------- viewer messages ---------------- */
@@ -262,13 +331,13 @@ static void agent_message(conn_t *c, cJSON *m)
         }
         if (!was_online)
             broadcast_event(d, "agent.online", NULL);
-        broadcast_device(d);
+        hub_device_changed(d);
     } else if (!d->hello) {
         ws_send_json(c, msg_error(msg_id(m), "bad_request", "send hello first"));
     } else if (!strcmp(t, "status")) {
         cJSON_Delete(d->status);
         d->status = cJSON_Duplicate(msg_d(m), 1);
-        broadcast_device(d);
+        hub_device_changed(d);
     } else if (!strcmp(t, "event")) {
         cJSON *dd = msg_d(m);
         broadcast_event(d, msg_str(dd, "kind", "unknown"), cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(dd, "info"), 1));
@@ -306,7 +375,7 @@ void hub_viewer_open(conn_t *c)
     cJSON *m = msg_new("devices", 0, NULL);
     cJSON *arr = cJSON_AddArrayToObject(msg_d(m), "devices");
     for (int i = 0; i < S.ndevices; i++)
-        cJSON_AddItemToArray(arr, hub_device_json(&S.devices[i]));
+        cJSON_AddItemToArray(arr, hub_device_json(S.devices[i]));
     ws_send_json(c, m);
 }
 
@@ -343,7 +412,7 @@ void hub_conn_closed(conn_t *c)
         LOGI("agent %s offline", d->id);
         if (was) {
             broadcast_event(d, "agent.offline", NULL);
-            broadcast_device(d);
+            hub_device_changed(d);
         }
     }
 }

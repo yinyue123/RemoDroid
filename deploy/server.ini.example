@@ -1,8 +1,10 @@
-; /etc/remodroid/server.ini — control server on AWS (plan §4.7).
-; Reload after editing:  systemctl reload remodroid-server   (or kill -HUP)
+; /etc/remodroid/server.ini — the RemoDroid server (plan §4.7).
+; Easiest: start the server and open http://<this server>:5580/ — the setup wizard
+; (code in /var/lib/remodroid/setup-token) writes this file for you, and the Routers
+; page adds routers. Editing by hand works too; reload with: systemctl reload remodroid-server
 
 [http]
-listen = 0.0.0.0:80
+listen = 0.0.0.0:5580              ; the wizard moves this to the port you choose
 web_root = /usr/share/remodroid/web
 allowed_origins =                  ; extra allowed Origins for /ws/viewer, comma separated
 
@@ -34,27 +36,29 @@ max_failed_logins = 5              ; per IP, then a temporary lockout
 lockout_minutes = 15
 
 [users]
-; username = bcrypt hash          (remodroid-server hashpw)
-me = $2b$10$REPLACE-WITH-HASH
+; username = bcrypt hash   (made by the setup wizard, or: remodroid-server hashpw)
+; No users = setup mode: only the wizard is served, unlocked by the setup code.
 
 [devices]
-; device id = bcrypt hash of the device secret
-router1 = $2b$10$REPLACE-WITH-HASH
+; device id = bcrypt hash of its secret   (added by `remodroid enroll` from the Routers page)
 
 [device_names]
-router1 = Living room phone
 
 [turn]
-; Built-in relay (no coturn needed). Leave listen empty to use an external TURN server.
-listen = 0.0.0.0:3478
-public_ip = YOUR-AWS-PUBLIC-IP     ; the address phones and iPhones can reach (EC2 private IPs are NATed)
-relay_min_port = 49152             ; open this UDP range plus 3478 in the security group
+; Built-in STUN + TURN relay (no coturn needed); the setup wizard fills this in.
+listen =                           ; e.g. 0.0.0.0:3478 (UDP); empty = off
+public_ip =                        ; the address phones and iPhones can reach (EC2 private IPs are NATed)
+relay_min_port = 49152             ; open this UDP range plus the listen port in the firewall
 relay_max_port = 49252
 realm = remodroid
 max_allocations = 32
-urls = turn:YOUR-AWS-HOST:3478?transport=udp   ; TURN is plain UDP; its own credentials protect it
-shared_secret = CHANGE-ME          ; signs the short-lived TURN credentials
+urls =                             ; handed to both sides, e.g. stun:HOST:3478, turn:HOST:3478?transport=udp
+shared_secret =                    ; signs the short-lived TURN credentials (the wizard makes one)
 credential_ttl_minutes = 60
+
+[ice]
+; More STUN/TURN servers for both sides: "url [username credential]", comma-separated
+extra =
 
 [keepalive]
 ping_seconds = 20

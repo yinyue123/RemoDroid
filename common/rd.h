@@ -63,6 +63,8 @@ void     rd_put_be16(uint8_t *p, uint16_t v);
 void     rd_put_be32(uint8_t *p, uint32_t v);
 uint32_t rd_get_le32(const uint8_t *p);
 void     rd_put_le32(uint8_t *p, uint32_t v);
+/* mkdir -p; the last component gets mode. */
+int      rd_mkdirs(const char *path, unsigned mode);
 /* Parse "host:port" / "[v6]:port"; host/port are written NUL-terminated. */
 int      rd_split_hostport(const char *in, char *host, size_t hostcap, char *port, size_t portcap, const char *defport);
 

@@ -1,10 +1,12 @@
 ; /etc/remodroid/agent.ini — router agent (plan §4.7).
-; Reload after editing:  /etc/init.d/remodroid-agent reload   (or kill -HUP)
+; Connect it to your panel with the command from its Routers page:
+;   remodroid enroll --panel https://your.panel --code XXXX-XXXX
+; Most settings below can then be changed on the panel. Reload: /etc/init.d/remodroid-agent reload
 
 [server]
-url = wss://YOUR-AWS-HOST/ws/agent ; wss:// when the server has HTTPS, ws:// when it doesn't
-device_id = router1
-device_secret = CHANGE-ME          ; remodroid-server gensecret
+url =                              ; written by enroll: wss://your.panel/ws/agent (ws:// without HTTPS)
+device_id =                        ; written by enroll
+device_secret =                    ; written by enroll
 ca_file =                          ; CAs trusted for wss://; empty = the system bundle
                                    ; (OpenWrt: opkg install ca-bundle). The router's clock must be right.
 

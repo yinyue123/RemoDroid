@@ -3,6 +3,7 @@
  *   remodroid-server [-c /etc/remodroid/server.ini]
  *   remodroid-server hashpw [password]     print a bcrypt hash for server.ini
  *   remodroid-server gensecret             print a random device secret */
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,8 @@
 #include "server.h"
 
 server_t S;
+
+static void count_key(const char *k, const char *v, void *ud) { ++*(int *)ud; }
 
 static void set_str(char **dst, const char *v)
 {
@@ -34,6 +37,10 @@ static int load_config(void)
     rd_conf_free(S.conf);
     S.conf = c;
     rd_log_level = rd_log_parse_level(rd_conf_get(c, "log", "level", NULL), rd_log_level);
+    int users = 0;
+    rd_conf_each(c, "users", count_key, &users);
+    S.setup = users == 0; /* fresh install: only the setup wizard until an admin exists */
+    snprintf(S.state_dir, sizeof S.state_dir, "%s", rd_conf_get(c, "server", "state_dir", "/var/lib/remodroid"));
     S.session_days = (int)rd_conf_int(c, "auth", "session_days", 30);
     S.max_failed = (int)rd_conf_int(c, "auth", "max_failed_logins", 5);
     S.lockout_min = (int)rd_conf_int(c, "auth", "lockout_minutes", 15);
@@ -68,6 +75,34 @@ static int load_config(void)
     if (S.ping_s < 1)
         S.ping_s = 20;
     return 0;
+}
+
+int server_conf_set(const char *sec, const char *key, const char *val)
+{
+    if (rd_conf_write(S.conf_path, sec, key, val) < 0) {
+        LOGE("cannot write %s", S.conf_path);
+        return -1;
+    }
+    load_config(); /* S.conf follows the file; a half-written change may not validate yet */
+    return 0;
+}
+
+/* After the wizard: start over with the new listen addresses. All sockets are
+ * close-on-exec; the short delay lets the reply reach the browser. */
+static ev_timer restart_timer;
+
+static void on_restart(struct ev_loop *loop, ev_timer *w, int revents)
+{
+    LOGI("restarting with the new settings");
+    execv("/proc/self/exe", S.argv);
+    LOGE("re-exec failed (%s); exiting so the service manager restarts us", strerror(errno));
+    exit(0);
+}
+
+void server_restart_soon(void)
+{
+    ev_timer_init(&restart_timer, on_restart, 0.8, 0.);
+    ev_timer_start(S.loop, &restart_timer);
 }
 
 static void on_ping(struct ev_loop *loop, ev_timer *w, int revents) { server_tick_ping(); }
@@ -125,6 +160,7 @@ static void usage(void)
 int main(int argc, char **argv)
 {
     S.conf_path = "/etc/remodroid/server.ini";
+    S.argv = argv;
     rd_log_init("server", RD_LOG_INFO);
     if (argc > 1 && !strcmp(argv[1], "hashpw")) {
         char pw[256];
@@ -168,8 +204,8 @@ int main(int argc, char **argv)
         return 0;
     }
     hub_init_devices();
-    if (S.ndevices == 0)
-        LOGW("no [devices] configured; agents cannot log in");
+    if (S.ndevices == 0 && !S.setup)
+        LOGW("no routers yet: add one on the Routers page (/agent.html)");
     S.loop = EV_DEFAULT;
     if (server_listen(rd_conf_get(S.conf, "http", "listen", "0.0.0.0:80"), 0) < 0)
         return 1;
@@ -185,6 +221,8 @@ int main(int argc, char **argv)
     }
     if (turn_start() < 0)
         return 1;
+    if (S.setup)
+        setup_init();
     ev_timer_init(&S.ping_timer, on_ping, S.ping_s, S.ping_s);
     ev_timer_start(S.loop, &S.ping_timer);
     ev_timer_init(&S.sweep_timer, on_sweep, 600., 600.);

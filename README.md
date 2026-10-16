@@ -21,7 +21,9 @@ iPhone Safari ──WebRTC (UDP)──► AWS: remodroid-server (HTTP, WebSocket
 | `agent/` | Router agent: built-in ADB client (usbfs), phone supervisor, UDP relay, WebSocket client, CLI | C + libev |
 | `android/native/` | Phone WebRTC stack: ICE + TURN client, DTLS-SRTP, SCTP data channels, H.265/H.264 RTP, congestion control | C |
 | `android/java/` | Phone server: screen capture, MediaCodec, input injection, clipboard, screen power, files, logcat | Java (app_process) |
-| `web/` | iPhone client (PWA): video, multi-touch, floating-ball menu, photo upload, clipboard, all settings | HTML/CSS/JS |
+| `web/` | iPhone client (PWA): video, multi-touch, floating-ball menu, photo upload, clipboard, all settings; `wizard.html` (server setup) and `agent.html` (routers: enroll, settings) | HTML/CSS/JS |
+| `worker/` | The same panel on Cloudflare Workers + a Durable Object, with Cloudflare TURN, for people without a server | JS |
+| `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev) and `install_server.sh` / `install_agent.sh` | HTML, sh |
 | `common/` | Shared C: WebSocket framing, tunnel frames, STUN, JSON envelope, ini, utilities | C |
 | `third_party/` | Vendored libraries, compiled in statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp | C |
 | `deploy/` | Example `server.ini` / `agent.ini`, systemd units, OpenRC and procd scripts | |
@@ -64,9 +66,41 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | `python android/native/test/rtp_depack.py` | H.265 and H.264 packetizers: bit-exact round trip through an independent depacketizer + FFmpeg |
 | `python tests/e2e_webrtc.py [--relay]` | Full Path A: viewer → server → agent → tunnel → phone stack; `--relay` forces the built-in TURN |
 | `python tests/e2e_browser.py` | The real web client in headless Chrome against the full stack: video, touch, menu, protocol |
+| `node tests/setup.mjs build/host` | First-run wizard (setup token, saving, restart on the new port), login, enrollment codes with the real agent's `enroll`, router settings through the panel, rename, remove |
+| `node tests/worker.mjs build/host` | The Cloudflare Worker under `wrangler dev` (after `cd worker && npm install`) with the real agent: setup, login, enrollment, viewer WebSocket and signaling, commands, rename, remove |
 | `node tests/tls.mjs build/host` | HTTPS, redirect, `Secure` cookies, viewer and agent over `wss://` (trusted and untrusted CA), certificate reload on SIGHUP; with `PEBBLE_DIR` set, ACME issuance, reuse and automatic renewal against Pebble (Let's Encrypt's test CA) |
 
 The Python tests need `aiortc` (and `playwright` + Chromium for the browser test).
+
+## Install
+
+The install site, [remodroid.pages.dev](https://remodroid.pages.dev) (`wizard/` in this repository), walks
+through the same steps with copy buttons.
+
+1. **Server**, one of:
+   - **Your own Linux server:** `curl -fsSL https://remodroid.pages.dev/install_server.sh | sudo sh`. It
+     installs the package, starts the server and prints `http://<ip>:5580/wizard.html?token=…`. The setup
+     wizard (`web/wizard.html`) asks for the web port, a **domain** (automatic HTTPS from Let's Encrypt),
+     the admin login and the STUN/TURN port. It writes `/etc/remodroid/server.ini`, and the server restarts
+     on your ports. Afterwards the same page edits the settings behind the login. `remodroid-server -t` checks
+     the file without starting anything.
+   - **No server: Cloudflare.** Make a TURN key (dashboard → Realtime → TURN Server). Then deploy `worker/`
+     (`cd worker && npm install && npx wrangler deploy`, or import your fork with root directory `worker`).
+     Open `https://remodroid.<you>.workers.dev` and its wizard asks for the login and the TURN key. The
+     Worker is the same panel (login, routers, signaling) on a Durable Object with built-in storage.
+2. **Agent** on the router: `wget -qO- https://remodroid.pages.dev/install_agent.sh | sh` (OpenWrt),
+   or `curl … | sudo sh` (Debian, Ubuntu, CentOS).
+3. **Connect:** on the panel, open **Routers → Add a router** (`web/agent.html`). Paste the command it shows
+   on the router: `remodroid enroll --panel https://your.panel --code X5SX-K3M7`. The code is single-use and
+   valid for 10 minutes. The router then shows as online, and its settings are edited on that page.
+4. **Phone:** enable USB debugging, plug it into the router, and accept "Allow USB debugging" once.
+5. **iPhone:** open the panel in Safari, log in, then Share → Add to Home Screen.
+
+Firewall for a self-hosted server: TCP 5580 (setup), then your web port (80) and 443 with a domain,
+UDP 3478 and UDP 49152–49252 for TURN.
+
+On the router, `remodroid-agent devices | status | shell … | push | pull | logcat | key | restart-server`
+talk to the running agent (no adb needed).
 
 ## Install from packages
 
@@ -84,25 +118,6 @@ Packages install `/usr/bin/remodroid-*`, `/etc/remodroid/*.ini` (kept on upgrade
 and phone files under `/usr/share/remodroid/`, and a service for the distro's init system
 (systemd, OpenRC or procd). Edit the ini file, then enable the service. Pick the OpenWrt
 package whose arch matches `opkg print-architecture` on your router.
-
-## Deploy
-
-1. **AWS**: install the `remodroid-server` package (or copy the binary, `web/` and `deploy/server.ini.example` →
-   `/etc/remodroid/server.ini`); hash passwords with `remodroid-server hashpw`, make a device secret
-   with `remodroid-server gensecret`. Open TCP 80 and UDP 3478 + the relay port range. Install
-   `deploy/remodroid-server.service`. For HTTPS, point a domain at the server, set `[acme] domains =
-   your.domain` in `server.ini` and open TCP 443 too: the server gets and renews its certificate itself
-   (`remodroid-server -t` checks the file without starting anything).
-2. **Router**: copy `remodroid-agent` for the router's CPU to `/usr/bin/`, the phone files to
-   `/usr/share/remodroid/` (`remodroid-server.jar`, `<abi>/libremodroid.so`), `deploy/agent.ini.example`
-   → `/etc/remodroid/agent.ini`, and `deploy/remodroid-agent.init` → `/etc/init.d/remodroid-agent`;
-   `enable` + `start` (or just `opkg install` the remodroid-agent ipk). With HTTPS on the server, use
-   `url = wss://your.domain/ws/agent` (needs the CA bundle: `ca-bundle` on OpenWrt, and a correct clock).
-3. **Phone**: enable USB debugging, plug it into the router, accept "Allow USB debugging" once.
-4. **iPhone**: open `https://your.domain/` (or `http://<aws-host>/` without HTTPS), log in, then Share → Add to Home Screen.
-
-On the router, `remodroid-agent devices | status | shell … | push | pull | logcat | key | restart-server`
-talk to the running agent (no adb needed).
 
 ## Status
 

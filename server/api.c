@@ -1,4 +1,5 @@
 /* REST API (plan Appendix A.3). */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -7,7 +8,7 @@
 
 static const char *ADMIN_CMDS[] = {
     "server.restart", "phone.wake", "phone.sleep", "phone.reboot", "adb.reconnect", "agent.reload",
-    "quality.default", "agent.config",
+    "quality.default", "agent.config", "agent.config.get",
 };
 
 /* Matches "/api/v1/devices/{id}[/suffix]"; copies id; returns suffix ("" if none) or NULL. */
@@ -40,6 +41,12 @@ static int is_method(const http_req_t *r, const char *m)
 
 void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expires_ms, const char *sess_id)
 {
+    if (r->path_len == 13 && !memcmp(r->path, "/api/v1/setup", 13)) {
+        setup_api(c, r, user);
+        return;
+    }
+    if (enroll_api(c, r, user))
+        return;
     if (req_is(r, "GET", "/api/v1/me")) {
         cJSON *b = cJSON_CreateObject();
         cJSON_AddStringToObject(b, "user", user);
@@ -59,7 +66,7 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
         cJSON *b = cJSON_CreateObject();
         cJSON *arr = cJSON_AddArrayToObject(b, "devices");
         for (int i = 0; i < S.ndevices; i++)
-            cJSON_AddItemToArray(arr, hub_device_json(&S.devices[i]));
+            cJSON_AddItemToArray(arr, hub_device_json(S.devices[i]));
         http_json(c, 200, b, NULL);
         return;
     }
@@ -78,6 +85,27 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
 
     if (!*suffix && is_method(r, "GET")) {
         http_json(c, 200, hub_device_json(d), NULL);
+    } else if (!*suffix && is_method(r, "PATCH")) { /* rename */
+        cJSON *body = cJSON_ParseWithLength((const char *)r->body, r->body_len);
+        const char *name = msg_str(body, "name", "");
+        if (!*name || strlen(name) > 60 || strpbrk(name, "\r\n=;[]")) {
+            http_error(c, 400, "bad_request", "a name of 1-60 characters, without = ; [ ]");
+        } else if (server_conf_set("device_names", d->id, name) < 0) {
+            http_error(c, 500, "io_error", "could not write the configuration file");
+        } else {
+            hub_rename_device(d, name);
+            http_json(c, 200, hub_device_json(d), NULL);
+        }
+        cJSON_Delete(body);
+    } else if (!*suffix && is_method(r, "DELETE")) { /* forget the router; it must enroll again */
+        LOGI("%s: removed router %s", user, d->id);
+        if (server_conf_set("devices", d->id, NULL) < 0 || server_conf_set("device_names", d->id, NULL) < 0) {
+            http_error(c, 500, "io_error", "could not write the configuration file");
+            return;
+        }
+        auth_drop_sessions_for(d->id, 1);
+        hub_remove_device(d);
+        http_respond(c, 204, NULL, "", 0, NULL);
     } else if (!strcmp(suffix, "/adb") && is_method(r, "GET")) {
         cJSON *adb = d->status ? cJSON_GetObjectItemCaseSensitive(d->status, "adb") : NULL;
         if (!d->agent) {

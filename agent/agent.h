@@ -33,6 +33,7 @@ const char *agent_conf(const char *sec, const char *key, const char *def);
 long        agent_conf_int(const char *sec, const char *key, long def);
 int         agent_conf_bool(const char *sec, const char *key, int def);
 int         agent_reload(void);
+int         agent_reload_apply(void); /* agent_reload + reconnect if the server settings changed */
 /* Rewrites one key in agent.ini (keeping comments) and reloads. */
 int         agent_conf_set(const char *sec, const char *key, const char *val);
 void        agent_event(const char *kind, cJSON *info); /* takes ownership of info */
@@ -57,6 +58,7 @@ void   phone_init(void);
 void   phone_adb_state(int state);
 void   phone_on_server_msg(cJSON *m);  /* session.*, signal, cmd from the server */
 cJSON *phone_status_json(void);
+cJSON *phone_config_json(void);
 cJSON *phone_server_log_tail(int lines);
 int    phone_run_cmd(const char *cmd, cJSON *args, char *err, size_t errcap);
 void   phone_restart_server(void);
@@ -65,5 +67,10 @@ void   phone_config_changed(void);
 /* cli.c: local control socket and the client side of the CLI */
 int cli_server_start(void);
 int cli_client_main(int argc, char **argv);
+/* One request to the running agent; returns its ack payload (caller frees) or NULL. */
+cJSON *cli_call(const char *type);
+
+/* enroll.c: `remodroid-agent enroll --panel URL --code CODE` */
+int enroll_main(int argc, char **argv);
 
 #endif

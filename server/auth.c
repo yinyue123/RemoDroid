@@ -179,6 +179,39 @@ static fail_t *fail_entry(const char *ip, int create)
 
 const char *user_hash(const char *name) { return rd_conf_get(S.conf, "users", name, NULL); }
 
+void auth_drop_sessions_for(const char *name, int device)
+{
+    for (asess_t **pp = &sessions; *pp;) {
+        asess_t *s = *pp;
+        if (s->device == device && !strcmp(s->name, name)) {
+            *pp = s->next;
+            free(s);
+        } else {
+            pp = &s->next;
+        }
+    }
+}
+
+int auth_locked(conn_t *c)
+{
+    fail_t *f = fail_entry(c->ip, 0);
+    return f && f->until_ms > rd_now_ms();
+}
+
+int auth_fail(conn_t *c)
+{
+    uint64_t now = rd_now_ms();
+    fail_t *f = fail_entry(c->ip, 1);
+    f->last_ms = now;
+    if (++f->count >= S.max_failed) {
+        f->until_ms = now + (uint64_t)S.lockout_min * 60000;
+        f->count = 0;
+        LOGW("lockout for %s (%d minutes)", c->ip, S.lockout_min);
+        return 1;
+    }
+    return 0;
+}
+
 int auth_basic(const http_req_t *r, conn_t *c, int device, char *name_out, size_t name_cap)
 {
     size_t vl;
@@ -211,14 +244,7 @@ int auth_basic(const http_req_t *r, conn_t *c, int device, char *name_out, size_
     snprintf(name_out, name_cap, "%s", name);
     return 1;
 bad:
-    f = fail_entry(c->ip, 1);
-    f->last_ms = now;
-    if (++f->count >= S.max_failed) {
-        f->until_ms = now + (uint64_t)S.lockout_min * 60000;
-        f->count = 0;
-        LOGW("login lockout for %s (%d minutes)", c->ip, S.lockout_min);
-    } else {
+    if (!auth_fail(c))
         LOGW("failed %s login from %s", device ? "device" : "user", c->ip);
-    }
     return 0;
 }

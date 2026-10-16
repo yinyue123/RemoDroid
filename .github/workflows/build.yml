@@ -50,6 +50,14 @@ jobs:
           echo "PEBBLE_DIR=$RUNNER_TEMP/pebble" >> "$GITHUB_ENV"
       - name: HTTPS, wss and ACME tests
         run: node tests/tls.mjs build/host
+      - name: Setup wizard and router enrollment tests
+        run: node tests/setup.mjs build/host
+      - name: Cloudflare Worker tests (wrangler dev)
+        run: |
+          (cd worker && npm install --no-audit --no-fund)
+          node tests/worker.mjs build/host
+      - name: Install site uses the panel's stylesheet
+        run: cmp web/setup.css wizard/setup.css
 
   binaries:
     name: binaries (${{ matrix.arch }})

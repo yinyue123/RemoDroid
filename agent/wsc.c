@@ -430,6 +430,10 @@ static void handle_message(cJSON *m)
         const char *cmd = msg_str(d, "cmd", "");
         char err[200] = "";
         LOGI("server command: %s", cmd);
+        if (!strcmp(cmd, "agent.config.get")) {
+            wsc_send(msg_ack(id, phone_config_json()));
+            return;
+        }
         int r = phone_run_cmd(cmd, cJSON_GetObjectItemCaseSensitive(d, "args"), err, sizeof err);
         if (r == 0) {
             cJSON *res = cJSON_CreateObject();
@@ -648,8 +652,11 @@ static int parse_url(void)
     return rd_split_hostport(hp, W.host, sizeof W.host, W.port, sizeof W.port, W.tls ? "443" : "80");
 }
 
+static int started;
+
 void wsc_start(void)
 {
+    started = 1;
     W.fd = -1;
     ev_timer_init(&W.timer, on_timer, 0., 0.);
     ev_timer_init(&W.ping, on_ping, A.ping_s, A.ping_s);
@@ -662,6 +669,11 @@ void wsc_start(void)
 
 void wsc_restart(void)
 {
+    if (!started) { /* no URL at startup: the first one comes from enroll or a reload */
+        if (A.url[0])
+            wsc_start();
+        return;
+    }
     if (W.state != W_IDLE)
         ws_close_conn("restart");
     if (parse_url() == 0) {

@@ -873,6 +873,18 @@ static const cfgmap_t CFG[] = {
     { "preset", "video", "preset" },                   { "mode", "video", "mode" },
 };
 
+/* The settings the panel can change, under the names it uses (agent.config.get). */
+cJSON *phone_config_json(void)
+{
+    cJSON *j = cJSON_CreateObject();
+    for (size_t i = 0; i < RD_ARRAY_LEN(CFG); i++) {
+        const char *v = agent_conf(CFG[i].sec, CFG[i].key, NULL);
+        if (v)
+            cJSON_AddItemToObject(j, CFG[i].api, typed_value(v));
+    }
+    return j;
+}
+
 static int apply_config(cJSON *args, char *err, size_t errcap)
 {
     int changed = 0;
@@ -908,10 +920,8 @@ static int apply_config(cJSON *args, char *err, size_t errcap)
         }
         changed = 1;
     }
-    if (changed) {
-        agent_reload();
-        phone_config_changed();
-    }
+    if (changed)
+        agent_reload_apply();
     return 0;
 }
 
@@ -950,11 +960,10 @@ int phone_run_cmd(const char *cmd, cJSON *args, char *err, size_t errcap)
     } else if (!strcmp(cmd, "adb.reconnect")) {
         transport_reconnect(A.tm);
     } else if (!strcmp(cmd, "agent.reload")) {
-        if (agent_reload() < 0) {
+        if (agent_reload_apply() < 0) {
             snprintf(err, errcap, "agent.ini has an error; kept the old settings");
             return -1;
         }
-        phone_config_changed();
     } else if (!strcmp(cmd, "agent.config") || !strcmp(cmd, "quality.default")) {
         return apply_config(args, err, errcap);
     } else {

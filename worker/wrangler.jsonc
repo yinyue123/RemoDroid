@@ -1,0 +1,16 @@
+// RemoDroid on Cloudflare Workers: the same panel as remodroid-server, for people
+// without a server of their own. Deploy from this directory: npx wrangler deploy
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "remodroid",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  // the web client, wizard.html and agent.html, straight from the repository
+  // run_worker_first: "/" needs the login (and the setup redirect) before index.html
+  "assets": { "directory": "../web", "binding": "ASSETS", "run_worker_first": true },
+  // one Durable Object holds every WebSocket and the data (its built-in SQLite)
+  "durable_objects": { "bindings": [{ "name": "HUB", "class_name": "Hub" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
+  "observability": { "enabled": true }
+  // Optional: "vars": { "SETUP_TOKEN": "…" } makes the first-run wizard ask for this code.
+}

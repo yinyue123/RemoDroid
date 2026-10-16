@@ -12,5 +12,9 @@ int         rd_conf_bool(const rd_conf_t *c, const char *sec, const char *key, i
 /* Calls fn for every key in a section, in file order. */
 void        rd_conf_each(const rd_conf_t *c, const char *sec, void (*fn)(const char *key, const char *val, void *ud),
                          void *ud);
+/* Sets [sec] key = val in an ini file, keeping comments, order and inline
+ * comments; val NULL removes the key. Creates the file and section if needed and
+ * keeps the file's permissions. Written atomically (temp file + rename). */
+int         rd_conf_write(const char *path, const char *sec, const char *key, const char *val);
 
 #endif

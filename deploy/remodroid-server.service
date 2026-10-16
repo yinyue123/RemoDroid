@@ -1,5 +1,6 @@
 # systemd unit for the RemoDroid control server (installed by the deb/rpm packages).
-#   edit /etc/remodroid/server.ini, then: systemctl enable --now remodroid-server
+#   systemctl enable --now remodroid-server, then open http://<server>:5580/ (setup wizard;
+#   it writes /etc/remodroid/server.ini, hence ReadWritePaths)
 [Unit]
 Description=RemoDroid control server
 After=network-online.target
@@ -13,7 +14,8 @@ RestartSec=2
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadOnlyPaths=/etc/remodroid /usr/share/remodroid
+ReadWritePaths=/etc/remodroid
+ReadOnlyPaths=/usr/share/remodroid
 StateDirectory=remodroid
 StateDirectoryMode=0700
 

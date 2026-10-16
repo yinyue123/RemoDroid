@@ -70,8 +70,11 @@ typedef struct {
     ev_timer ping_timer, sweep_timer;
     ev_signal sig_hup, sig_term, sig_int;
     conn_t *conns;
-    device_t *devices;
+    device_t **devices;  /* allocated one by one: enrollment adds and removes them at runtime */
     int ndevices;
+    int setup;           /* no [users] yet: only the setup wizard is served */
+    char state_dir[256]; /* [server] state_dir: setup token, ACME files */
+    char **argv;         /* for the restart after the wizard */
     /* settings */
     int session_days, max_failed, lockout_min, ping_s, timeout_s, heartbeat_s;
     char cookie_name[64];
@@ -109,6 +112,7 @@ typedef struct {
 const char *req_header(const http_req_t *r, const char *name, size_t *len);
 int         req_is(const http_req_t *r, const char *method, const char *path);
 int         req_query_int(const http_req_t *r, const char *key, int def);
+void        http_serve_static(conn_t *c, const http_req_t *r, const char *extra);
 
 /* auth.c */
 typedef struct asess asess_t;
@@ -123,10 +127,18 @@ const char *auth_new_session(const char *name, int device); /* returns session i
 void        auth_drop_session(const char *id);
 void        auth_cookie_header(const char *id, int secure, char *out, size_t cap);
 void        auth_sweep(void);
+void        auth_drop_sessions_for(const char *name, int device);
+/* Counts a failed attempt from c's IP; 1 when the IP is locked out (shared with logins). */
+int         auth_fail(conn_t *c);
+int         auth_locked(conn_t *c);
 const char *user_hash(const char *name);
 
 /* hub.c */
 void      hub_init_devices(void);
+device_t *hub_add_device(const char *id, const char *name, const char *hash);
+void      hub_remove_device(device_t *d);
+void      hub_rename_device(device_t *d, const char *name);
+void      hub_device_changed(device_t *d); /* device.update to every viewer */
 device_t *hub_device(const char *id);
 cJSON    *hub_device_json(device_t *d);
 void      hub_viewer_open(conn_t *c);
@@ -151,6 +163,19 @@ int  acme_start(void);    /* loads an existing certificate and schedules issuanc
 void acme_reload(void);   /* after SIGHUP */
 /* http-01: copies the key authorization for token; returns 0 if the token is pending */
 int  acme_challenge(const char *token, size_t token_len, char *out, size_t cap);
+
+/* main.c */
+int  server_conf_set(const char *sec, const char *key, const char *val); /* writes server.ini, reloads */
+void server_restart_soon(void);                                          /* re-exec with the new settings */
+
+/* setup.c: first-run wizard (web/wizard.html) and its API */
+void setup_init(void);          /* setup mode: create the token and say where to go */
+void setup_request(conn_t *c, const http_req_t *r); /* every request while S.setup */
+void setup_api(conn_t *c, const http_req_t *r, const char *user); /* /api/v1/setup after setup */
+
+/* enroll.c: adding routers with one-time codes (web/agent.html, remodroid-agent enroll) */
+void enroll_public(conn_t *c, const http_req_t *r);               /* POST /api/v1/enroll (no login) */
+int  enroll_api(conn_t *c, const http_req_t *r, const char *user); /* 1 if handled */
 
 /* turn.c: built-in TURN relay ([turn] listen); 0 when disabled or started */
 int turn_start(void);

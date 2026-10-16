@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>RemoDroid Routers</title>
+<meta name="description" content="Add routers to RemoDroid with a one-line enroll command, and manage their settings.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="setup.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/"><i>RD</i>RemoDroid</a>
+  <span class="spacer"></span>
+  <a class="link" href="/wizard.html">Server ↗</a>
+  <a class="link" href="/">Panel ↗</a>
+</header>
+<nav class="steps" id="steps" aria-label="Add a router" hidden></nav>
+<main id="main" aria-live="polite"></main>
+<footer class="foot" id="foot" hidden>
+  <button class="back" id="back" type="button">← Back</button>
+  <span class="left" id="left"></span>
+  <button class="btn" id="next" type="button">Next →</button>
+</footer>
+<script>
+(() => {
+'use strict';
+/* Where install_agent.sh lives (the RemoDroid install site, wizard/ in the repository). */
+const INSTALL = 'https://remodroid.pages.dev';
+const RELEASES = 'https://github.com/yinyue123/RemoDroid/releases/latest';
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const main = $('#main');
+const panel = location.origin;
+const COPY = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+  if (r.status === 401) { location.href = '/login?next=/agent.html'; throw new Error('login required'); }
+  let j = {};
+  try { j = await r.json(); } catch (_) {}
+  if (!r.ok) throw Object.assign(new Error(j.msg || 'error ' + r.status), { status: r.status, j });
+  return j;
+}
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 3200);
+}
+/* A command box with a copy button; parts: [[text, cls], ...] */
+function cmdBox(text, html) {
+  return `<div class="cmd"><code>${html || esc(text)}</code><button type="button" aria-label="Copy" data-copy="${esc(text)}">${COPY}</button></div>`;
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); } catch (_) {
+    const ta = document.createElement('textarea'); ta.value = b.dataset.copy; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (__) {} ta.remove();
+  }
+  b.classList.add('ok'); b.innerHTML = '✓'; setTimeout(() => { b.classList.remove('ok'); b.innerHTML = COPY; }, 1400);
+});
+const hl = s => esc(s).replace(/(--[a-z-]+)/g, '<span class="f">$1</span>');
+
+let devices = [], view = 'list', step = 0, os = 'openwrt', code = null, codeTimer = null, pollTimer = null, newId = null;
+
+/* ---------- router list ---------- */
+const PHONE_STATE = d => {
+  const p = d.phone || {};
+  if (!d.online) return ['off', 'router offline'];
+  if (!p.attached) return ['wait', 'no phone on USB'];
+  if (p.adb_state === 'unauthorized') return ['wait', 'tap “Allow USB debugging” on the phone'];
+  if (p.server !== 'running') return ['wait', 'phone server ' + (p.server || 'starting')];
+  return ['on', `${p.model || 'phone'} · Android ${p.android || '?'}`];
+};
+
+async function loadDevices() {
+  try { devices = (await api('GET', '/api/v1/devices')).devices || []; } catch (e) { if (e.message !== 'login required') toast(e.message); }
+}
+
+function renderList() {
+  $('#steps').hidden = $('#foot').hidden = true;
+  main.innerHTML = `<p class="eyebrow">Routers</p><h1>Your <em>routers</em></h1>
+    <p class="lede">Each router runs the agent, holds a phone on USB and connects out to this panel. No open ports at home.</p>
+    <div class="routers" id="routers">${devices.length ? devices.map(card).join('') : '<div class="empty">No routers yet.</div>'}</div>
+    <p style="margin-top:22px"><button class="btn" id="add" type="button">+ Add a router</button></p>`;
+  $('#add').onclick = () => startAdd();
+  main.querySelectorAll('[data-act]').forEach(b => b.onclick = () => act(b.dataset.act, b.dataset.id, b));
+}
+function card(d) {
+  const [cls, phone] = PHONE_STATE(d);
+  const a = d.agent || {};
+  return `<article class="router" id="r-${esc(d.id)}">
+    <header><span class="dot ${d.online ? 'on' : 'off'}" title="${d.online ? 'online' : 'offline'}"></span><b>${esc(d.name)}</b><code>${esc(d.id)}</code><span class="spacer"></span>
+      ${d.session && d.session.active ? '<span class="chip">in use</span>' : ''}</header>
+    <div class="meta"><span><span class="dot ${cls}"></span>${esc(phone)}</span>
+      ${a.version ? `<span>agent ${esc(a.version)} · ${esc(a.arch)}</span>` : ''}${a.public_ip ? `<span>${esc(a.public_ip)}</span>` : ''}
+      ${!d.online && d.last_seen ? `<span>last seen ${esc(new Date(d.last_seen).toLocaleString())}</span>` : ''}</div>
+    <div class="actions">
+      <button class="btn small ghost" type="button" data-act="settings" data-id="${esc(d.id)}" ${d.online ? '' : 'disabled'}>Settings</button>
+      <button class="btn small ghost" type="button" data-act="rename" data-id="${esc(d.id)}">Rename</button>
+      <button class="btn small danger" type="button" data-act="remove" data-id="${esc(d.id)}">Remove</button>
+    </div>
+    <div class="settings" id="s-${esc(d.id)}" hidden></div>
+  </article>`;
+}
+
+/* Router settings: agent.ini through the panel (agent.config.get / agent.config). */
+const SETTINGS = [
+  ['Video', [
+    ['codec', 'Codec', 'select', ['auto', 'h265', 'h264']],
+    ['preset', 'Resolution', 'select', ['1080p', '720p', '540p', '360p']],
+    ['fps', 'Max frame rate', 'number'],
+    ['kbps', 'Max bitrate (kbit/s)', 'number'],
+    ['mode', 'Bitrate', 'select', ['auto', 'manual']],
+  ]],
+  ['Phone', [
+    ['screenOff', 'Turn the phone screen off while connected', 'bool'],
+    ['lockOnDisc', 'Lock the phone after disconnecting', 'bool'],
+    ['grace', 'Lock after (seconds)', 'number'],
+    ['rotation', 'Rotation', 'select', ['auto', 'portrait', 'landscape']],
+    ['overheat', 'Overheat warning (°C)', 'number'],
+  ]],
+  ['Clipboard & files', [
+    ['clipSync', 'Sync the clipboard', 'bool'],
+    ['autoPaste', 'Paste after sending text', 'bool'],
+    ['destDir', 'Upload folder', 'text'],
+    ['mediaScan', 'Add uploads to the Gallery', 'bool'],
+    ['maxMb', 'Largest file (MB)', 'number'],
+  ]],
+  ['Network', [
+    ['route', 'Media path', 'select', ['auto', 'tunnel', 'wifi']],
+    ['relay', 'Always relay through TURN', 'bool'],
+  ]],
+];
+
+async function openSettings(id) {
+  const box = document.getElementById('s-' + id);
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = '<p class="note">Reading the router\'s settings…</p>';
+  let cur = {};
+  try { cur = (await api('POST', `/api/v1/devices/${encodeURIComponent(id)}/cmd`, { cmd: 'agent.config.get' })).result || {}; }
+  catch (e) { box.innerHTML = `<div class="callout bad">${esc(e.message)}</div>`; return; }
+  box.innerHTML = `<div class="form">${SETTINGS.map(([g, items]) => `<h2 style="margin:6px 0 0">${g}</h2>${items.map(([k, label, type, opts]) => {
+    const v = cur[k], fid = `f-${id}-${k}`;
+    if (type === 'bool') return `<label class="check"><input type="checkbox" id="${fid}" data-k="${k}" data-t="bool" ${v === true ? 'checked' : ''}><span>${label}</span></label>`;
+    if (type === 'select') return `<div class="field"><label for="${fid}">${label}</label><select id="${fid}" data-k="${k}">${opts.map(o => `<option ${String(v) === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>`;
+    return `<div class="field"><label for="${fid}">${label}</label><input id="${fid}" data-k="${k}" data-t="${type}" type="${type === 'number' ? 'number' : 'text'}" value="${esc(v ?? '')}"></div>`;
+  }).join('')}`).join('')}
+    <div><button class="btn" type="button" id="save-${esc(id)}">Save to the router</button></div></div>`;
+  document.getElementById('save-' + id).onclick = async () => {
+    const args = {};
+    box.querySelectorAll('[data-k]').forEach(el => {
+      const k = el.dataset.k;
+      const v = el.dataset.t === 'bool' ? el.checked : el.dataset.t === 'number' ? Number(el.value) : el.value;
+      if (String(v) !== String(cur[k] ?? (el.dataset.t === 'bool' ? false : ''))) args[k] = v;
+    });
+    if (!Object.keys(args).length) { toast('Nothing changed'); return; }
+    try { await api('POST', `/api/v1/devices/${encodeURIComponent(id)}/cmd`, { cmd: 'agent.config', args }); toast('Saved; the phone uses it from now on'); Object.assign(cur, args); }
+    catch (e) { toast(e.message); }
+  };
+}
+
+async function act(what, id, btn) {
+  const d = devices.find(x => x.id === id);
+  if (what === 'settings') return openSettings(id);
+  if (what === 'rename') {
+    const name = prompt('Name for this router', d ? d.name : '');
+    if (!name || !name.trim()) return;
+    try { await api('PATCH', `/api/v1/devices/${encodeURIComponent(id)}`, { name: name.trim() }); await loadDevices(); renderList(); }
+    catch (e) { toast(e.message); }
+  } else if (what === 'remove') {
+    if (!confirm(`Remove “${d ? d.name : id}”? Its agent is disconnected and must enroll again to come back.`)) return;
+    try { await fetch(`/api/v1/devices/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' }); await loadDevices(); renderList(); }
+    catch (e) { toast(e.message); }
+  }
+}
+
+/* ---------- add a router: install → connect → phone ---------- */
+const ADD = [{ label: 'Agent', sub: 'Install' }, { label: 'Connect', sub: 'Enroll' }, { label: 'Phone', sub: 'USB' }];
+const OS = {
+  openwrt: { name: 'OpenWrt', cmd: `wget -qO- ${INSTALL}/install_agent.sh | sh`, pkg: 'ipk', install: 'opkg install ./remodroid-agent_*.ipk', note: 'Run it in an SSH session on the router. Pulls in ca-bundle for HTTPS.' },
+  debian: { name: 'Debian · Ubuntu', cmd: `curl -fsSL ${INSTALL}/install_agent.sh | sudo sh`, pkg: 'deb', install: 'sudo apt install ./remodroid-agent_*.deb', note: 'Raspberry Pi OS and Armbian too.' },
+  rhel: { name: 'CentOS · Fedora', cmd: `curl -fsSL ${INSTALL}/install_agent.sh | sudo sh`, pkg: 'rpm', install: 'sudo dnf install ./remodroid-agent-*.rpm', note: 'Also Rocky, Alma and Amazon Linux.' },
+  alpine: { name: 'Alpine', cmd: `wget -qO- ${INSTALL}/install_agent.sh | sh`, pkg: 'apk', install: 'apk add --allow-untrusted ./remodroid-agent_*.apk', note: 'Run as root.' },
+};
+
+function renderSteps() {
+  $('#steps').hidden = false;
+  $('#steps').innerHTML = `<button class="st" type="button" id="toList"><span class="n">←</span><span><b>Routers</b><small>List</small></span></button><span class="bar"></span>` +
+    ADD.map((s, i) => `${i ? `<span class="bar${i <= step ? ' done' : ''}"></span>` : ''}<button class="st${i === step ? ' on' : i < step ? ' done' : ''}" type="button" data-i="${i}"><span class="n">${i < step ? '✓' : i + 1}</span><span><b>${s.label}</b><small>${s.sub}</small></span></button>`).join('');
+  $('#toList').onclick = () => showList();
+  $('#steps').querySelectorAll('[data-i]').forEach(b => b.onclick = () => go(+b.dataset.i));
+  $('#foot').hidden = false;
+  $('#back').disabled = false;
+  $('#back').onclick = () => (step ? go(step - 1) : showList());
+  const left = ADD.length - 1 - step;
+  $('#left').textContent = left ? `${left} step${left > 1 ? 's' : ''} to go` : 'last step';
+  $('#next').textContent = step === ADD.length - 1 ? 'Done →' : 'Next →';
+  $('#next').onclick = () => (step === ADD.length - 1 ? (location.href = '/') : go(step + 1));
+}
+
+function go(i) {
+  step = i;
+  clearInterval(pollTimer); pollTimer = null;
+  renderSteps();
+  if (i === 0) renderInstall();
+  else if (i === 1) renderConnect();
+  else renderPhone();
+  window.scrollTo(0, 0);
+}
+
+function renderInstall() {
+  const o = OS[os];
+  main.innerHTML = `<p class="eyebrow">01 — agent</p><h1>Install the <em>agent</em></h1>
+    <p class="lede">It runs on the router the phone is plugged into and dials out to this panel. No open port, no public address.</p>
+    <div class="seg" role="tablist">${Object.entries(OS).map(([k, v]) => `<button type="button" role="tab" data-os="${k}" aria-selected="${k === os}">${v.name}</button>`).join('')}</div>
+    <div class="num"><i>1</i>One command</div>
+    ${cmdBox(o.cmd, hl(o.cmd))}
+    <div class="term"><div><span class="p">$</span> ${esc(o.cmd)}</div><div class="d">▸ fetching the build for this machine</div><div class="d">▸ installed /usr/bin/remodroid-agent, started the service</div></div>
+    <p class="note">${esc(o.note)}</p>
+    <div class="num"><i class="alt">2</i>Or download the package</div>
+    <p>From the <a href="${RELEASES}" target="_blank" rel="noopener">latest release</a>, take the <code>remodroid-agent</code> <b>.${esc(o.pkg)}</b> for your CPU${o.pkg === 'ipk' ? ' (the architecture <code>opkg print-architecture</code> lists)' : ''}, then install it with <code>${esc(o.install)}</code>.</p>
+    <div class="chips"><small>Needs</small><span class="chip">a USB port</span><span class="chip">Linux · OpenWrt</span><span class="chip">phone with USB debugging</span></div>
+    <button class="btn wide" type="button" id="done">I've installed it →</button>`;
+  main.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { os = b.dataset.os; renderInstall(); });
+  $('#done').onclick = () => go(1);
+}
+
+async function newCode() {
+  clearInterval(codeTimer);
+  try { code = await api('POST', '/api/v1/enroll/codes', {}); }
+  catch (e) { main.innerHTML = `<div class="callout bad">${esc(e.message)}</div>`; return false; }
+  code.until = Date.now() + code.expires_in * 1000;
+  code.state = 'pending';
+  codeTimer = setInterval(tick, 1000);
+  return true;
+}
+function tick() {
+  const el = $('#expires');
+  if (!code || !el) return;
+  const s = Math.max(0, Math.round((code.until - Date.now()) / 1000));
+  el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  if (!s && code.state === 'pending') { clearInterval(codeTimer); renderConnect(true); }
+}
+
+async function renderConnect(expired) {
+  if (!expired && (!code || code.state === 'expired' || Date.now() > code.until)) {
+    main.innerHTML = '<p class="note">Making a code…</p>';
+    if (!(await newCode())) return;
+  }
+  if (step !== 1) return;
+  const enroll = `remodroid enroll --panel ${panel} --code ${code.code}`;
+  const both = `${OS[os].cmd.replace(/\| (sudo )?sh$/, '| $1sh -s --')} --panel ${panel} --code ${code.code}`;
+  main.innerHTML = `<p class="eyebrow">02 — connect</p><h1>Paste this into <em>the router</em></h1>
+    ${expired ? `<div class="callout warn">That code expired. <button class="link-btn" type="button" id="again">Make a new one</button></div>` : ''}
+    ${cmdBox(enroll, hl(enroll))}
+    <div class="term" id="term"><div><span class="p">$</span> ${esc(enroll)}</div></div>
+    <div class="link-anim" id="anim"><div class="box" title="router"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div><div class="wire"></div><div class="box" title="this panel"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/></svg></div></div>
+    <p class="status" id="state">waiting for the agent</p>
+    <p class="small-print">code <b>${esc(code.code)}</b> · expires in <b id="expires">…</b> · single use</p>
+    <details style="margin-top:26px"><summary class="note">Agent not installed yet? Install and enroll in one go</summary>${cmdBox(both, hl(both))}</details>`;
+  tick();
+  if (expired) { $('#again').onclick = async () => { code = null; renderConnect(); }; return; }
+  pollTimer = setInterval(pollCode, 2000);
+  pollCode();
+}
+
+async function pollCode() {
+  if (!code || step !== 1) return;
+  let s;
+  try { s = await api('GET', `/api/v1/enroll/codes/${code.code}`); } catch (_) { return; }
+  const term = $('#term'), state = $('#state'), anim = $('#anim');
+  if (!term) return;
+  if (s.state === 'used' && code.state === 'pending') {
+    code.state = 'used';
+    newId = s.device;
+    term.innerHTML += `<div class="d">▸ contacting the panel…</div><div class="d">▸ enrolled as ${esc(s.device)}</div>`;
+    state.textContent = 'connecting…';
+  }
+  if (s.state === 'used' && s.online && code.state !== 'online') {
+    code.state = 'online';
+    clearInterval(codeTimer);
+    term.innerHTML += '<div class="k">✓ bound — this router is online</div>';
+    anim.classList.add('ok');
+    state.innerHTML = `<b>${esc(s.device)}</b> is online`;
+    clearInterval(pollTimer); pollTimer = null;
+    setTimeout(() => { if (step === 1) go(2); }, 1500);
+  }
+}
+
+async function renderPhone() {
+  const draw = () => {
+    const d = devices.find(x => x.id === newId) || devices.find(x => x.online) || null;
+    const [cls, txt] = d ? PHONE_STATE(d) : ['wait', 'waiting for a router'];
+    const ready = cls === 'on';
+    main.innerHTML = `<p class="eyebrow">03 — phone</p><h1>Plug in <em>the phone</em></h1>
+      <p class="lede">Once per phone: turn on USB debugging, connect it to the router and allow the router's key.</p>
+      <div class="num"><i>1</i>Turn on USB debugging</div>
+      <p class="note">Settings → About phone → tap <b>Build number</b> seven times. Then Settings → System → <b>Developer options</b> → <b>USB debugging</b>.</p>
+      <div class="num"><i>2</i>Connect it to the router's USB port</div>
+      <p class="note">Use a data cable. A powered hub helps if the router's port is weak.</p>
+      <div class="num"><i>3</i>Allow the router</div>
+      <p class="note">The phone asks <b>“Allow USB debugging?”</b>. Tick <b>Always allow from this computer</b>, then <b>Allow</b>.</p>
+      <div class="callout ${ready ? 'ok' : ''}" style="margin-top:22px"><span class="dot ${cls}"></span>${d ? `<b>${esc(d.name)}</b>: ` : ''}${esc(txt)}</div>
+      ${ready ? '<a class="btn wide" href="/">Open the panel →</a>' : ''}`;
+  };
+  await loadDevices();
+  draw();
+  pollTimer = setInterval(async () => { await loadDevices(); if (step === 2) draw(); }, 3000);
+}
+
+function startAdd() { view = 'add'; code = null; newId = null; go(0); }
+async function showList() {
+  view = 'list';
+  clearInterval(pollTimer); clearInterval(codeTimer);
+  await loadDevices();
+  renderList();
+  pollTimer = setInterval(async () => { if (view !== 'list') return; const open = [...document.querySelectorAll('.settings:not([hidden])')].length; await loadDevices(); if (!open) renderList(); }, 5000);
+}
+
+(async () => {
+  await loadDevices();
+  if (location.hash === '#add' || !devices.length) startAdd();
+  else showList();
+})();
+})();
+</script>
+</body>
+</html>

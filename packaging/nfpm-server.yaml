@@ -48,4 +48,4 @@ contents:
     file_info:
       mode: 0755
 scripts:
-  postinstall: ./packaging/postinstall.sh
+  postinstall: ./packaging/postinstall-server.sh

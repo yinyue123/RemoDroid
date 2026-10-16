@@ -69,7 +69,8 @@ These are the places where the obvious mental model differs from what the code d
 | Program | Runs on | Language | Source | Job |
 |---|---|---|---|---|
 | Web client | iPhone Safari | JS/HTML/CSS | `web/` | Login page, video, touch input, floating-ball menu; the WebRTC *answerer* |
-| `remodroid-server` | AWS | C + libev | `server/` | HTTP + Basic auth + cookies, static files, viewer/agent WebSockets, signaling relay, REST API, TURN relay |
+| `remodroid-server` | AWS (any Linux server) | C + libev | `server/` | HTTP(S) + Basic auth + cookies, static files, viewer/agent WebSockets, signaling relay, REST API, TURN relay, setup wizard and router enrollment API |
+| Worker (alternative to the server) | Cloudflare | JS | `worker/` | The same panel on a Durable Object, with Cloudflare TURN |
 | `remodroid-agent` | Router | C + libev | `agent/` | ADB client over USB, installs and supervises the phone server, UDP relay ("tunnel"), WebSocket to AWS, local CLI |
 | Phone server (Java) | Phone, as shell user | Java 8 bytecode (dex) | `android/java/` | Screen capture + hardware encoder, input injection, clipboard, screen power, files, shell, logcat |
 | Phone WebRTC stack | Phone, same process | C (JNI library) | `android/native/` | ICE/TURN client, DTLS, SRTP, RTP packetizing, RTCP feedback, congestion control, SCTP data channels, SDP |
@@ -919,6 +920,28 @@ Every POST is a JWS: `{"protected": b64url({"alg":"ES256","nonce","url","jwk"|"k
 "signature": b64url(r‖s)}`. A `badNonce` answer is retried with the fresh nonce. On start, a stored certificate
 that covers the domains is loaded straight away. A check runs every 6 hours, and renewal starts when a third of the
 lifetime is left. Failures retry after 10 minutes, doubling up to 12 hours.
+
+### 11.6 Setup wizard and enrollment (`setup.c`, `enroll.c`)
+
+**Setup.**
+- With no `[users]` the server is in setup mode: it serves only `wizard.html` and `/api/v1/setup`.
+- The setup API is unlocked by the token in `<state_dir>/setup-token`. The installer prints the link with it.
+- Saving rewrites `server.ini` line by line with `rd_conf_write` (comments kept), then re-execs
+  `/proc/self/exe` on the new ports. All sockets are close-on-exec.
+
+**Enrollment:**
+
+```
+web/agent.html   POST /api/v1/enroll/codes            → {code: "X5SX-K3M7", expires_in: 600}
+router           remodroid enroll --panel https://… --code X5SX-K3M7
+                 POST /api/v1/enroll {code, name, arch} (no login: the code is the proof)
+                 ← {device_id, device_secret, ws_path}  → agent.ini [server] url/device_id/device_secret
+                 the CLI asks the running agent to reload; it connects with wss:// (https panel) or ws://
+web/agent.html   GET /api/v1/enroll/codes/X5SX-K3M7     → {state: "used", device, online: true}
+```
+
+The router's settings are then read and written from the panel with the `agent.config.get` and
+`agent.config` commands. The Cloudflare Worker (`worker/src/hub.js`) implements the same endpoints.
 
 ---
 

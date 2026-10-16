@@ -16,33 +16,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <netdb.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <mbedtls/asn1.h>
 #include <mbedtls/bignum.h>
-#include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
-#include <mbedtls/entropy.h>
 #include <mbedtls/error.h>
-#include <mbedtls/net_sockets.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/sha256.h>
-#include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 #include <mbedtls/x509_csr.h>
 
+#include "httpc.h"
 #include "msg.h"
-#include "picohttpparser.h"
 #include "server.h"
 
 #define LETSENCRYPT "https://acme-v02.api.letsencrypt.org/directory"
 #define MAX_DOMAINS 16
-#define MAX_BODY (1024 * 1024)
 #define RETRY_MIN 600.          /* first retry after a failure: 10 min, doubling */
 #define RETRY_MAX (12 * 3600.)
 #define CHECK_EVERY (6 * 3600.) /* renewal check */
@@ -148,21 +141,6 @@ static char *b64url(const void *d, size_t n)
     return s;
 }
 
-static int mkdirs(const char *path, mode_t mode)
-{
-    char tmp[512];
-    snprintf(tmp, sizeof tmp, "%s", path);
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            if (mkdir(tmp, 0755) < 0 && errno != EEXIST)
-                return -1;
-            *p = '/';
-        }
-    }
-    return mkdir(tmp, mode) < 0 && errno != EEXIST ? -1 : 0;
-}
-
 /* Writes via a temporary file and rename(), so a reader never sees half a file. */
 static int write_file(const char *path, const void *d, size_t n, mode_t mode)
 {
@@ -181,29 +159,20 @@ static int write_file(const char *path, const void *d, size_t n, mode_t mode)
     return 0;
 }
 
-/* ---------------- blocking HTTPS client ---------------- */
+/* ---------------- HTTPS to the CA (common/httpc.c) ---------------- */
 
-typedef struct {
-    int status;
-    char *body;
-    size_t len;
-    char location[512], nonce[256];
-    int retry_after;
-} resp_t;
+typedef httpc_resp_t resp_t;
 
 typedef struct {
     job_t *j;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context drbg;
-    mbedtls_x509_crt ca;        /* trusted roots for the CA's HTTPS */
-    mbedtls_ssl_config conf;    /* TLS client */
+    httpc_t *http;              /* also the random generator */
     char nonce[256];
     mbedtls_pk_context key;     /* account key */
     char *jwk;                  /* {"crv":…,"kty":…,"x":…,"y":…} */
     char kid[512];              /* account URL */
 } acme_t;
 
-static int rng(void *a, unsigned char *out, size_t n) { return mbedtls_ctr_drbg_random(&((acme_t *)a)->drbg, out, n); }
+static int rng(void *a, unsigned char *out, size_t n) { return httpc_rng(((acme_t *)a)->http, out, n); }
 
 static int write_key(acme_t *a, const char *path, mbedtls_pk_context *k)
 {
@@ -221,227 +190,18 @@ static int new_key(acme_t *a, mbedtls_pk_context *k)
                : 0;
 }
 
-static void resp_free(resp_t *r)
-{
-    free(r->body);
-    memset(r, 0, sizeof *r);
-}
-
-static void hdr_copy(const struct phr_header *h, char *out, size_t cap)
-{
-    size_t n = RD_MIN(h->value_len, cap - 1);
-    memcpy(out, h->value, n);
-    out[n] = 0;
-}
-
-static int bsend(void *ctx, const unsigned char *b, size_t n)
-{
-    ssize_t r = send(*(int *)ctx, b, n, MSG_NOSIGNAL);
-    return r < 0 ? MBEDTLS_ERR_NET_SEND_FAILED : (int)r;
-}
-
-static int brecv(void *ctx, unsigned char *b, size_t n)
-{
-    ssize_t r = recv(*(int *)ctx, b, n, 0);
-    return r < 0 ? MBEDTLS_ERR_NET_RECV_FAILED : (int)r; /* blocking, with SO_RCVTIMEO */
-}
+static void resp_free(resp_t *r) { httpc_resp_free(r); }
 
 static int https(acme_t *a, const char *method, const char *url, const char *body, resp_t *r)
 {
-    job_t *j = a->j;
-    memset(r, 0, sizeof *r);
+    char err[300];
     if (strncmp(url, "https://", 8))
-        return fail(j, "not an https URL: %.200s", url);
-    const char *hs = url + 8, *slash = strchr(hs, '/');
-    const char *path = slash ? slash : "/";
-    char hp[300], host[256], port[16];
-    size_t hl = slash ? (size_t)(slash - hs) : strlen(hs);
-    if (hl >= sizeof hp)
-        return fail(j, "URL too long");
-    memcpy(hp, hs, hl);
-    hp[hl] = 0;
-    if (rd_split_hostport(hp, host, sizeof host, port, sizeof port, "443") < 0)
-        return fail(j, "bad URL %.200s", url);
-
-    struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM }, *ai, *p;
-    int e = getaddrinfo(host, port, &hints, &ai);
-    if (e)
-        return fail(j, "%s: %s", host, gai_strerror(e));
-    int fd = -1;
-    for (p = ai; p; p = p->ai_next) { /* every address, e.g. IPv4 after a failed IPv6 */
-        fd = socket(p->ai_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        if (fd < 0)
-            continue;
-        struct timeval tv = { 20, 0 };
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        if (connect(fd, p->ai_addr, p->ai_addrlen) == 0)
-            break;
-        close(fd);
-        fd = -1;
-    }
-    freeaddrinfo(ai);
-    if (fd < 0)
-        return fail(j, "cannot connect to %s:%s: %s", host, port, strerror(errno));
-
-    int ret = -1, k;
-    rd_buf_t in;
-    rd_buf_init(&in);
-    mbedtls_ssl_context ssl;
-    mbedtls_ssl_init(&ssl);
-    if ((k = mbedtls_ssl_setup(&ssl, &a->conf)) || (k = mbedtls_ssl_set_hostname(&ssl, host))) {
-        fail(j, "TLS setup: %s", mbed_err(k));
-        goto out;
-    }
-    mbedtls_ssl_set_bio(&ssl, &fd, bsend, brecv, NULL);
-    if ((k = mbedtls_ssl_handshake(&ssl))) {
-        uint32_t flags = mbedtls_ssl_get_verify_result(&ssl);
-        if (flags && flags != (uint32_t)-1) {
-            char info[200];
-            mbedtls_x509_crt_verify_info(info, sizeof info, "", flags);
-            info[strcspn(info, "\n")] = 0;
-            fail(j, "%s: certificate not trusted: %s (set [acme] ca_file?)", host, info);
-        } else {
-            fail(j, "%s: TLS handshake failed: %s", host, mbed_err(k));
-        }
-        goto out;
-    }
-    char req[2048];
-    size_t blen = body ? strlen(body) : 0;
-    int n = snprintf(req, sizeof req,
-                     "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: remodroid-server/%s\r\nAccept: */*\r\n"
-                     "Connection: close\r\n%sContent-Length: %zu\r\n\r\n",
-                     method, path, hp, RD_VERSION, body ? "Content-Type: application/jose+json\r\n" : "", blen);
-    if ((size_t)n >= sizeof req) {
-        fail(j, "request too long");
-        goto out;
-    }
-    const char *parts[2] = { req, body };
-    size_t lens[2] = { (size_t)n, blen };
-    for (int i = 0; i < 2; i++) {
-        for (size_t off = 0; off < lens[i];) {
-            k = mbedtls_ssl_write(&ssl, (const unsigned char *)parts[i] + off, lens[i] - off);
-            if (k <= 0) {
-                fail(j, "%s: write failed: %s", host, mbed_err(k));
-                goto out;
-            }
-            off += (size_t)k;
-        }
-    }
-    for (;;) { /* Connection: close, so read to the end */
-        rd_buf_reserve(&in, 16384);
-        k = mbedtls_ssl_read(&ssl, in.p + in.len, in.cap - in.len);
-        if (k <= 0)
-            break; /* close_notify, EOF, or a reset after the body (checked below) */
-        in.len += (size_t)k;
-        if (in.len > MAX_BODY) {
-            fail(j, "%s: response too large", host);
-            goto out;
-        }
-    }
-    int minor;
-    const char *msg;
-    size_t msg_len, nh = 40;
-    struct phr_header h[40];
-    int hlen = phr_parse_response((const char *)in.p, in.len, &minor, &r->status, &msg, &msg_len, h, &nh, 0);
-    if (hlen < 0) {
-        fail(j, "%s: no complete HTTP response", host);
-        goto out;
-    }
-    int chunked = 0;
-    long clen = -1;
-    for (size_t i = 0; i < nh; i++) {
-        if (h[i].name_len == 8 && !strncasecmp(h[i].name, "Location", 8))
-            hdr_copy(&h[i], r->location, sizeof r->location);
-        else if (h[i].name_len == 12 && !strncasecmp(h[i].name, "Replay-Nonce", 12))
-            hdr_copy(&h[i], r->nonce, sizeof r->nonce);
-        else if (h[i].name_len == 11 && !strncasecmp(h[i].name, "Retry-After", 11))
-            r->retry_after = atoi(h[i].value);
-        else if (h[i].name_len == 14 && !strncasecmp(h[i].name, "Content-Length", 14))
-            clen = atol(h[i].value);
-        else if (h[i].name_len == 17 && !strncasecmp(h[i].name, "Transfer-Encoding", 17) &&
-                 h[i].value_len >= 7 && !strncasecmp(h[i].value, "chunked", 7))
-            chunked = 1;
-    }
-    size_t blen2 = in.len - (size_t)hlen;
-    if (!chunked && clen >= 0 && strcmp(method, "HEAD")) {
-        if (blen2 < (size_t)clen) {
-            fail(j, "%s: response cut short", host);
-            goto out;
-        }
-        blen2 = (size_t)clen;
-    }
-    r->body = malloc(blen2 + 1);
-    memcpy(r->body, in.p + hlen, blen2);
-    if (chunked) {
-        struct phr_chunked_decoder dec = { 0 };
-        if (phr_decode_chunked(&dec, r->body, &blen2) == -1) {
-            fail(j, "%s: bad chunked body", host);
-            goto out;
-        }
-    }
-    r->body[blen2] = 0;
-    r->len = blen2;
+        return fail(a->j, "not an https URL: %.200s", url);
+    if (httpc_request(a->http, method, url, body ? "application/jose+json" : NULL, body, r, err, sizeof err) < 0)
+        return fail(a->j, "%s%s", err, strstr(err, "not trusted") || strstr(err, "CA") ? " (set [acme] ca_file?)" : "");
     if (r->nonce[0])
         snprintf(a->nonce, sizeof a->nonce, "%s", r->nonce);
-    ret = 0;
-out:
-    mbedtls_ssl_close_notify(&ssl);
-    mbedtls_ssl_free(&ssl);
-    close(fd);
-    rd_buf_free(&in);
-    if (ret < 0)
-        resp_free(r);
-    return ret;
-}
-
-/* RNG, trusted roots and the TLS client config for this run. */
-static int client_init(acme_t *a)
-{
-    job_t *j = a->j;
-    mbedtls_entropy_init(&a->entropy);
-    mbedtls_ctr_drbg_init(&a->drbg);
-    mbedtls_x509_crt_init(&a->ca);
-    mbedtls_ssl_config_init(&a->conf);
-    mbedtls_pk_init(&a->key);
-    if (mbedtls_ctr_drbg_seed(&a->drbg, mbedtls_entropy_func, &a->entropy, (const unsigned char *)"rd-acme", 7))
-        return fail(j, "cannot seed the random generator");
-    if (j->ca_file[0]) {
-        int r = mbedtls_x509_crt_parse_file(&a->ca, j->ca_file);
-        if (r < 0)
-            return fail(j, "cannot read [acme] ca_file %s: %s", j->ca_file, mbed_err(r));
-    } else {
-        /* the binary is static: look where distributions keep the CA bundle */
-        static const char *bundles[] = {
-            "/etc/ssl/certs/ca-certificates.crt", /* Debian, Ubuntu, Alpine, OpenWrt (ca-bundle) */
-            "/etc/pki/tls/certs/ca-bundle.crt",   /* RHEL, CentOS, Fedora, Amazon Linux */
-            "/etc/ssl/cert.pem",                  /* Alpine, BSD-style */
-            "/etc/ssl/ca-bundle.pem",             /* openSUSE */
-        };
-        int found = 0;
-        for (size_t i = 0; i < RD_ARRAY_LEN(bundles) && !found; i++)
-            found = access(bundles[i], R_OK) == 0 && mbedtls_x509_crt_parse_file(&a->ca, bundles[i]) >= 0;
-        if (!found)
-            return fail(j, "no CA bundle found (install ca-certificates, or set [acme] ca_file)");
-    }
-    int r = mbedtls_ssl_config_defaults(&a->conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
-                                        MBEDTLS_SSL_PRESET_DEFAULT);
-    if (r)
-        return fail(j, "TLS config: %s", mbed_err(r));
-    mbedtls_ssl_conf_authmode(&a->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-    mbedtls_ssl_conf_ca_chain(&a->conf, &a->ca, NULL);
-    mbedtls_ssl_conf_rng(&a->conf, rng, a);
     return 0;
-}
-
-static void client_free(acme_t *a)
-{
-    mbedtls_pk_free(&a->key);
-    mbedtls_ssl_config_free(&a->conf);
-    mbedtls_x509_crt_free(&a->ca);
-    mbedtls_ctr_drbg_free(&a->drbg);
-    mbedtls_entropy_free(&a->entropy);
-    free(a->jwk);
 }
 
 /* ---------------- JWS (RFC 7515) with ES256 ---------------- */
@@ -832,9 +592,15 @@ static void *worker(void *arg)
     job_t *j = arg;
     acme_t *a = calloc(1, sizeof *a);
     a->j = j;
-    if (client_init(a) == 0)
+    mbedtls_pk_init(&a->key);
+    a->http = httpc_new(j->ca_file, "remodroid-server/" RD_VERSION);
+    if (a->http)
         j->ok = issue(a) == 0;
-    client_free(a);
+    else
+        fail(j, "cannot seed the random generator");
+    mbedtls_pk_free(&a->key);
+    httpc_free(a->http);
+    free(a->jwk);
     free(a);
     chal_clear();
     ev_async_send(S.loop, &A.done); /* the loop reads j after this */
@@ -970,7 +736,7 @@ static int read_config(void)
     snprintf(c->ca_file, sizeof c->ca_file, "%s", rd_conf_get(S.conf, "acme", "ca_file", ""));
     snprintf(c->profile, sizeof c->profile, "%s", rd_conf_get(S.conf, "acme", "profile", ""));
     A.enabled = c->ndomains > 0;
-    if (A.enabled && mkdirs(c->dir, 0700) < 0) {
+    if (A.enabled && rd_mkdirs(c->dir, 0700) < 0) {
         LOGE("[acme] dir %s: %s", c->dir, strerror(errno));
         return -1;
     }
