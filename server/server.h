@@ -128,6 +128,8 @@ void        auth_drop_session(const char *id);
 void        auth_cookie_header(const char *id, int secure, char *out, size_t cap);
 void        auth_sweep(void);
 void        auth_drop_sessions_for(const char *name, int device);
+void        auth_save_sessions(const char *path); /* before our own re-exec */
+void        auth_load_sessions(const char *path); /* at startup; removes the file */
 /* Counts a failed attempt from c's IP; 1 when the IP is locked out (shared with logins). */
 int         auth_fail(conn_t *c);
 int         auth_locked(conn_t *c);
@@ -172,6 +174,7 @@ void server_restart_soon(void);                                          /* re-e
 void setup_init(void);          /* setup mode: create the token and say where to go */
 void setup_request(conn_t *c, const http_req_t *r); /* every request while S.setup */
 void setup_api(conn_t *c, const http_req_t *r, const char *user); /* /api/v1/setup after setup */
+void settings_api(conn_t *c, const http_req_t *r, const char *user); /* /api/v1/settings: the panel's Server tab */
 
 /* enroll.c: adding routers with one-time codes (web/agent.html, remodroid-agent enroll) */
 void enroll_public(conn_t *c, const http_req_t *r);               /* POST /api/v1/enroll (no login) */

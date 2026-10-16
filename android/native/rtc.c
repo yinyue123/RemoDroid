@@ -34,6 +34,11 @@ typedef struct session {
     uint32_t ts_base;
     int have_pts;
     int last_kbps;
+    uint32_t audio_ssrc, audio_ts_base;
+    uint16_t audio_seq;
+    int64_t audio_first_pts;
+    int audio_have_pts;
+    uint64_t audio_packets;
     double last_kf_req;
     ev_tstamp started;
     struct session *next_dead;
@@ -207,10 +212,11 @@ static void dtls_up(void *ud, const uint8_t keys[60], int is_client)
     }
     s->connected = 1;
     const char *profile = s->ans.codec == CODEC_H265 ? "main" : s->ans.codec == CODEC_H264_HIGH ? "high" : "baseline";
-    LOGI("session %s connected: %s (%s), data channels %s", s->sid, codec_name(s->ans.codec), profile,
-         s->sctp ? "on" : "off");
+    LOGI("session %s connected: %s (%s), data channels %s, audio %s", s->sid, codec_name(s->ans.codec), profile,
+         s->sctp ? "on" : "off", s->ans.audio_ok ? "on" : "off");
     if (r->cb.on_session)
-        r->cb.on_session(r->ud, s->sid, RTC_SESSION_CONNECTED, codec_name(s->ans.codec), profile, s->quality, NULL);
+        r->cb.on_session(r->ud, s->sid, RTC_SESSION_CONNECTED, codec_name(s->ans.codec), profile, s->quality, NULL,
+                         s->ans.audio_ok);
     if (r->cb.on_bitrate)
         r->cb.on_bitrate(r->ud, r->o.start_kbps);
 }
@@ -304,7 +310,7 @@ static void end_session(rtc_t *r, const char *reason, int notify)
         send_msg(r, m);
     }
     if (r->cb.on_session)
-        r->cb.on_session(r->ud, s->sid, RTC_SESSION_ENDED, NULL, NULL, NULL, reason);
+        r->cb.on_session(r->ud, s->sid, RTC_SESSION_ENDED, NULL, NULL, NULL, reason, 0);
     /* freed from the loop, never from inside ICE/DTLS/SCTP callbacks */
     s->next_dead = r->dead;
     r->dead = s;
@@ -327,6 +333,7 @@ static void start_session(rtc_t *r, const char *sid, cJSON *d)
     s->started = ev_now(r->loop);
     rd_random(&s->ssrc, 4);
     rd_random(&s->rtx_ssrc, 4);
+    rd_random(&s->audio_ssrc, 4);
     r->s = s;
     s->ice = ice_new(r->loop, r->net, (ice_cb_t){ ice_candidate, ice_state_cb, ice_data }, s);
     int relay = r->force_relay || msg_bool(d, "force_relay", 0);
@@ -335,6 +342,7 @@ static void start_session(rtc_t *r, const char *sid, cJSON *d)
     rd_random(&sess_id, sizeof sess_id);
     sdp_offer_t o = { .ufrag = ice_ufrag(s->ice), .pwd = ice_pwd(s->ice), .fingerprint = dtls_fingerprint(),
                       .ssrc = s->ssrc, .rtx_ssrc = s->rtx_ssrc, .offer_h265 = r->o.offer_h265,
+                      .offer_audio = r->o.offer_audio, .audio_ssrc = s->audio_ssrc,
                       .session_id = sess_id >> 2 };
     char *sdp = sdp_build_offer(&o);
     cJSON *sd = cJSON_CreateObject();
@@ -345,7 +353,7 @@ static void start_session(rtc_t *r, const char *sid, cJSON *d)
     ice_gather(s->ice);
     LOGI("session %s: offer sent (%s)", sid, r->o.offer_h265 ? "H.265 + H.264" : "H.264");
     if (r->cb.on_session)
-        r->cb.on_session(r->ud, s->sid, RTC_SESSION_CONNECTING, NULL, NULL, s->quality, NULL);
+        r->cb.on_session(r->ud, s->sid, RTC_SESSION_CONNECTING, NULL, NULL, s->quality, NULL, 0);
 }
 
 static void on_signal(rtc_t *r, const char *sid, cJSON *d)
@@ -523,6 +531,33 @@ int rtc_video(rtc_t *r, const uint8_t *d, size_t n, int64_t pts_us, int keyframe
     return rtp_send_frame(s->rtp, d, n, ts, keyframe, ev_now(r->loop));
 }
 
+/* Opus needs no packetizer: one encoder packet is one RTP payload (RFC 7587). No RTCP SR for it,
+ * so the browser plays it as it arrives instead of holding it back for lip sync. */
+int rtc_audio(rtc_t *r, const uint8_t *d, size_t n, int64_t pts_us)
+{
+    session_t *s = r->s;
+    if (!s || s->dying || !s->srtp_ready || !s->ans.audio_ok || !n || n > 1200)
+        return -1;
+    int first = !s->audio_have_pts;
+    if (first) {
+        s->audio_have_pts = 1;
+        s->audio_first_pts = pts_us;
+        rd_random(&s->audio_ts_base, 4);
+        rd_random(&s->audio_seq, 2);
+    }
+    uint32_t ts = s->audio_ts_base + (uint32_t)((pts_us - s->audio_first_pts) * 48 / 1000);
+    uint8_t pkt[1212];
+    pkt[0] = 0x80;
+    pkt[1] = (uint8_t)((first ? 0x80 : 0) | (s->ans.audio_pt & 0x7f));
+    rd_put_be16(pkt + 2, s->audio_seq++);
+    rd_put_be32(pkt + 4, ts);
+    rd_put_be32(pkt + 8, s->audio_ssrc);
+    memcpy(pkt + 12, d, n);
+    rtp_out(s, pkt, n + 12, 0);
+    s->audio_packets++;
+    return 0;
+}
+
 void rtc_get_stats(rtc_t *r, rtc_stats_t *st)
 {
     memset(st, 0, sizeof *st);
@@ -532,6 +567,7 @@ void rtc_get_stats(rtc_t *r, rtc_stats_t *st)
     if (!s || s->dying)
         return;
     st->connected = s->connected;
+    st->audio_packets = s->audio_packets;
     int rtt = 0;
     ice_selected(s->ice, &st->local_type, &st->remote_type, &rtt);
     st->rtt_ms = rtt;

@@ -190,7 +190,7 @@ static void usage(void)
             "                       pull REMOTE LOCAL | logcat [args] | key CODE | restart-server |\n"
             "                       reconnect | reload\n"
             "       remodroid-agent [-c agent.ini] enroll --panel https://your.panel/ --code XXXX-XXXX\n"
-            "                       (the command shown on the panel's Routers page)\n");
+            "                       (the command shown on the panel: Agents → Add)\n");
 }
 
 int main(int argc, char **argv)

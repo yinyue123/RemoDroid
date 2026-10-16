@@ -1,6 +1,6 @@
 // RemoDroid panel on Cloudflare Workers.
 //
-// Static files (web/: the client, wizard.html, agent.html) are served as assets.
+// Static files (web/: the client, panel.html, wizard.html) are served as assets.
 // Everything with state (login, setup, routers, WebSockets, signaling) goes to one
 // Durable Object, the Hub (hub.js), which speaks the same protocol as remodroid-server,
 // so the web client and remodroid-agent work unchanged.

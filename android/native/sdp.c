@@ -27,8 +27,8 @@ char *sdp_build_offer(const sdp_offer_t *o)
     rd_buf_init(&b);
     rd_buf_printf(&b,
                   "v=0\r\no=- %llu 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
-                  "a=group:BUNDLE 0 1\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS remodroid\r\n",
-                  (unsigned long long)o->session_id);
+                  "a=group:BUNDLE 0 1%s\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS remodroid\r\n",
+                  (unsigned long long)o->session_id, o->offer_audio ? " 2" : "");
     const char *pts = o->offer_h265 ? "96 97 98 99 100 101" : "98 99 100 101";
     rd_buf_printf(&b,
                   "m=video 9 UDP/TLS/RTP/SAVPF %s\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\n"
@@ -63,6 +63,17 @@ char *sdp_build_offer(const sdp_offer_t *o)
                   "a=fingerprint:sha-256 %s\r\na=setup:active\r\na=mid:1\r\n"
                   "a=sctp-port:5000\r\na=max-message-size:262144\r\n",
                   o->ufrag, o->pwd, o->fingerprint);
+    /* The phone's sound (AudioCapture.java): Opus, 48 kHz stereo, one 20 ms frame per packet. Same
+     * stream id as the video, so the browser plays both from one MediaStream. */
+    if (o->offer_audio)
+        rd_buf_printf(&b,
+                      "m=audio 9 UDP/TLS/RTP/SAVPF %d\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\n"
+                      "a=ice-ufrag:%s\r\na=ice-pwd:%s\r\na=ice-options:trickle\r\n"
+                      "a=fingerprint:sha-256 %s\r\na=setup:active\r\na=mid:2\r\n"
+                      "a=sendonly\r\na=msid:remodroid audio0\r\na=rtcp-mux\r\n"
+                      "a=rtpmap:%d opus/48000/2\r\na=fmtp:%d minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1\r\n"
+                      "a=ssrc:%u cname:remodroid\r\na=ssrc:%u msid:remodroid audio0\r\n",
+                      PT_OPUS, o->ufrag, o->pwd, o->fingerprint, PT_OPUS, PT_OPUS, o->audio_ssrc, o->audio_ssrc);
     rd_buf_append(&b, "", 1);
     return (char *)b.p;
 }
@@ -88,7 +99,7 @@ int sdp_parse_answer(const char *sdp, sdp_answer_t *a)
     memset(a, 0, sizeof *a);
     a->sctp_port = 5000;
     a->max_message = 65536;
-    enum { M_NONE, M_VIDEO, M_APP, M_OTHER } media = M_NONE;
+    enum { M_NONE, M_VIDEO, M_APP, M_AUDIO, M_OTHER } media = M_NONE;
     int vpts[32], nvpts = 0;
     ptinfo_t info[32];
     int ninfo = 0;
@@ -110,6 +121,9 @@ int sdp_parse_answer(const char *sdp, sdp_answer_t *a)
                     vpts[nvpts++] = atoi(p + 1);
                     p = strchr(p + 1, ' ');
                 }
+            } else if (!strcmp(kind, "audio")) {
+                media = M_AUDIO;
+                a->audio_ok = port != 0;
             } else if (!strcmp(kind, "application")) {
                 media = M_APP;
                 a->sctp_ok = port != 0 && strstr(l, "SCTP");
@@ -135,6 +149,10 @@ int sdp_parse_answer(const char *sdp, sdp_answer_t *a)
             a->sctp_port = atoi(v + 10);
         else if (media == M_APP && !strncmp(v, "max-message-size:", 17))
             a->max_message = (size_t)strtoul(v + 17, NULL, 10);
+        else if (media == M_AUDIO && !strncmp(v, "rtpmap:", 7) && (strstr(v, " opus/48000") || strstr(v, " OPUS/48000")))
+            a->audio_pt = atoi(v + 7);
+        else if (media == M_AUDIO && (!strcmp(v, "inactive") || !strcmp(v, "sendonly")))
+            a->audio_ok = 0;
         else if (media == M_VIDEO && !strncmp(v, "rtpmap:", 7) && ninfo < 32) {
             ptinfo_t *pi = &info[ninfo++];
             memset(pi, 0, sizeof *pi);
@@ -175,6 +193,8 @@ int sdp_parse_answer(const char *sdp, sdp_answer_t *a)
     }
     if (a->video_ok && !a->codec)
         a->video_ok = 0;
+    if (!a->audio_pt)
+        a->audio_ok = 0;
     for (int k = 0; a->codec && k < ninfo; k++)
         if (!strcasecmp(info[k].name, "rtx") && info[k].apt == a->pt && has_pt(vpts, nvpts, info[k].pt))
             a->rtx_pt = info[k].pt;

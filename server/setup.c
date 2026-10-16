@@ -4,8 +4,11 @@
  * the wizard, guarded by a one-time token printed in the log and written to
  * <state_dir>/setup-token (install_server.sh prints the link). The wizard picks
  * the ports, domain (automatic HTTPS), admin account and STUN/TURN; saving
- * writes server.ini and the server re-execs itself on the new ports. Later the
- * same page edits the settings, behind the normal login. */
+ * writes server.ini and the server re-execs itself on the new ports.
+ *
+ * After setup, the panel's Server tab (web/panel.html) edits one setting at a
+ * time through /api/v1/settings: a PATCH carries only what changed, and the
+ * server restarts only when a listener has to move (ports, domain, TURN). */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,8 +84,8 @@ static cJSON *current(const http_req_t *r, const char *user)
     cJSON_AddNumberToObject(j, "turn_port", listen_port(tl, 3478));
     cJSON_AddStringToObject(j, "public_ip", rd_conf_get(S.conf, "turn", "public_ip", ""));
     cJSON_AddStringToObject(j, "ice_extra", rd_conf_get(S.conf, "ice", "extra", ""));
-    size_t hl;
-    const char *h = req_header(r, "Host", &hl);
+    size_t hl = 0;
+    const char *h = r ? req_header(r, "Host", &hl) : NULL;
     char host[256] = "";
     if (h && hl < sizeof host) {
         memcpy(host, h, hl);
@@ -211,6 +214,255 @@ static void apply(conn_t *c, cJSON *in, const char *user)
     cJSON_AddNumberToObject(b, "restart_ms", 1500);
     http_json(c, 200, b, NULL);
     server_restart_soon();
+}
+
+/* ---------------- the panel's Server tab: one setting at a time ---------------- */
+
+/* [ice] extra = "url [user credential], url, …" (hub.c: extra_ice) */
+typedef struct {
+    char url[256], user[129], cred[129];
+} ice_entry_t;
+
+static int parse_extra(const char *line, ice_entry_t *out, int max)
+{
+    char *list = rd_strdup(line), *save = NULL;
+    int n = 0;
+    for (char *e = strtok_r(list, ",", &save); e && n < max; e = strtok_r(NULL, ",", &save)) {
+        char *s2 = NULL, *url = strtok_r(e, " \t", &s2), *u = strtok_r(NULL, " \t", &s2), *pw = strtok_r(NULL, " \t", &s2);
+        if (!url)
+            continue;
+        memset(&out[n], 0, sizeof out[n]);
+        snprintf(out[n].url, sizeof out[n].url, "%s", url);
+        if (u && pw) {
+            snprintf(out[n].user, sizeof out[n].user, "%s", u);
+            snprintf(out[n].cred, sizeof out[n].cred, "%s", pw);
+        }
+        n++;
+    }
+    free(list);
+    return n;
+}
+
+static int ice_token_ok(const char *s, size_t max)
+{
+    size_t n = strlen(s);
+    if (n > max)
+        return 0;
+    for (const char *p = s; *p; p++)
+        if (*p <= ' ' || *p == ',' || *p == 127)
+            return 0;
+    return 1;
+}
+
+static cJSON *settings_get(const http_req_t *r, const char *user)
+{
+    cJSON *j = current(r, user);
+    cJSON_DeleteItemFromObjectCaseSensitive(j, "ice_extra");
+    cJSON *arr = cJSON_AddArrayToObject(j, "ice_servers");
+    ice_entry_t e[32];
+    int n = parse_extra(rd_conf_get(S.conf, "ice", "extra", ""), e, 32);
+    for (int i = 0; i < n; i++) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "url", e[i].url);
+        cJSON_AddStringToObject(o, "username", e[i].user);
+        cJSON_AddBoolToObject(o, "has_credential", e[i].cred[0] != 0); /* never sent back */
+        cJSON_AddItemToArray(arr, o);
+    }
+    cJSON_AddBoolToObject(j, "https", tls_ready());
+    return j;
+}
+
+static int set_if_changed(const char *sec, const char *key, const char *val, int *changed)
+{
+    const char *cur = rd_conf_get(S.conf, sec, key, NULL);
+    if ((!val && !cur) || (val && cur && !strcmp(val, cur)))
+        return 0;
+    *changed = 1;
+    return server_conf_set(sec, key, val);
+}
+
+/* PATCH /api/v1/settings: only the fields present change; the rest stays as it is. */
+static void settings_patch(conn_t *c, cJSON *in, const char *user)
+{
+#define HAS(k) (cJSON_GetObjectItemCaseSensitive(in, k) != NULL)
+    int http_port = listen_port(rd_conf_get(S.conf, "http", "listen", ""), 80);
+    int tls_port = listen_port(rd_conf_get(S.conf, "tls", "listen", ""), 443);
+    const char *tl = rd_conf_get(S.conf, "turn", "listen", "");
+    int turn_on = *tl != 0, turn_port = listen_port(tl, 3478);
+    int redirect = strcmp(rd_conf_get(S.conf, "tls", "plain_http", "redirect"), "allow") != 0;
+    char domain[256], email[256], pub[64];
+    snprintf(domain, sizeof domain, "%s", rd_conf_get(S.conf, "acme", "domains", ""));
+    domain[strcspn(domain, ", ")] = 0;
+    snprintf(email, sizeof email, "%s", rd_conf_get(S.conf, "acme", "email", ""));
+    snprintf(pub, sizeof pub, "%s", rd_conf_get(S.conf, "turn", "public_ip", ""));
+
+    if (HAS("http_port")) http_port = (int)msg_num(in, "http_port", 0);
+    if (HAS("tls_port")) tls_port = (int)msg_num(in, "tls_port", 0);
+    if (HAS("turn_port")) turn_port = (int)msg_num(in, "turn_port", 0);
+    if (HAS("turn_enabled")) turn_on = msg_bool(in, "turn_enabled", 1);
+    if (HAS("redirect_http")) redirect = msg_bool(in, "redirect_http", 1);
+    if (HAS("domain")) snprintf(domain, sizeof domain, "%s", msg_str(in, "domain", ""));
+    if (HAS("email")) snprintf(email, sizeof email, "%s", msg_str(in, "email", ""));
+    if (HAS("public_ip")) snprintf(pub, sizeof pub, "%s", msg_str(in, "public_ip", ""));
+    const char *uname = msg_str(in, "username", user), *pw = msg_str(in, "password", "");
+    int account = HAS("username") || HAS("password");
+
+    const char *err = NULL;
+    if (!valid_port(http_port))
+        err = "the web port must be 1-65535";
+    else if (*domain && (!valid_name(domain, ".-", 253) || !strchr(domain, '.')))
+        err = "the domain looks wrong (e.g. remodroid.example.com)";
+    else if (*domain && (!valid_port(tls_port) || tls_port == http_port))
+        err = "the HTTPS port must be 1-65535 and differ from the web port";
+    else if (*email && (strchr(email, ' ') || !strchr(email, '@') || strlen(email) > 200))
+        err = "the email address looks wrong";
+    else if (!valid_name(uname, "._-", 32))
+        err = "the username may use letters, digits, '.', '_' and '-' (up to 32)";
+    else if (HAS("password") && strlen(pw) < 8)
+        err = "the password needs at least 8 characters";
+    else if (turn_on && !valid_port(turn_port))
+        err = "the STUN/TURN port must be 1-65535";
+    else if (turn_on && !valid_ipv4(pub))
+        err = "the public IPv4 address is needed for STUN/TURN (e.g. 203.0.113.10)";
+    if (err) {
+        http_error(c, 400, "bad_request", err);
+        return;
+    }
+    const char *old_hash = rd_conf_get(S.conf, "users", user, NULL);
+    if (account) { /* changing the login needs the current password, not just a session */
+        if (auth_locked(c)) {
+            http_error(c, 429, "rate_limited", "too many wrong passwords, try again later");
+            return;
+        }
+        if (!auth_check_password(old_hash, msg_str(in, "current_password", ""))) {
+            auth_fail(c);
+            http_error(c, 403, "wrong_password", "the current password is wrong");
+            return;
+        }
+        if (strcmp(uname, user) && rd_conf_get(S.conf, "users", uname, NULL)) {
+            http_error(c, 409, "bad_request", "that username is taken");
+            return;
+        }
+    }
+
+    /* the ICE list: entries without a credential keep the one they had ("was" = their old URL) */
+    char extra[2048] = "";
+    cJSON *list = cJSON_GetObjectItemCaseSensitive(in, "ice_servers");
+    if (list) {
+        if (!cJSON_IsArray(list) || cJSON_GetArraySize(list) > 32) {
+            http_error(c, 400, "bad_request", "ice_servers must be a list of up to 32 servers");
+            return;
+        }
+        ice_entry_t old[32];
+        int nold = parse_extra(rd_conf_get(S.conf, "ice", "extra", ""), old, 32);
+        size_t o = 0;
+        cJSON *it;
+        cJSON_ArrayForEach(it, list) {
+            const char *url = msg_str(it, "url", ""), *u = msg_str(it, "username", ""), *cr = msg_str(it, "credential", "");
+            const char *was = msg_str(it, "was", url);
+            if ((strncmp(url, "stun:", 5) && strncmp(url, "turn:", 5) && strncmp(url, "turns:", 6)) || strlen(url) < 7 ||
+                !ice_token_ok(url, 250) || !ice_token_ok(u, 128) || !ice_token_ok(cr, 128)) {
+                http_error(c, 400, "bad_request", "a STUN/TURN server looks wrong (e.g. stun:203.0.113.10:3478)");
+                return;
+            }
+            if (*u && !*cr)
+                for (int k = 0; k < nold; k++)
+                    if (!strcmp(old[k].url, was) && !strcmp(old[k].user, u))
+                        cr = old[k].cred;
+            int w = snprintf(extra + o, sizeof extra - o, "%s%s%s%s%s%s", o ? ", " : "", url, *u && *cr ? " " : "",
+                             *u && *cr ? u : "", *u && *cr ? " " : "", *u && *cr ? cr : "");
+            if (w < 0 || (size_t)w >= sizeof extra - o) {
+                http_error(c, 400, "bad_request", "too many STUN/TURN servers");
+                return;
+            }
+            o += (size_t)w;
+        }
+    }
+
+    int ok = 1, restart = 0, changed = 0;
+    int web = HAS("http_port") || HAS("domain") || HAS("email") || HAS("tls_port") || HAS("redirect_http");
+    int turn = HAS("turn_enabled") || HAS("turn_port") || HAS("public_ip") || HAS("domain"); /* urls name the domain */
+    char v[300];
+    if (HAS("http_port")) {
+        snprintf(v, sizeof v, "0.0.0.0:%d", http_port);
+        ok &= set_if_changed("http", "listen", v, &restart) == 0;
+    }
+    if (!web) {
+    } else if (*domain) {
+        ok &= set_if_changed("acme", "domains", domain, &restart) == 0;
+        ok &= set_if_changed("acme", "email", *email ? email : NULL, &restart) == 0;
+        snprintf(v, sizeof v, "0.0.0.0:%d", tls_port);
+        ok &= set_if_changed("tls", "listen", v, &restart) == 0;
+        ok &= set_if_changed("tls", "plain_http", redirect ? "redirect" : "allow", &restart) == 0;
+    } else {
+        ok &= set_if_changed("acme", "domains", NULL, &restart) == 0;
+        if (!*rd_conf_get(S.conf, "tls", "cert", ""))
+            ok &= set_if_changed("tls", "listen", NULL, &restart) == 0;
+    }
+    if (!turn) {
+    } else if (turn_on) {
+        snprintf(v, sizeof v, "0.0.0.0:%d", turn_port);
+        if (!*tl || listen_port(tl, 0) != turn_port) /* keep a hand-set listen address */
+            ok &= set_if_changed("turn", "listen", v, &restart) == 0;
+        ok &= set_if_changed("turn", "public_ip", pub, &restart) == 0;
+        const char *h = *domain ? domain : pub;
+        snprintf(v, sizeof v, "stun:%s:%d, turn:%s:%d?transport=udp", h, turn_port, h, turn_port);
+        ok &= set_if_changed("turn", "urls", v, &restart) == 0;
+        if (!*rd_conf_get(S.conf, "turn", "shared_secret", "")) {
+            uint8_t r[24];
+            char s[40];
+            rd_random(r, sizeof r);
+            rd_b64_encode(r, sizeof r, s, sizeof s);
+            for (char *p = s; *p; p++)
+                *p = *p == '+' ? '-' : *p == '/' ? '_' : *p;
+            ok &= set_if_changed("turn", "shared_secret", s, &restart) == 0;
+        }
+    } else {
+        ok &= set_if_changed("turn", "listen", NULL, &restart) == 0;
+        ok &= set_if_changed("turn", "urls", NULL, &restart) == 0;
+    }
+    if (list) /* read for every new session: no restart */
+        ok &= set_if_changed("ice", "extra", *extra ? extra : NULL, &changed) == 0;
+    int relogin = 0;
+    if (account) {
+        char *hash = *pw ? auth_hash_password(pw) : rd_strdup(old_hash);
+        ok &= hash && set_if_changed("users", uname, hash, &changed) == 0;
+        free(hash);
+        if (strcmp(uname, user)) {
+            ok &= set_if_changed("users", user, NULL, &changed) == 0;
+            auth_drop_sessions_for(user, 0);
+            relogin = 1;
+        }
+    }
+    if (!ok) {
+        http_error(c, 500, "io_error", "could not write the configuration file; check its permissions");
+        return;
+    }
+    LOGI("settings: changed by %s%s", user, restart ? " (restarting)" : "");
+    cJSON *b = settings_get(NULL, relogin ? uname : user);
+    cJSON_AddBoolToObject(b, "ok", 1);
+    cJSON_AddNumberToObject(b, "restart_ms", restart ? 1500 : 0);
+    cJSON_AddBoolToObject(b, "relogin", relogin);
+    http_json(c, 200, b, NULL);
+    if (restart)
+        server_restart_soon();
+#undef HAS
+}
+
+void settings_api(conn_t *c, const http_req_t *r, const char *user)
+{
+    if (req_is(r, "GET", "/api/v1/settings")) {
+        http_json(c, 200, settings_get(r, user), NULL);
+    } else if (req_is(r, "PATCH", "/api/v1/settings") || req_is(r, "POST", "/api/v1/settings")) {
+        cJSON *in = cJSON_ParseWithLength((const char *)r->body, r->body_len);
+        if (!cJSON_IsObject(in))
+            http_error(c, 400, "bad_request", "expected a JSON object");
+        else
+            settings_patch(c, in, user);
+        cJSON_Delete(in);
+    } else {
+        http_error(c, 404, "not_found", "no such endpoint");
+    }
 }
 
 static void handle(conn_t *c, const http_req_t *r, const char *user)

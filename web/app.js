@@ -15,11 +15,12 @@ const DEFAULTS = {
   mode: 'auto', preset: '720p', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: false,
   screenOff: true, lockOnDisc: true, grace: 10, rotation: 'auto', clipSync: true, autoPaste: false, overheat: 45,
   destDir: '/sdcard/DCIM/RemoDroid', mediaScan: true, overwrite: false, maxMb: 2048, route: 'auto', relay: false,
-  device: ''
+  audio: true, sound: true, device: ''
 };
 const S = Object.assign({}, DEFAULTS);
 try { Object.assign(S, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+{ const want = new URLSearchParams(location.search).get('device'); if (want) { S.device = want; save(); history.replaceState(null, '', '/'); } }
 let ballPos = null;
 try { ballPos = JSON.parse(localStorage.getItem(KEY + '-ball') || 'null'); } catch (e) {}
 
@@ -126,7 +127,8 @@ async function cmd(name, args, msg) {
     const r = await api('POST', `/devices/${encodeURIComponent(st.device.id)}/cmd`, { cmd: name, args: args || {} });
     const j = await r.json().catch(() => ({}));
     if (r.ok) toast(msg); else toast(j.msg || `Failed (${r.status})`);
-  } catch (e) { toast('Network error: ' + e.message); }
+    return r.ok;
+  } catch (e) { toast('Network error: ' + e.message); return false; }
 }
 
 /* ================= viewer WebSocket ================= */
@@ -212,14 +214,19 @@ function maybeStart() {
   if (!ph.attached) { setOverlay(ph.problem ? 'Phone busy' : 'No phone', ph.problem ? `The router sees the phone, but ${ph.problem}.` : 'Plug the phone into the router.'); return; }
   if (ph.adb_state === 'unauthorized') { setOverlay('Allow USB debugging', 'Accept the prompt on the phone (tick Always allow).'); return; }
   if (ph.server !== 'running') { setOverlay('Starting', 'The phone server is starting…'); return; }
-  if (st.device.session && st.device.session.active) { setOverlay('In use', 'Another viewer is connected to this phone.', true); return; }
+  const vs = st.device.session;
+  if (vs && vs.active) {
+    const who = vs.viewer ? `${vs.viewer} is` : 'Someone is', at = vs.since ? ` since ${new Date(vs.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
+    setOverlay('In use', `${who} viewing this phone from another browser${at}. Take over to disconnect them and connect here.`, false, true);
+    return;
+  }
   startSession();
 }
-async function startSession() {
+async function startSession(takeover) {
   st.sid = 'pending';
   setOverlay('Connecting', `Connecting to ${st.device.name}…`);
   try {
-    const r = await request('session.request', { device: st.device.id, quality: quality(), force_relay: S.relay });
+    const r = await request('session.request', { device: st.device.id, quality: quality(), force_relay: S.relay, ...(takeover ? { takeover: true } : {}) });
     st.sid = r.sid;
     st.ended = false;
   } catch (e) {
@@ -240,8 +247,10 @@ function startPeer(iceServers) {
   pc.ontrack = e => {
     try { e.receiver.playoutDelayHint = 0; } catch (_) {}   /* Chrome */
     try { e.receiver.jitterBufferTarget = 0; } catch (_) {} /* spec / newer Safari */
-    const v = $('#video');
-    v.srcObject = e.streams[0] || new MediaStream([e.track]);
+    const v = $('#video'), stream = e.streams[0];
+    if (stream) { if (v.srcObject !== stream) v.srcObject = stream; }
+    else { if (!(v.srcObject instanceof MediaStream)) v.srcObject = new MediaStream(); v.srcObject.addTrack(e.track); }
+    if (e.track.kind === 'audio') { st.hasAudio = true; syncMenuStates(); }
     v.play().catch(() => { $('#tapToPlay').hidden = false; });
   };
   pc.ondatachannel = e => {
@@ -293,23 +302,26 @@ function sessionEnded(reason) {
   closePeer();
   st.sid = null;
   st.ended = true;
+  if (reason === 'taken_over') wantSession = false; /* don't grab it straight back */
   const nice = { viewer_left: 'You left the session.', agent_offline: 'The router agent went offline.', phone_unavailable: 'The phone server is not ready.',
     ice_failed: 'No network path to the phone.', connection_failed: 'The connection dropped.', replaced: 'Another session started.',
+    taken_over: 'Another browser took over this phone.',
     timeout: 'The phone did not answer in time.' };
-  setOverlay('Disconnected', (nice[reason] || reason) + (S.lockOnDisc ? ` The phone locks in ${S.grace} s.` : ''), true);
+  setOverlay('Disconnected', (nice[reason] || reason) + (S.lockOnDisc && reason !== 'taken_over' ? ` The phone locks in ${S.grace} s.` : ''), true);
 }
 function endSession() {
   wantSession = false;
   if (st.sid && st.sid !== 'pending') wsSend({ t: 'session.end', d: {} });
   sessionEnded('viewer_left');
 }
-function setOverlay(title, text, showReconnect) {
+function setOverlay(title, text, showReconnect, showTakeover) {
   if (DEMO) return;
   $('#disc').hidden = false;
   $('#discTitle').textContent = title;
   $('#discText').textContent = text;
   $('#discCount').textContent = '';
   $('#reconnect').hidden = !showReconnect;
+  $('#takeover').hidden = !showTakeover;
   $('#discLink').hidden = title !== 'No routers yet';
   ball.hidden = true;
 }
@@ -319,7 +331,11 @@ $('#reconnect').addEventListener('click', () => {
   setOverlay('Connecting', '…');
   if (!st.ws) connectWs(); else maybeStart();
 });
-$('#tapToPlayBtn').addEventListener('click', () => { $('#tapToPlay').hidden = true; $('#video').play().catch(() => {}); });
+$('#takeover').addEventListener('click', () => {
+  wantSession = true;
+  if (st.device && !st.sid) startSession(true);
+});
+$('#tapToPlayBtn').addEventListener('click', () => { $('#tapToPlay').hidden = true; unmute(); $('#video').play().catch(() => {}); });
 
 /* ================= data channels (A.6–A.8) ================= */
 function sendCtrl(t, d, wait) {
@@ -349,7 +365,10 @@ function onChannel(label, data) {
     $('#disc').hidden = true; ball.hidden = !!openId;
     toast(`Connected · ${codecLabel()}`);
     if (S.mode !== 'auto' || S.preset !== '720p') sendCtrl('quality.set', quality());
+    if (!S.sound && d.caps && d.caps.audio) sendCtrl('audio.set', { on: false }); /* keep the phone's speaker */
+    syncMenuStates();
     break;
+  case 'audio.state': st.audioOn = d.on; syncMenuStates(); break;
   case 'quality.state': st.quality = d; break;
   case 'screen.changed': st.screen = d; break;
   case 'stats': st.phoneStats = d; st.panel = d.panel || st.panel; break;
@@ -369,15 +388,17 @@ function onChannel(label, data) {
 
 /* ================= stream area + input ================= */
 const stage = $('#stage'), video = $('#video'), cv = $('#screen'), ctx = cv.getContext('2d');
+/* The picture stays inside the safe area: under the status bar (and Safari's toolbars) iOS
+ * blurs whatever is drawn there, which made the top of the phone's screen unreadable. */
 function layout() {
-  const W = stage.clientWidth, H = stage.clientHeight;
+  const ins = bounds(), W = stage.clientWidth - ins.l - ins.r, H = stage.clientHeight - ins.t - ins.b;
   let w, h;
   if (DEMO) { w = cv.width; h = cv.height; }
   else { w = video.videoWidth || st.screen.w || 9; h = video.videoHeight || st.screen.h || 20; }
   const sc = Math.min(W / w, H / h), cw = Math.floor(w * sc), ch = Math.floor(h * sc);
   for (const e of [video, cv]) {
     e.style.width = cw + 'px'; e.style.height = ch + 'px';
-    e.style.left = Math.floor((W - cw) / 2) + 'px'; e.style.top = Math.floor((H - ch) / 2) + 'px';
+    e.style.left = Math.floor(ins.l + (W - cw) / 2) + 'px'; e.style.top = Math.floor(ins.t + (H - ch) / 2) + 'px';
   }
 }
 window.addEventListener('resize', layout);
@@ -431,7 +452,7 @@ function up(e, action) {
 for (const t of [video, cv]) {
   t.addEventListener('pointerdown', down);
   t.addEventListener('pointermove', move);
-  t.addEventListener('pointerup', e => up(e, 1));
+  t.addEventListener('pointerup', e => { up(e, 1); unmute(); });
   t.addEventListener('pointercancel', e => up(e, 3));
   t.addEventListener('contextmenu', e => e.preventDefault());
 }
@@ -481,6 +502,21 @@ function drawTouches(c, W, H, u, t) {
 }
 
 /* ================= HUD ================= */
+/* How the WebRTC media gets here, from the selected ICE candidate pair:
+ * relay = through a TURN server, srflx/prflx = straight through NAT (STUN found the address),
+ * host = straight on the same network. */
+function rtcRoute(rep) {
+  let pair = null;
+  rep.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = rep.get(r.selectedCandidatePairId); });
+  if (!pair) rep.forEach(r => { if (!pair && r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
+  if (!pair) return null;
+  const l = rep.get(pair.localCandidateId) || {}, r = rep.get(pair.remoteCandidateId) || {};
+  const types = [l.candidateType, r.candidateType];
+  const mode = types.includes('relay') ? 'TURN relay' : types.some(t => t === 'srflx' || t === 'prflx') ? 'P2P (STUN)' : 'direct (LAN)';
+  const proto = (l.candidateType === 'relay' && l.relayProtocol) || l.protocol || '';
+  const via = types.includes('relay') ? (l.candidateType === 'relay' ? (l.url || l.address || '') : (r.address || '')) : (r.address || '');
+  return { mode, proto, via: String(via).replace(/^turns?:/, '').replace(/\?.*$/, ''), local: l.candidateType, remote: r.candidateType };
+}
 let prevBytes = 0, prevT = 0;
 async function tickStats() {
   if (st.pc) {
@@ -501,6 +537,7 @@ async function tickStats() {
         if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded' && r.currentRoundTripTime != null)
           st.localStats.rtt = Math.round(r.currentRoundTripTime * 1000);
       });
+      st.localStats.route = rtcRoute(rep);
     } catch (_) {}
   }
   const hud = $('#hud');
@@ -512,7 +549,8 @@ async function tickStats() {
       `<b>${Math.round(l.fps || 0)}</b> fps <span class="dim">/ ${p.fps || '—'}</span> · <b>${((l.kbps || 0) / 1000).toFixed(1)}</b> Mbps<br>` +
       `rtt <b>${l.rtt ?? p.rtt_ms ?? '—'}</b> ms · jb <b>${l.jbMs ?? '—'}</b> ms · lost <b>${l.lost ?? 0}</b><br>` +
       `${codecLabel()} · ${l.size || '—'} · ${S.mode} <span class="dim">${p.target_kbps ? '→ ' + (p.target_kbps / 1000).toFixed(1) + ' Mbps' : ''}</span><br>` +
-      `<span class="dim">decoder</span> ${dec} ${l.decMs ? l.decMs + ' ms' : ''} · <span class="dim">path</span> ${p.path || '—'}<br>` +
+      `<span class="dim">webrtc</span> <span class="rtc">${l.route ? l.route.mode : '—'}</span>${l.route ? ` ${l.route.proto} <span class="dim">${l.route.local}→${l.route.remote}</span>` : ''}<br>` +
+      `<span class="dim">decoder</span> ${dec} ${l.decMs ? l.decMs + ' ms' : ''} · <span class="dim">usb</span> ${p.path || '—'}${st.hasAudio ? ` · <span class="dim">sound</span> ${p.audio ? (video.muted ? 'muted' : 'on') : 'off'}` : ''}<br>` +
       `<span class="dim">panel</span> ${st.panel} · <span class="dim">input</span> ${st.inputs}<span class="hex">${st.lastHex}</span>`;
   }
   $('#chipText').textContent = st.device ? `${st.device.name}${l.rtt != null ? ' · ' + l.rtt + ' ms' : ''}` : (DEMO ? 'demo' : 'no device');
@@ -597,7 +635,55 @@ function syncMenuStates() {
   sb.classList.toggle('on', st.panel === 'off');
   sb.querySelector('span').textContent = st.panel === 'off' ? 'Screen on' : 'Screen off';
   $('#menuStats').classList.toggle('on', S.stats);
+  const snd = $('#menuSound'), audible = S.sound && !video.muted;
+  snd.classList.toggle('on', audible); snd.classList.toggle('muted', !audible);
+  snd.querySelector('span').textContent = audible ? 'Sound on' : 'Sound off';
+  $('#menuLock').querySelector('span').textContent = st.locked ? 'Wake' : 'Lock';
+  $('#menuFull').classList.toggle('on', standalone() || !!(document.fullscreenElement || document.webkitFullscreenElement));
 }
+const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
+
+/* Sound: Safari only starts audio from a tap, so the first touch on the phone's picture unmutes it.
+ * Switching Sound off also stops the capture on the phone, so its own speaker plays again. */
+function unmute() {
+  if (!S.sound || !video.muted) return;
+  video.muted = false;
+  video.play().catch(() => {});
+  syncMenuStates();
+}
+function toggleSound() {
+  const on = !(S.sound && !video.muted);
+  S.sound = on; save();
+  video.muted = !on;
+  if (on) video.play().catch(() => {});
+  sendCtrl('audio.set', { on }, true).then(r => {
+    if (on && !r.on) toast(st.device && st.device.phone && st.device.phone.sdk < 31 ? 'Phone sound needs Android 12 or newer' : 'The phone isn\'t sending sound (Settings → Phone → Sound)');
+    else toast(on ? 'Sound plays here — the phone is quiet' : 'Sound back on the phone');
+  }).catch(() => toast(on ? 'Sound on' : 'Sound off'));
+  syncMenuStates();
+}
+function toggleFullscreen() {
+  const d = document, root = d.documentElement;
+  if (standalone()) { toast('Already full screen (Home Screen app)'); return; }
+  const fsEl = d.fullscreenElement || d.webkitFullscreenElement;
+  const req = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (fsEl) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+  if (req && (d.fullscreenEnabled || d.webkitFullscreenEnabled)) {
+    Promise.resolve(req.call(root)).catch(() => openSheet('full'));
+    return;
+  }
+  openSheet('full'); /* iPhone: only Home Screen web apps run full screen */
+}
+/* A fresh WebRTC session to the same phone: the fix for a frozen picture or a stuck connection. */
+function reconnectStream() {
+  if (st.sid && st.sid !== 'pending') wsSend({ t: 'session.end', d: {} });
+  closePeer();
+  st.sid = null; st.ended = true; wantSession = true;
+  setOverlay('Reconnecting', st.device ? `Connecting to ${st.device.name}…` : '…');
+  if (!st.ws) connectWs(); else setTimeout(maybeStart, 300);
+}
+document.addEventListener('fullscreenchange', () => { layout(); syncMenuStates(); });
+document.addEventListener('webkitfullscreenchange', () => { layout(); syncMenuStates(); });
 menu.addEventListener('click', e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const a = b.dataset.act;
@@ -608,7 +694,15 @@ menu.addEventListener('click', e => {
     sendCtrl('screen.power', { on }, true).then(() => { st.panel = on ? 'on' : 'off'; syncMenuStates();
       toast(on ? 'Phone screen turned on' : 'Phone screen turned off — stream continues'); }).catch(e => toast(e.message));
   } else if (a === 'stats') { S.stats = !S.stats; save(); tickStats(); syncMenuStates(); }
-  else if (a === 'routers') { location.href = '/agent.html'; }
+  else if (a === 'sound') { toggleSound(); }
+  else if (a === 'lock') {
+    closeMenu();
+    if (st.locked) cmd('phone.wake', {}, 'Phone woken').then(ok => { if (ok) { st.locked = false; syncMenuStates(); } });
+    else cmd('phone.sleep', {}, 'Phone locked').then(ok => { if (ok) { st.locked = true; syncMenuStates(); } });
+  }
+  else if (a === 'reconnect') { closeMenu(); reconnectStream(); }
+  else if (a === 'fullscreen') { closeMenu(); toggleFullscreen(); }
+  else if (a === 'devices') { location.href = '/panel.html'; }
 });
 
 /* ================= sheets ================= */
@@ -785,7 +879,7 @@ function quality() {
   return { mode: S.mode, preset: S.preset, fps: S.fps, kbps: S.kbps, codec: S.codec };
 }
 /* names the agent understands in agent.config (agent/phone.c) */
-const AGENT_KEYS = ['screenOff', 'lockOnDisc', 'grace', 'clipSync', 'autoPaste', 'overheat', 'rotation', 'route', 'relay', 'destDir', 'mediaScan', 'overwrite', 'maxMb'];
+const AGENT_KEYS = ['screenOff', 'lockOnDisc', 'grace', 'clipSync', 'autoPaste', 'overheat', 'rotation', 'route', 'relay', 'destDir', 'mediaScan', 'overwrite', 'maxMb', 'audio'];
 function changed(key) {
   save();
   if (['mode', 'preset', 'fps', 'kbps', 'codec'].includes(key)) {
@@ -885,6 +979,8 @@ function renderTab(id) {
       toggleRow('lockOnDisc', 'Lock phone after disconnect'),
       stepRow('grace', 'Lock grace period', 0, 60, 5, ' s', 'Reconnect within this time and nothing locks.'),
       segRow('rotation', 'Rotation', [['auto', 'Auto'], ['portrait', 'Portrait'], ['landscape', 'Landscape']])));
+    add(group('Sound',
+      toggleRow('audio', 'Play the phone\'s sound here', 'Like scrcpy: the phone\'s speaker goes quiet while you\'re connected. Android 12 or newer.')));
     add(group('Clipboard',
       toggleRow('clipSync', 'Clipboard sync', 'Show copied Android text here, ready to copy with one tap'),
       toggleRow('autoPaste', 'Paste into focused field after sending')));

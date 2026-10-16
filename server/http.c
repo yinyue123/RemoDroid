@@ -444,6 +444,11 @@ static void handle_request(conn_t *c, const http_req_t *r)
         http_error(c, 405, "bad_request", "method not allowed");
         return;
     }
+    /* The Home Screen icon and manifest: iOS fetches them without the login cookie. */
+    if (!sess && (req_is(r, "GET", "/manifest.webmanifest") || req_is(r, "GET", "/icon.svg") || req_is(r, "GET", "/icon-180.png"))) {
+        http_serve_static(c, r, NULL);
+        return;
+    }
     /* Pages: cookie, or Basic auth that creates the cookie, or a 401 challenge. */
     if (!sess) {
         int a = auth_basic(r, c, 0, name, sizeof name);

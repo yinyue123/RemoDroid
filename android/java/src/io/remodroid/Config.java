@@ -13,6 +13,7 @@ final class Config {
     volatile String rotation = "auto";
     volatile String path = "auto";
     volatile boolean forceRelay = false;
+    volatile boolean audio = true;
     volatile String videoMode = "auto";
     volatile String preset = "720p";
     volatile String codec = "auto";
@@ -35,6 +36,7 @@ final class Config {
             rotation = p.optString("rotation", rotation);
             path = p.optString("path", path);
             forceRelay = p.optBoolean("force_relay", forceRelay);
+            audio = p.optBoolean("audio", audio);
         }
         if (v != null) {
             videoMode = v.optString("mode", videoMode);

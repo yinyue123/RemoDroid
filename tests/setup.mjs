@@ -99,12 +99,14 @@ web_root = ${ROOT}/web
   const t0 = Date.now();
   const en = await run(path.join(BIN, 'remodroid-agent'), ['-c', aini, 'enroll', '--panel', B + '/', '--code', code]);
   ok(en.code === 0 && /bound — this router is online/.test(en.out) && Date.now() - t0 < 8000, 'remodroid enroll binds the router within seconds');
+  if (en.code !== 0 || !/bound/.test(en.out)) console.log(en.out.replace(/^/gm, '      '));
   ok(/device_id = living-room/.test(fs.readFileSync(aini, 'utf8')) && /\[devices\]\nliving-room = \$2b\$/.test(fs.readFileSync(ini, 'utf8')),
     'both config files have the router');
   const fresh = path.join(dir, 'fresh.ini');
   const code2 = (await (await fetch(B + '/api/v1/enroll/codes', { method: 'POST', headers: H, body: '{}' })).json()).code;
   const en2 = await run(path.join(BIN, 'remodroid-agent'), ['-c', fresh, 'enroll', '--panel', B, '--code', code2]);
-  ok(en2.code === 0 && (fs.statSync(fresh).mode & 0o777) === 0o600 && /isn't running/.test(en2.out), 'enroll creates a missing agent.ini (0600) and says to start the agent');
+  const realAgent = fs.existsSync('/var/run/remodroid.sock') || fs.existsSync('/run/remodroid.sock'); /* a real install on this machine answers instead */
+  ok(en2.code === 0 && (fs.statSync(fresh).mode & 0o777) === 0o600 && (realAgent || /isn't running/.test(en2.out)), 'enroll creates a missing agent.ini (0600) and says to start the agent');
   j = await (await fetch(B + `/api/v1/enroll/codes/${code}`, { headers: H })).json();
   ok(j.state === 'used' && j.device === 'living-room' && j.online, 'the page sees the router online');
   const wrong = await run(path.join(BIN, 'remodroid-agent'), ['-c', path.join(dir, 'x.ini'), 'enroll', '--panel', B, '--code', 'ZZZZ-ZZZZ']);
@@ -123,6 +125,38 @@ web_root = ${ROOT}/web
   ok(r.status === 204 && !/living-room =/.test(fs.readFileSync(ini, 'utf8')), 'remove takes it out of server.ini');
   await until(async () => /unauthorized|HTTP 40[13]|rejected/.test(agent.log), 10000, 'agent refused');
   ok(true, 'the removed router can no longer log in');
+
+  console.log('settings (the panel\'s Server tab)');
+  r = await fetch(B + '/api/v1/settings', { headers: H });
+  let txt = await r.text();
+  j = JSON.parse(txt);
+  ok(r.status === 200 && j.ice_servers.length === 2 && j.ice_servers[1].username === 'alice' && j.ice_servers[1].has_credential && !/s3cret/.test(txt),
+    'the STUN/TURN list comes back without its passwords');
+  const PATCH = body => fetch(B + '/api/v1/settings', { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+  r = await PATCH({ ice_servers: [{ url: 'stun:stun.cloudflare.com:3478' },
+    { url: 'turn:turn.example.com:3479?transport=udp', username: 'alice', was: 'turn:turn.example.com:3478?transport=udp' },
+    { url: 'stun:203.0.113.10:3478' }] });
+  j = await r.json();
+  ok(r.status === 200 && j.restart_ms === 0 && /extra = stun:stun\.cloudflare\.com:3478, turn:turn\.example\.com:3479\?transport=udp alice s3cret, stun:203\.0\.113\.10:3478/.test(fs.readFileSync(ini, 'utf8')),
+    'editing one server keeps its password; adding one needs just the address; no restart');
+  r = await PATCH({ ice_servers: [{ url: 'http://example.com' }] });
+  ok(r.status === 400, 'a malformed server is refused');
+  r = await PATCH({ password: 'new-password-1' });
+  ok(r.status === 403, 'a new password needs the current one');
+  r = await PATCH({ current_password: 'correct-horse', password: 'new-password-1' });
+  j = await r.json();
+  const basic = pw => fetch(B + '/', { headers: { Authorization: 'Basic ' + Buffer.from('admin:' + pw).toString('base64') } }).then(x => x.status);
+  ok(r.status === 200 && j.restart_ms === 0 && await basic('new-password-1') === 200 && await basic('correct-horse') === 401,
+    'the password changes on its own, nothing else does');
+  const tport = 20000 + Math.floor(Math.random() * 20000);
+  r = await PATCH({ turn_enabled: true, public_ip: '203.0.113.7', turn_port: tport });
+  j = await r.json();
+  ok(r.status === 200 && j.restart_ms > 0 && new RegExp(`\\[turn\\][^[]*listen = 0\\.0\\.0\\.0:${tport}`).test(fs.readFileSync(ini, 'utf8')),
+    'turning on the built-in TURN restarts the server');
+  await sleep(j.restart_ms + 300);
+  await until(() => fetch(B + '/api/v1/settings', { headers: H }).then(x => x.ok, () => false), 8000, 'back after restart');
+  j = await (await fetch(B + '/api/v1/settings', { headers: H })).json();
+  ok(j.turn_enabled && j.turn_port === tport && j.public_ip === '203.0.113.7', 'the server is back with TURN on');
 }
 
 const timer = setTimeout(() => { console.log('  ✗ overall timeout'); failures++; finish(); }, 90000);

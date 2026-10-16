@@ -1,4 +1,4 @@
-/* RemoDroid setup pages: wizard.html (server settings) and agent.html (routers).
+/* RemoDroid setup pages: wizard.html (first-run setup) and panel.html (with panel.css).
  * Also copied by the install site (wizard/). System fonts only: a fresh server may be offline. */
 :root{
   color-scheme: light;

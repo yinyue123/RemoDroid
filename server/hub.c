@@ -76,6 +76,8 @@ cJSON *hub_device_json(device_t *d)
     if (d->vs) {
         cJSON_AddStringToObject(s, "sid", d->vs->sid);
         cJSON_AddNumberToObject(s, "since", (double)d->vs->since);
+        if (d->vs->viewer)
+            cJSON_AddStringToObject(s, "viewer", d->vs->viewer->user);
     }
     return j;
 }
@@ -231,7 +233,12 @@ static void viewer_session_request(conn_t *c, cJSON *m)
     device_t *dev = hub_device(msg_str(d, "device", ""));
     if (!dev) { ws_send_json(c, msg_error(id, "not_found", "unknown device")); return; }
     if (!online(dev)) { ws_send_json(c, msg_error(id, "offline", "the router agent is offline")); return; }
-    if (dev->vs && dev->vs->viewer != c) { ws_send_json(c, msg_error(id, "busy", "device is already in a session")); return; }
+    if (dev->vs && dev->vs->viewer != c) {
+        if (!msg_bool(d, "takeover", 0)) { ws_send_json(c, msg_error(id, "busy", "device is already in a session")); return; }
+        /* "Take over": the other viewer is told why and the phone drops its peer before the new one starts */
+        LOGI("%s takes over %s from %s", c->user, dev->id, dev->vs->viewer ? dev->vs->viewer->user : "?");
+        end_session(dev->vs, "taken_over", 1, 1);
+    }
     if (c->vs)
         end_session(c->vs, "replaced", 1, 0);
     vsession_t *vs = calloc(1, sizeof *vs);

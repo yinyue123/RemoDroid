@@ -70,7 +70,7 @@ async def run(args):
     nclip = make_clip(clip)
     port = 27000 + os.getpid() % 1000
     phone = subprocess.Popen(
-        [args.bin, "--listen", f"tcp:127.0.0.1:{port}", "--frames", clip, "--direct", "1", "--seconds", "40",
+        [args.bin, "--listen", f"tcp:127.0.0.1:{port}", "--frames", clip, "--direct", "1", "--audio", "1", "--seconds", "40",
          "--log", "debug" if args.verbose else "info"],
         stdout=subprocess.PIPE, stderr=None if args.verbose else subprocess.DEVNULL, text=True)
     results = {"clip_frames": nclip}
@@ -86,6 +86,7 @@ async def run(args):
 
         pc = RTCPeerConnection()
         decoded = []
+        audio = []
         channels = {}
         got = []
         opened = asyncio.Event()
@@ -98,7 +99,10 @@ async def run(args):
                         f = await track.recv()
                     except Exception:
                         return
-                    decoded.append((f.width, f.height))
+                    if track.kind == "audio":
+                        audio.append(f.samples)
+                    else:
+                        decoded.append((f.width, f.height))
             asyncio.ensure_future(consume())
 
         @pc.on("datachannel")
@@ -144,6 +148,7 @@ async def run(args):
                             d = m["d"]
                             if d["type"] == "offer":
                                 results["offer_has_h264"] = "H264/90000" in d["sdp"]
+                                results["offer_has_opus"] = "opus/48000/2" in d["sdp"]
                                 await pc.setRemoteDescription(RTCSessionDescription(d["sdp"], "offer"))
                                 answer = await pc.createAnswer()
                                 await pc.setLocalDescription(answer)
@@ -176,6 +181,7 @@ async def run(args):
         await asyncio.sleep(6)
         results["decoded_frames"] = len(decoded)
         results["frame_size"] = decoded[-1] if decoded else None
+        results["audio_frames"] = len(audio)
         results["dc_replies"] = [m for _, m in got]
         stats = await pc.getStats()
         for s in stats.values():
@@ -197,7 +203,8 @@ async def run(args):
           and "echo:hello" in results["dc_replies"]
           and any('"label":"input"' in m and '"binary":1' in m and '"n":14' in m for m in results["dc_replies"])
           and any('"label":"file"' in m and '"n":16008' in m for m in results["dc_replies"])
-          and results["frame_size"] == (640, 360))
+          and results["frame_size"] == (640, 360)
+          and results["audio_frames"] >= 150)  # 20 ms packets for 6+ s
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 

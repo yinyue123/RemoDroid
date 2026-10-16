@@ -23,6 +23,8 @@ final class Session implements ScreenEncoder.Listener {
     private final Controller controller;
     private final ScreenEncoder encoder;
     private final Files files;
+    private final AudioCapture audio = new AudioCapture();
+    private volatile boolean audioNegotiated, audioWanted = true; /* audioWanted: the viewer's Sound switch */
     private final ScheduledExecutorService exec = Executors.newSingleThreadScheduledExecutor();
     private final Map<Integer, Shell.Logcat> logcats = new HashMap<>();
     final String sid;
@@ -68,9 +70,10 @@ final class Session implements ScreenEncoder.Listener {
 
     // ---------------- lifecycle (native thread) ----------------
 
-    void connected(String codec, String profile, String qualityJson) {
+    void connected(String codec, String profile, String qualityJson, boolean audioNegotiated) {
         this.codec = codec;
         this.profile = profile;
+        this.audioNegotiated = audioNegotiated;
         try {
             quality = new JSONObject(qualityJson == null ? "{}" : qualityJson);
         } catch (Exception e) {
@@ -85,6 +88,7 @@ final class Session implements ScreenEncoder.Listener {
             encoder.configure(codec, profile, shortSide(quality.optString("preset", cfg.preset)),
                     Math.min(quality.optInt("fps", cfg.maxFps), cfg.maxFps), kbps);
             encoder.start();
+            updateAudio();
         });
         statsTask = exec.scheduleAtFixedRate(this::sendStats, 1, 1, TimeUnit.SECONDS);
     }
@@ -93,6 +97,7 @@ final class Session implements ScreenEncoder.Listener {
         active = false;
         exec.execute(() -> {
             encoder.stop();
+            audio.stop();
             for (Shell.Logcat l : logcats.values()) l.stop();
             logcats.clear();
             files.cancelAll();
@@ -148,6 +153,30 @@ final class Session implements ScreenEncoder.Listener {
 
     boolean panelOff() { return panelOff; }
 
+    // ---------------- sound ----------------
+
+    /** Capture runs only while it has somewhere to go: the viewer took the track, the router's
+     *  [phone] audio setting is on, and the viewer hasn't switched Sound off. Stopping gives the
+     *  sound back to the phone's speaker. */
+    private void updateAudio() {
+        boolean want = active && audioNegotiated && cfg.audio && audioWanted;
+        if (want && !audio.running()) audio.start();
+        else if (!want && audio.running()) audio.stop();
+    }
+
+    void configChanged() {
+        try {
+            exec.execute(this::updateAudio);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) { } /* the session just ended */
+    }
+
+    private void sendAudioState() {
+        try {
+            send(new JSONObject().put("t", "audio.state").put("d", new JSONObject().put("on", audio.running())
+                    .put("available", audioNegotiated && AudioCapture.supported()).put("enabled", cfg.audio)));
+        } catch (Exception ignored) { }
+    }
+
     // ---------------- data channels ----------------
 
     void channelOpen(String label) {
@@ -161,7 +190,8 @@ final class Session implements ScreenEncoder.Listener {
             send(new JSONObject().put("t", "session.ready").put("d", new JSONObject().put("proto", 1)
                     .put("screen", new JSONObject().put("w", di.width).put("h", di.height).put("rotation", di.rotation))
                     .put("codec", codec)
-                    .put("caps", new JSONObject().put("codecs", codecs).put("max_fps", cfg.maxFps).put("audio", false))));
+                    .put("caps", new JSONObject().put("codecs", codecs).put("max_fps", cfg.maxFps)
+                            .put("audio", audioNegotiated && AudioCapture.supported()))));
         } catch (Exception ignored) { }
         if (cfg.clipboardSync) {
             String c = device.getClipboard();
@@ -276,6 +306,12 @@ final class Session implements ScreenEncoder.Listener {
                     reply(m, null);
                     break;
                 }
+                case "audio.set":
+                    audioWanted = d.optBoolean("on", true);
+                    updateAudio();
+                    sendAudioState();
+                    reply(m, new JSONObject().put("on", audio.running()));
+                    break;
                 case "screen.power":
                     setPanel(d.optBoolean("on", true));
                     reply(m, null);
@@ -350,7 +386,7 @@ final class Session implements ScreenEncoder.Listener {
                     .put("loss_pct", s.optDouble("loss_pct", 0)).put("codec", codec)
                     .put("width", encoder.width).put("height", encoder.height)
                     .put("path", "relay".equals(s.optString("local")) ? "relay" : server.pathName())
-                    .put("panel", panelOff ? "off" : "on").put("inputs", controller.events);
+                    .put("panel", panelOff ? "off" : "on").put("inputs", controller.events).put("audio", audio.running());
             send(new JSONObject().put("t", "stats").put("d", d));
         } catch (Exception ignored) { }
     }

@@ -23,7 +23,7 @@ iPhone Safari ──WebRTC (UDP)──► AWS: remodroid-server (HTTP, WebSocket
 | `agent/` | Router agent: built-in ADB client (usbfs), phone supervisor, UDP relay, WebSocket client, CLI | C + libev |
 | `android/native/` | Phone WebRTC stack: ICE + TURN client, DTLS-SRTP, SCTP data channels, H.265/H.264 RTP, congestion control | C |
 | `android/java/` | Phone server: screen capture, MediaCodec, input injection, clipboard, screen power, files, logcat | Java (app_process) |
-| `web/` | iPhone client (PWA): video, multi-touch, floating-ball menu, photo upload, clipboard, all settings; `wizard.html` (server setup) and `agent.html` (routers: enroll, settings) | HTML/CSS/JS |
+| `web/` | iPhone client (PWA): video, sound, multi-touch, floating-ball menu (lock, reconnect, full screen), photo upload, clipboard, all settings; `panel.html` (bottom tabs: Devices, Agents with enroll and settings, Server settings one item at a time) and `wizard.html` (first-run setup) | HTML/CSS/JS |
 | `worker/` | The same panel on Cloudflare Workers + a Durable Object, with Cloudflare TURN, for people without a server | JS |
 | `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev) and `install_server.sh` / `install_agent.sh` | HTML, sh |
 | `common/` | Shared C: WebSocket framing, tunnel frames, STUN, JSON envelope, ini, utilities | C |
@@ -92,11 +92,13 @@ through the same steps with copy buttons.
      Worker is the same panel (login, routers, signaling) on a Durable Object with built-in storage.
 2. **Agent** on the router: `wget -qO- https://remodroid.pages.dev/install_agent.sh | sh` (OpenWrt),
    or `curl … | sudo sh` (Debian, Ubuntu, CentOS).
-3. **Connect:** on the panel, open **Routers → Add an agent** (`web/agent.html`). Paste the command it shows
+3. **Connect:** on the panel, open **Agents → Add** (`web/panel.html`). Paste the command it shows
    on the router: `remodroid enroll --panel https://your.panel --code X5SX-K3M7`. The code is single-use and
-   valid for 10 minutes. The router then shows as online, and its settings are edited on that page.
+   valid for 10 minutes. The agent then shows as online; tap it to edit its settings. The **Server** tab
+   changes one server setting at a time (domain, ports, login, STUN/TURN list).
 4. **Phone:** enable USB debugging, plug it into the router, and accept "Allow USB debugging" once.
-5. **iPhone:** open the panel in Safari, log in, then Share → Add to Home Screen.
+5. **iPhone:** open the panel in Safari, log in, then Share → Add to Home Screen. Opened from the Home
+   Screen it runs full screen (Safari on iPhone can't hide its bars for a normal page).
 
 Firewall for a self-hosted server: TCP 5580 (setup), then your web port (80) and 443 with a domain,
 UDP 3478 and UDP 49152–49252 for TURN.
@@ -127,4 +129,6 @@ Verified on this machine: everything in the test table above, including real Chr
 Not yet verified (needs your hardware, plan milestone M0): the Java phone server on a real
 Android phone (capture, encoder settings, input injection, clipboard, screen power), USB ADB on the
 router, Safari on your iPhone (H.265 support, hardware decoding), and real-network congestion control.
-Audio (M4) is not implemented yet.
+Sound (M4) works like scrcpy: the phone's output is captured (Android 12+), encoded to Opus and sent as a
+WebRTC audio track, and the phone's own speaker goes quiet while you're connected. The first tap on the
+picture unmutes it in Safari; the menu's **Sound** switch hands it back to the phone.

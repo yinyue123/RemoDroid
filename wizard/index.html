@@ -215,7 +215,7 @@ function pageConnect() {
   main.innerHTML = `${eyebrow(4, 'connect')}<h1>Enroll <em>the router</em></h1>
     <p class="lede">The router joins your panel with a one-time code that only your panel can make.</p>
     ${S.panel ? '' : panelField('panel')}
-    <div class="num"><i>1</i>Open your panel's Routers page</div>
+    <div class="num"><i>1</i>Open your panel's Agents tab</div>
     <p id="routers"></p>
     <div class="num"><i>2</i>Add an agent</div>
     <p>That link opens <b>Add an agent → Connect</b> (or click them yourself). Your panel shows a code such as <code>X5SX-K3M7</code>: single use, valid for <b>10 minutes</b>. The page there has the whole command with a copy button; or type the code here.</p>
@@ -223,14 +223,14 @@ function pageConnect() {
     <div class="num"><i>3</i>Run it on the router</div>
     <div id="enroll"></div>
     <div class="term" id="term"></div>
-    <p class="note">When it says <b>bound</b>, your panel's page turns green too. From then on the router's video, phone and clipboard settings live on the Routers page — no ini editing.</p>`;
+    <p class="note">When it says <b>bound</b>, your panel's page turns green too. From then on the router's video, phone and clipboard settings live on the panel's Agents tab — no ini editing.</p>`;
   const draw = () => {
     const code = ($('#code').value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
     const c = code.length === 8 ? code.slice(0, 4) + '-' + code.slice(4) : '';
     const p = S.panel || 'https://your.panel';
     const line = `remodroid enroll --panel ${p} --code ${c || 'XXXX-XXXX'}`;
     $('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">Open ${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html ↗</a>`
-      : 'Enter your panel\'s address above, or open it yourself and go to <b>Routers</b> (top right of the setup page).';
+      : 'Enter your panel\'s address above, or open it yourself and go to <b>Agents → Add</b>.';
     $('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? 'Type the code from your panel above.' : 'Enter your panel\'s address and the code.'}</p>`;
     $('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ contacting the panel ${esc(p)}…</div><div class="d">▸ enrolled as "OpenWrt" (openwrt); saved in /etc/remodroid/agent.ini</div><div class="k">✓ bound — this router is online</div>`;
   };
@@ -248,7 +248,7 @@ function pagePhone() {
     <div class="num"><i>2</i>Connect it to the router's USB port</div>
     <p>A data cable, not a charge-only one. The agent finds the phone by itself and installs its small server on it (nothing from the Play Store).</p>
     <div class="num"><i>3</i>Allow the router</div>
-    <p>The phone asks <b>“Allow USB debugging?”</b>. Tick <b>Always allow from this computer</b>, then <b>Allow</b>. ${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">The Routers page</a>` : 'The Routers page'} shows the phone as ready.</p>`;
+    <p>The phone asks <b>“Allow USB debugging?”</b>. Tick <b>Always allow from this computer</b>, then <b>Allow</b>. ${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">The panel's Agents tab</a>` : 'The panel\'s Agents tab'} shows the phone as ready.</p>`;
 }
 
 /* ---------- 6. done ---------- */

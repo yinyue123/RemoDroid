@@ -415,7 +415,9 @@ WebRTC doesn't define how to deliver them. RemoDroid relays them as JSON through
 What each step does in the code:
 
 1. **`session.request`** (`app.js: startSession`). The server's `viewer_session_request()`:
-   - checks that the device exists, is online and isn't busy;
+   - checks that the device exists, is online and isn't busy. If another viewer holds it, the request fails with `busy`
+     unless it carries `"takeover":true` (the **Take over** button on the "In use" screen): then that viewer's session
+     is ended with reason `taken_over` (the phone gets `session.end`, the old browser `session.ended`) and this one goes ahead;
    - makes a session ID (`s_` + 16 hex);
    - computes TURN credentials (`ice_servers()`, §11.4);
    - sends `session.start` to the agent;
@@ -458,7 +460,7 @@ v=0                                                   SDP version
 o=- 4611686018427387904 2 IN IP4 127.0.0.1            origin: session id, version (unused values are allowed)
 s=-                                                   session name (unused)
 t=0 0                                                 timing: permanent
-a=group:BUNDLE 0 1                                    both m-sections share ONE transport (one ICE/DTLS)
+a=group:BUNDLE 0 1 2                                  all m-sections share ONE transport (one ICE/DTLS)
 a=extmap-allow-mixed                                  one- and two-byte header extensions may mix
 a=msid-semantic: WMS remodroid
 m=video 9 UDP/TLS/RTP/SAVPF 96 97 98 99 100 101       video section; port 9 = "see ICE"; PT list in preference order
@@ -493,9 +495,23 @@ a=ice-ufrag / ice-pwd / fingerprint / setup:active    same transport values (BUN
 a=mid:1
 a=sctp-port:5000                                      SCTP port inside DTLS
 a=max-message-size:262144                             largest data-channel message the phone accepts
+m=audio 9 UDP/TLS/RTP/SAVPF 111                       the phone's sound (Android 12+; left out otherwise)
+a=mid:2  a=sendonly  a=msid:remodroid audio0          same stream id as the video: one MediaStream in Safari
+a=rtpmap:111 opus/48000/2                             Opus, 48 kHz, stereo
+a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1
+a=ssrc:<audio ssrc> cname:remodroid  (+ msid line)
 ```
 
 If the phone has no hardware H.265 encoder, PTs 96 and 97 are left out.
+
+**Sound** (`AudioCapture.java`, `rtc_audio`). The phone records the `REMOTE_SUBMIX` source, the same
+one scrcpy uses: while it records, Android plays media into the submix instead of the speaker, so the
+sound moves to the iPhone. It needs a context that says it is `com.android.shell` (uid 2000, which holds
+`CAPTURE_AUDIO_OUTPUT`), built from `ActivityThread` on the main thread. MediaCodec encodes Opus;
+each 20 ms packet becomes one RTP packet (PT 111, 48 kHz clock, marker on the first). No RTCP sender
+reports are sent for it, so the browser plays it at once instead of holding it for lip sync. Capture
+runs only while the viewer took the track, `[phone] audio` is on and the viewer hasn't switched Sound off
+(`audio.set` on the ctrl channel); stopping gives the sound back to the phone's speaker.
 
 ---
 
@@ -929,15 +945,23 @@ lifetime is left. Failures retry after 10 minutes, doubling up to 12 hours.
 - Saving rewrites `server.ini` line by line with `rd_conf_write` (comments kept), then re-execs
   `/proc/self/exe` on the new ports. All sockets are close-on-exec.
 
+**Settings after setup** (`settings_api`, the panel's Server tab, `web/panel.html#server`):
+- `GET /api/v1/settings` returns the current values; the STUN/TURN list comes back as
+  `[{url, username, has_credential}]`, never with its passwords.
+- `PATCH /api/v1/settings` carries only the fields that changed. A new name or password needs
+  `current_password`. A list entry without a password keeps the one it had (matched by `was`, its old URL).
+- Only a change to a listener (web/HTTPS port, domain, built-in TURN) restarts the server. Logins survive
+  that restart: `auth_save_sessions` writes them to `<state_dir>/sessions` (0600) just before the re-exec.
+
 **Enrollment:**
 
 ```
-web/agent.html   POST /api/v1/enroll/codes            → {code: "X5SX-K3M7", expires_in: 600}
+web/panel.html   POST /api/v1/enroll/codes            → {code: "X5SX-K3M7", expires_in: 600}
 router           remodroid enroll --panel https://… --code X5SX-K3M7
                  POST /api/v1/enroll {code, name, arch} (no login: the code is the proof)
                  ← {device_id, device_secret, ws_path}  → agent.ini [server] url/device_id/device_secret
                  the CLI asks the running agent to reload; it connects with wss:// (https panel) or ws://
-web/agent.html   GET /api/v1/enroll/codes/X5SX-K3M7     → {state: "used", device, online: true}
+web/panel.html   GET /api/v1/enroll/codes/X5SX-K3M7     → {state: "used", device, online: true}
 ```
 
 The router's settings are then read and written from the panel with the `agent.config.get` and

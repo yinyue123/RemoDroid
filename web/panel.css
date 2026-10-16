@@ -1,0 +1,114 @@
+/* The panel (panel.html): Devices · Agents · Server, with the tab bar at the
+ * bottom like a phone app. Builds on setup.css (colours, fields, buttons);
+ * the STUN/TURN list styles are shared with wizard.html. */
+body.panel{padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+.ptop{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;min-height:56px;
+  padding:calc(8px + env(safe-area-inset-top)) max(16px,calc(50vw - 380px)) 8px;
+  background:color-mix(in srgb,var(--paper) 90%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.ptop h1{flex:1;margin:0;font:600 19px/1.2 var(--serif);letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptop .back{border:0;background:none;color:var(--accent);font:16px var(--sans);padding:6px 4px;margin-left:-4px;display:flex;align-items:center;gap:2px;text-decoration:none}
+.ptop .back::before{content:"‹";font-size:26px;line-height:16px;margin-top:-3px}
+.ptop .act{border:0;background:none;color:var(--accent);font:500 16px var(--sans);padding:6px 2px;text-decoration:none;white-space:nowrap}
+.panel main{max-width:760px;padding:18px 16px 28px}
+
+/* ---------- bottom tab bar ---------- */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;
+  padding:6px 8px calc(6px + env(safe-area-inset-bottom));background:color-mix(in srgb,var(--paper) 90%,transparent);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line)}
+.tabbar a{flex:1;max-width:180px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 0;text-decoration:none;
+  color:var(--faint);font:500 11px/1 var(--sans);-webkit-tap-highlight-color:transparent}
+.tabbar svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tabbar a[aria-current="page"]{color:var(--accent)}
+.tabbar .badge{position:relative}
+.tabbar .badge::after{content:attr(data-n);position:absolute;top:-4px;right:-10px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;
+  background:var(--bad);color:#fff;font:600 10px/16px var(--sans);text-align:center}
+.tabbar .badge[data-n=""]::after,.tabbar .badge:not([data-n])::after{display:none}
+
+/* ---------- grouped lists (iOS settings style) ---------- */
+.gtitle{margin:22px 4px 7px;font:500 12px/1.2 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.gtitle:first-child{margin-top:4px}
+.gfoot{margin:7px 4px 0;font-size:13px;color:var(--muted)}
+.group{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.item{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:10px 14px;border:0;border-top:1px solid var(--line);
+  background:none;text-align:left;color:var(--ink);text-decoration:none;font:16px/1.3 var(--sans)}
+.item:first-child{border-top:0}
+button.item:active,a.item:active{background:var(--paper-2)}
+.item .txt{flex:1;min-width:0}
+.item .txt b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .txt small{display:block;font:13px/1.35 var(--sans);color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis}
+.item .val{flex:none;max-width:55%;color:var(--muted);font-size:15px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .chev{flex:none;color:var(--faint);font-size:22px;line-height:1;margin-left:-4px}
+.item.danger{color:var(--bad);justify-content:center;font-weight:500}
+.item.accent{color:var(--accent);font-weight:500}
+.item select{flex:none;max-width:55%;border:0;background:none;color:var(--muted);font-size:15px;text-align:right;direction:rtl;padding:4px 0;appearance:none;-webkit-appearance:none}
+.item select:focus{outline:none;color:var(--accent)}
+.ic{flex:none;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--paper-2);color:var(--ink-2)}
+.ic svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ic.on{background:var(--ok-soft);color:var(--ok)}
+.ic.off{background:var(--bad-soft);color:var(--bad)}
+.ic.wait{background:var(--warn-soft);color:var(--warn)}
+.pill{flex:none;font:500 11.5px/1 var(--mono);padding:5px 8px;border-radius:999px;background:var(--paper-2);color:var(--muted);border:1px solid var(--line)}
+.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.pill.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+
+/* switch */
+.sw{appearance:none;-webkit-appearance:none;flex:none;width:51px;height:31px;border-radius:999px;background:var(--line-2);position:relative;margin:0;cursor:pointer;transition:background .18s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .18s}
+.sw:checked{background:var(--ok)}
+.sw:checked::after{transform:translateX(20px)}
+.sw:disabled{opacity:.5}
+
+.empty-state{text-align:center;padding:48px 16px 24px;color:var(--muted)}
+.empty-state svg{width:56px;height:56px;fill:none;stroke:var(--faint);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.empty-state h2{margin:12px 0 6px;color:var(--ink)}
+.empty-state p{margin:0 0 20px}
+
+/* ---------- edit sheet ---------- */
+.scrim{position:fixed;inset:0;z-index:30;background:rgba(20,16,10,.38);animation:fade .15s ease-out}
+.psheet{position:fixed;z-index:31;left:0;right:0;bottom:0;margin-inline:auto;max-width:560px;max-height:92vh;overflow:auto;
+  background:var(--paper);border-radius:20px 20px 0 0;padding:8px 16px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -16px 40px rgba(0,0,0,.25);animation:rise .2s ease-out}
+.psheet header{display:flex;align-items:center;gap:8px;padding:8px 0 14px}
+.psheet header h2{flex:1;margin:0;text-align:center;font:600 17px/1.2 var(--sans)}
+.psheet header button{border:0;background:none;color:var(--accent);font:16px var(--sans);padding:6px 2px;min-width:64px}
+.psheet header button.save{font-weight:600;text-align:right}
+.psheet header button.cancel{text-align:left}
+.psheet header button[disabled]{opacity:.4}
+.psheet .form{max-width:none;gap:14px}
+.psheet .hint{font-size:13.5px;color:var(--muted);margin:0}
+@keyframes rise{from{transform:translateY(30px);opacity:.5}to{transform:none;opacity:1}}
+@keyframes fade{from{opacity:0}}
+@media (min-width:640px){.psheet{bottom:auto;top:12vh;border-radius:20px}}
+
+.busy{position:fixed;inset:0;z-index:40;display:grid;place-items:center;background:color-mix(in srgb,var(--paper) 80%,transparent);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+.busy div{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 24px;text-align:center;max-width:320px}
+.spin{width:28px;height:28px;margin:0 auto 10px;border-radius:50%;border:3px solid var(--line-2);border-top-color:var(--accent);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* the add-an-agent flow inside the Agents tab (from the old agent.html) */
+.panel .steps{padding:10px 0 14px;border:0;margin:0 0 6px}
+.panel .flow h1{font-size:clamp(30px,8vw,44px)}
+.panel .flow-foot{display:flex;gap:10px;align-items:center;margin-top:28px}
+.panel .flow-foot .spacer{flex:1}
+
+/* ---------- STUN/TURN list (ice-list.js; wizard.html too) ---------- */
+.ice-list{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.ice-row{display:flex;align-items:center;gap:12px;width:100%;padding:11px 14px;border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--ink)}
+.ice-row:first-child{border-top:0}
+.ice-row.open{display:block;background:var(--paper-2);padding:14px}
+.ice-ic{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font:600 13px var(--mono);background:var(--ok-soft);color:var(--ok)}
+.ice-ic.turn,.ice-ic.turns{background:var(--accent-soft);color:var(--accent)}
+.ice-txt{flex:1;min-width:0}
+.ice-txt b{display:block;font:500 15px var(--mono);overflow:hidden;text-overflow:ellipsis}
+.ice-txt small{display:block;font:12.5px var(--mono);color:var(--muted)}
+.ice-row .chev{color:var(--faint);font-size:22px}
+.ice-add{display:block;width:100%;padding:14px;border:0;border-top:1px solid var(--line);background:none;color:var(--accent);font:500 15px var(--sans);text-align:left}
+.ice-list > .ice-add:first-child{border-top:0}
+.ice-empty{margin:0;padding:14px;color:var(--muted);font-size:14px}
+.ice-edit{display:grid;gap:12px}
+.ice-edit .seg{margin:0}
+.ice-edit .seg button{padding:8px 14px;font-size:13px}
+.ice-edit[data-type="stun"] .turn-only{display:none}
+.ice-edit .ice-btns{display:flex;gap:8px;align-items:center}
+.ice-edit .ice-btns .spacer{flex:1}
+.ice-edit .callout{margin:0}
+.ice-more{display:grid;gap:12px}

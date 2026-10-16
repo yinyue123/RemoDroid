@@ -110,7 +110,7 @@ void enroll_public(conn_t *c, const http_req_t *r)
     if (!k || k->device[0] || rd_now_ms() > k->expires) {
         auth_fail(c);
         LOGW("enroll: bad or used code from %s", c->ip);
-        http_error(c, 404, "bad_code", "this code is wrong, used or expired; make a new one on the Routers page");
+        http_error(c, 404, "bad_code", "this code is wrong, used or expired; make a new one on the panel (Agents → Add)");
         cJSON_Delete(in);
         return;
     }

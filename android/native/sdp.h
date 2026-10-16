@@ -9,7 +9,7 @@
 enum { CODEC_NONE, CODEC_H265, CODEC_H264_HIGH, CODEC_H264_BASELINE };
 
 /* payload types in our offer */
-enum { PT_H265 = 96, PT_H265_RTX = 97, PT_H264H = 98, PT_H264H_RTX = 99, PT_H264B = 100, PT_H264B_RTX = 101 };
+enum { PT_H265 = 96, PT_H265_RTX = 97, PT_H264H = 98, PT_H264H_RTX = 99, PT_H264B = 100, PT_H264B_RTX = 101, PT_OPUS = 111 };
 /* header extension ids in our offer */
 enum { EXT_ABS_SEND_TIME = 1, EXT_TWCC = 2, EXT_PLAYOUT_DELAY = 3 };
 
@@ -17,6 +17,8 @@ typedef struct {
     const char *ufrag, *pwd, *fingerprint;
     uint32_t ssrc, rtx_ssrc;
     int offer_h265;
+    int offer_audio;   /* add an Opus m=audio section (mid 2) */
+    uint32_t audio_ssrc;
     uint64_t session_id;
 } sdp_offer_t;
 
@@ -27,6 +29,7 @@ typedef struct {
     int nack, pli, fir, twcc, remb;
     int ext_abs, ext_twcc, ext_playout;
     int sctp_ok, sctp_port;
+    int audio_ok, audio_pt;   /* the viewer accepted our Opus track */
     size_t max_message;
     char cand[16][256];
     int ncand;

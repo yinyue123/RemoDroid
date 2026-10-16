@@ -117,9 +117,31 @@ async function main() {
   j = await (await fetch(B + '/api/v1/setup', { headers: H })).json();
   ok(j.configured && j.username === 'admin' && /alice/.test(j.ice_extra), 'settings can be read back after login');
 
+  console.log('settings (the panel\'s Server tab)');
+  r = await fetch(B + '/api/v1/settings', { headers: H });
+  let txt = await r.text();
+  j = JSON.parse(txt);
+  ok(r.status === 200 && j.platform === 'worker' && j.ice_servers.length === 2 && j.ice_servers[1].has_credential && !/s3cret/.test(txt),
+    'the STUN/TURN list comes back without its passwords');
+  const PATCH = body => fetch(B + '/api/v1/settings', { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+  r = await PATCH({ ice_servers: [{ url: 'stun:stun.cloudflare.com:3478' },
+    { url: 'turn:turn.example.com:3479?transport=udp', username: 'alice', was: 'turn:turn.example.com:3478?transport=udp' }, { url: 'stun:203.0.113.10:3478' }] });
+  j = await (await fetch(B + '/api/v1/setup', { headers: H })).json();
+  ok(r.status === 200 && j.ice_extra === 'stun:stun.cloudflare.com:3478, turn:turn.example.com:3479?transport=udp alice s3cret, stun:203.0.113.10:3478',
+    'editing one server keeps its password; adding one needs just the address');
+  r = await PATCH({ ice_servers: [] });
+  ok(r.status === 400, 'the last STUN/TURN server can\'t go without Cloudflare TURN');
+  r = await PATCH({ current_password: 'wrong-one', password: 'new-password-1' });
+  ok(r.status === 403, 'a new password needs the current one');
+  r = await PATCH({ current_password: 'correct-horse', password: 'new-password-1' });
+  const basic = pw => fetch(B + '/', { redirect: 'manual', headers: { Authorization: 'Basic ' + Buffer.from('admin:' + pw).toString('base64') } }).then(x => x.status);
+  ok(r.status === 200 && await basic('new-password-1') === 200 && await basic('correct-horse') === 401, 'the password changes, the session stays');
+  r = await PATCH({ current_password: 'new-password-1', password: 'correct-horse' });
+  ok(r.status === 200, 'and back');
+
   console.log('enroll');
   const code = (await (await fetch(B + '/api/v1/enroll/codes', { method: 'POST', headers: H, body: '{"name":"Living room"}' })).json()).code;
-  ok(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/.test(code), 'the Routers page gets a one-time code');
+  ok(/^[2-9A-Z]{4}-[2-9A-Z]{4}$/.test(code), 'the Agents tab gets a one-time code');
   const ini = path.join(dir, 'agent.ini');
   fs.writeFileSync(ini, `[agent]\nadbkey = ${dir}/adbkey\nsocket = ${dir}/agent.sock\nlog_level = debug\n[phone]\nadb = tcp:127.0.0.1:1\n`);
   const agent = start('agent', path.join(BIN, 'remodroid-agent'), ['-c', ini]);

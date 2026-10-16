@@ -29,6 +29,7 @@ serial =                           ; empty = first phone found on USB
 link = adb                         ; adb | tcp:HOST:PORT (development only)
 path = auto                        ; auto | tunnel (Path A) | wifi (Path B)
 force_relay = false
+audio = true                       ; play the phone's sound on the iPhone; the phone's speaker goes quiet (Android 12+)
 screen_off_on_connect = true
 lock_on_disconnect = true
 lock_grace_seconds = 10

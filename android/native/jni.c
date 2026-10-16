@@ -9,7 +9,7 @@
 #include "rd.h"
 #include "rtc.h"
 
-enum { C_CTRL, C_DC, C_VIDEO, C_END, C_MAXKBPS, C_DIRECT, C_DC_OPEN };
+enum { C_CTRL, C_DC, C_VIDEO, C_END, C_MAXKBPS, C_DIRECT, C_DC_OPEN, C_AUDIO };
 
 typedef struct cmd {
     int type;
@@ -72,10 +72,10 @@ static void cb_link(void *ud, int up)
 }
 
 static void cb_session(void *ud, const char *sid, int state, const char *codec, const char *profile, const char *quality,
-                       const char *reason)
+                       const char *reason, int audio)
 {
     jstring a = jstr(sid), b = jstr(codec), c = jstr(profile), d = jstr(quality), e = jstr(reason);
-    (*J.env)->CallStaticVoidMethod(J.env, J.cls, J.on_session, a, (jint)state, b, c, d, e);
+    (*J.env)->CallStaticVoidMethod(J.env, J.cls, J.on_session, a, (jint)state, b, c, d, e, (jboolean)(audio != 0));
     jstring all[] = { a, b, c, d, e };
     for (int i = 0; i < 5; i++)
         if (all[i])
@@ -123,6 +123,7 @@ static void run_cmd(cmd_t *c)
     case C_DC: rtc_dc_send(J.rtc, c->label, c->flag, c->data, c->len); break;
     case C_DC_OPEN: rtc_dc_open(J.rtc, c->label); break;
     case C_VIDEO: rtc_video(J.rtc, c->data, c->len, c->pts, c->flag); break;
+    case C_AUDIO: rtc_audio(J.rtc, c->data, c->len, c->pts); break;
     case C_END: rtc_end_session(J.rtc, c->str); break;
     case C_MAXKBPS: rtc_set_max_kbps(J.rtc, c->num); break;
     case C_DIRECT: rtc_set_direct(J.rtc, c->flag); break;
@@ -155,10 +156,11 @@ static void on_stats(struct ev_loop *loop, ev_timer *w, int revents)
     snprintf(buf, sizeof buf,
              "{\"connected\":%s,\"target_kbps\":%d,\"acked_kbps\":%d,\"rtt_ms\":%d,\"loss_pct\":%.1f,"
              "\"packets\":%llu,\"bytes\":%llu,\"retransmits\":%llu,\"nacks\":%llu,\"plis\":%llu,"
-             "\"local\":\"%s\",\"remote\":\"%s\",\"cc\":\"%s\"}",
+             "\"local\":\"%s\",\"remote\":\"%s\",\"cc\":\"%s\",\"audio_packets\":%llu}",
              s.connected ? "true" : "false", s.target_kbps, s.acked_kbps, s.rtt_ms, s.loss * 100,
              (unsigned long long)s.packets, (unsigned long long)s.bytes, (unsigned long long)s.retransmits,
-             (unsigned long long)s.nacks, (unsigned long long)s.plis, s.local_type, s.remote_type, s.cc_state);
+             (unsigned long long)s.nacks, (unsigned long long)s.plis, s.local_type, s.remote_type, s.cc_state,
+             (unsigned long long)s.audio_packets);
     pthread_mutex_lock(&J.mu);
     memcpy(J.stats, buf, sizeof buf);
     pthread_mutex_unlock(&J.mu);
@@ -225,7 +227,8 @@ static char *dup_jstring(JNIEnv *env, jstring s)
 
 /* ---------------- native methods ---------------- */
 
-static jboolean n_start(JNIEnv *env, jclass cls, jstring listen, jboolean direct, jboolean h265, jint max_kbps, jint log)
+static jboolean n_start(JNIEnv *env, jclass cls, jstring listen, jboolean direct, jboolean h265, jboolean audio, jint max_kbps,
+                        jint log)
 {
     if (J.started)
         return J.ok;
@@ -233,7 +236,8 @@ static jboolean n_start(JNIEnv *env, jclass cls, jstring listen, jboolean direct
     const char *l = (*env)->GetStringUTFChars(env, listen, NULL);
     snprintf(J.listen, sizeof J.listen, "%s", l);
     (*env)->ReleaseStringUTFChars(env, listen, l);
-    J.opts = (rtc_opts_t){ .listen = J.listen, .direct = direct, .offer_h265 = h265, .max_kbps = max_kbps };
+    J.opts = (rtc_opts_t){ .listen = J.listen, .direct = direct, .offer_h265 = h265, .offer_audio = audio,
+                         .max_kbps = max_kbps };
     pthread_mutex_init(&J.mu, NULL);
     pthread_cond_init(&J.started_cv, NULL);
     pthread_create(&J.thread, NULL, thread_main, NULL);
@@ -291,6 +295,21 @@ static void n_video(JNIEnv *env, jclass cls, jobject buf, jint off, jint size, j
     enqueue(c);
 }
 
+/* one Opus packet from MediaCodec's direct output buffer */
+static void n_audio(JNIEnv *env, jclass cls, jobject buf, jint off, jint size, jlong pts)
+{
+    uint8_t *p = (*env)->GetDirectBufferAddress(env, buf);
+    if (!p || size <= 0)
+        return;
+    cmd_t *c = calloc(1, sizeof *c);
+    c->type = C_AUDIO;
+    c->len = (size_t)size;
+    c->data = malloc(c->len);
+    memcpy(c->data, p + off, (size_t)size);
+    c->pts = pts;
+    enqueue(c);
+}
+
 static void n_end_session(JNIEnv *env, jclass cls, jstring reason)
 {
     cmd_t *c = calloc(1, sizeof *c);
@@ -325,7 +344,8 @@ static jstring n_stats(JNIEnv *env, jclass cls)
 }
 
 static const JNINativeMethod METHODS[] = {
-    { "start", "(Ljava/lang/String;ZZII)Z", (void *)n_start },
+    { "start", "(Ljava/lang/String;ZZZII)Z", (void *)n_start },
+    { "audio", "(Ljava/nio/ByteBuffer;IIJ)V", (void *)n_audio },
     { "sendCtrl", "(Ljava/lang/String;)V", (void *)n_send_ctrl },
     { "dcSend", "(Ljava/lang/String;Z[B)V", (void *)n_dc_send },
     { "dcOpen", "(Ljava/lang/String;)V", (void *)n_dc_open },
@@ -351,7 +371,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved)
     J.on_ctrl = (*env)->GetStaticMethodID(env, cls, "onCtrl", "(Ljava/lang/String;)V");
     J.on_link = (*env)->GetStaticMethodID(env, cls, "onLink", "(Z)V");
     J.on_session = (*env)->GetStaticMethodID(env, cls, "onSession",
-                                             "(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+                                             "(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
     J.on_open = (*env)->GetStaticMethodID(env, cls, "onChannelOpen", "(Ljava/lang/String;)V");
     J.on_message = (*env)->GetStaticMethodID(env, cls, "onMessage", "(Ljava/lang/String;Z[B)V");
     J.on_keyframe = (*env)->GetStaticMethodID(env, cls, "onKeyframe", "()V");

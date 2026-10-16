@@ -872,6 +872,7 @@ static const cfgmap_t CFG[] = {
     { "autoPaste", "phone", "auto_paste" },            { "overheat", "phone", "overheat_c" },
     { "rotation", "phone", "rotation" },               { "route", "phone", "path" },
     { "relay", "phone", "force_relay" },               { "destDir", "files", "upload_dir" },
+    { "audio", "phone", "audio" },
     { "mediaScan", "files", "media_scan" },            { "overwrite", "files", "overwrite" },
     { "maxMb", "files", "max_mb" },                    { "codec", "video", "codec" },
     { "kbps", "video", "max_bitrate_kbps" },           { "fps", "video", "max_fps" },

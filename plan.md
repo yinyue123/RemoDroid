@@ -1,4 +1,4 @@
-# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v15)
+# RemoDroid: Low-Latency Android Cloud Gaming — Project Plan (Draft v16)
 
 > **v2 change:** the phone does all the heavy work (capture, encoding, WebRTC). The ARM device can be a weak OpenWrt router. Its only runtime job is a small C relay that reads framed packets from a TCP connection and sends them as UDP packets.
 >
@@ -9,6 +9,8 @@
 > **v5 change:** the router agent keeps a WebSocket connection to the AWS server, used only for control messages and keepalive (§4.2, §4.5). The agent is written in C and uses libev for all I/O.
 >
 > **v6 change:** no TLS. Plain HTTP and `ws://`, secured with HTTP Basic auth plus session cookies (§4.6).
+>
+> **v16 change:** sound, and a panel laid out like a phone app. The phone's audio output is captured and sent as an Opus WebRTC track (M4). `web/panel.html` has bottom tabs (Devices, Agents, Server); the Server tab edits one setting at a time through `PATCH /api/v1/settings`, which restarts the server only when a listener moves, and keeps logins across that restart. A viewer can take over a phone another browser is using (`session.request` with `takeover`).
 >
 > **v15 change:** guided install. A fresh server starts a setup wizard on port 5580 (`web/wizard.html`). Routers join with a one-time code: `remodroid enroll --panel … --code …` (`web/agent.html`). The same panel also runs on Cloudflare Workers (`worker/`) with Cloudflare TURN, for people without a server. The install site is in `wizard/` (remodroid.pages.dev).
 >
@@ -90,7 +92,7 @@ The phone is the WebRTC peer. The router relays packets without understanding th
 - **Java part**, about 1–1.5k lines, **written from scratch** for your phone's Android version, using scrcpy-server (Apache 2.0) **only as a reference** for hidden API signatures. No scrcpy code or binaries are used directly:
   - virtual display capture
   - MediaCodec encoding set up for low latency: **H.265 (HEVC) by default, H.264 as fallback**
-  - audio capture (Android 11+)
+  - audio capture (Android 12+)
   - input injection
   - live control of bitrate, resolution, FPS and keyframe requests
 - **Native part** (`libremodroid.so` loaded through JNI, or a separate `rtcd` executable connected through a unix socket if JNI loading under `app_process` turns out to be restricted; this gets verified in M0):
@@ -505,7 +507,7 @@ remodroid/
 | M1 | **Agent + LAN MVP** | C agent relaying media; phone streams WebRTC (H.265, with automatic H.264 fallback) through the router to Safari on the LAN; touch control works; latency measured for Path A and Path B |
 | M2 | **Cloud path** | AWS control server (plain HTTP), Basic-auth login with session cookies, and TURN deployed; agent's WebSocket connects, authenticates with Basic auth then cookie, sends keepalives and reconnects; signaling flows over it; works over 5G |
 | M3 | **Quality controls** | Presets, live bitrate, resolution switching, auto mode, stats overlay |
-| M4 | **Audio** | Opus audio with tap-to-unmute |
+| M4 | **Audio** | Opus audio with tap-to-unmute — **done** (v16): REMOTE_SUBMIX capture as the shell user (`AudioCapture.java`), Opus from MediaCodec, one RTP packet per 20 ms frame on an `m=audio` section (mid 2) |
 | M5 | **Photo upload, clipboard, screen power** | iPhone photo appears in the Android album; text copied on either side can be pasted on the other; the panel turns off after connecting; the phone locks 10 s after disconnecting and also after a server crash |
 | M6 | **Reliability + packaging** | USB replug recovery, auto-reconnect, procd/systemd services, logs; `make dist` builds every static binary in the build container; install = copy files |
 | M7 | *Optional* | Gamepad, clipboard sync, multiple devices, recording |
@@ -657,7 +659,7 @@ All endpoints except `/login` require the `rd_session` cookie (§4.6). Bodies ar
     "path": "tunnel",
     "codecs": ["h265", "h264"]
   },
-  "session": {"active": true, "sid": "s_8f2c…", "since": 1767139000000}
+  "session": {"active": true, "sid": "s_8f2c…", "since": 1767139000000, "viewer": "me"}
 }
 ```
 - `phone.screen`: `on` | `off` (panel off, §4.9) | `asleep`.
@@ -707,11 +709,11 @@ Authenticated by cookie; the server checks `Origin`.
 | server → viewer | `devices` | `{"devices":[Device,…]}` | Full snapshot, sent right after connecting |
 | server → viewer | `device.update` | `{"id":"router1","patch":{…}}` | Partial `Device` update, e.g. battery or screen state |
 | server → viewer | `device.event` | `Event` (below) | **Device detection** and state changes, in real time |
-| viewer → server | `session.request` | `{"device":"router1","quality":QualitySettings}` | Ask to connect; reply `ack {"sid":"s_…"}` or `error busy/offline` |
+| viewer → server | `session.request` | `{"device":"router1","quality":QualitySettings,"takeover":true}` | Ask to connect; reply `ack {"sid":"s_…"}` or `error busy/offline`. `takeover` (the **Take over** button) ends the other viewer's session (`session.ended {reason:"taken_over"}`) instead of answering `busy` |
 | server → viewer | `session.ice` | `{"ice_servers":[{"urls":"turn:…","username":"…","credential":"…"}]}` | TURN credentials for this session |
 | server ⇄ viewer | `signal` | `{"type":"offer"\|"answer"\|"candidate", …}` | WebRTC signaling (the phone sends the offer) |
 | viewer → server | `session.end` | `{}` | Leave |
-| server → viewer | `session.ended` | `{"reason":"viewer_left"\|"phone_detached"\|"agent_offline"\|"timeout"}` | Session is over |
+| server → viewer | `session.ended` | `{"reason":"viewer_left"\|"taken_over"\|"phone_detached"\|"agent_offline"\|"timeout"}` | Session is over |
 
 **`Event` object**, the device detection feed:
 ```json
@@ -790,6 +792,7 @@ Opened by the phone right after the WebRTC connection is up. The first message i
 | Direction | `t` | `d` |
 |---|---|---|
 | viewer → phone | `screen.power` | `{"on":true}`: turn the physical panel on or off during the session |
+| viewer → phone | `audio.set` | `{"on":false}`: stop sending sound, so the phone's own speaker plays again (`true` takes it back); reply `ack {"on":…}` and `audio.state {"on","available","enabled"}` |
 | phone → viewer | `screen.state` | `{"panel":"on"\|"off","locked":true}` |
 
 **Shell**
@@ -928,4 +931,4 @@ These work **without a WebRTC session and without AWS**, which is useful on the 
 | mbedTLS config | `common/rd_mbedtls_config.h` (unique name) | `MBEDTLS_CONFIG_FILE="mbedtls_config.h"` silently picked mbedTLS's own default file, so the agent and server were built with the full config; fixing it halved their size |
 
 **Verified on the build machine:** control plane (48 end-to-end checks, also on static MIPS binaries under QEMU), the phone WebRTC stack against aiortc (direct, through the agent's tunnel, and TURN-only), bit-exact H.265/H.264 packetization, and the real web client in headless Chrome against the whole chain.
-**Needs hardware (M0):** the Java phone server on a real phone, USB ADB on the router, Safari/iOS specifics, real-network congestion behaviour. **Not started:** audio (M4).
+**Needs hardware (M0):** the Java phone server on a real phone, USB ADB on the router, Safari/iOS specifics, real-network congestion behaviour. Audio (M4) is done and checked on a Sony SO-51A (Android 12).

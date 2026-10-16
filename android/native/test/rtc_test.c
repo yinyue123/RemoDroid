@@ -2,7 +2,9 @@
  * stack: serves the tunnel, streams a pre-encoded clip once a session is
  * connected, and echoes data channel messages.
  *
- *   rtc_test --listen tcp:127.0.0.1:27183 --frames clip.frames [--direct 1] [--h265 0] [--seconds 20]
+ *   rtc_test --listen tcp:127.0.0.1:27183 --frames clip.frames [--direct 1] [--h265 0] [--audio 1] [--seconds 20]
+ *
+ * --audio 1 offers the sound track and sends an Opus silence packet every 20 ms.
  *
  * clip.frames: repeated records of u32 BE length, u8 keyframe, Annex-B data. */
 #include <signal.h>
@@ -24,9 +26,9 @@ static struct {
     struct ev_loop *loop;
     rtc_t *rtc;
     frame_t *frames;
-    int nframes, next, connected, sent, keyreq;
-    int64_t pts;
-    ev_timer frame_timer, stop_timer;
+    int nframes, next, connected, sent, keyreq, audio, audio_sent;
+    int64_t pts, audio_pts;
+    ev_timer frame_timer, stop_timer, audio_timer;
     int kbps;
     char codec[16];
 } T;
@@ -68,6 +70,14 @@ static void on_frame(struct ev_loop *loop, ev_timer *w, int revents)
     T.next = (T.next + 1) % T.nframes;
 }
 
+static void on_audio(struct ev_loop *loop, ev_timer *w, int revents)
+{
+    static const uint8_t silence[] = { 0xF8, 0xFF, 0xFE }; /* Opus CELT FB 20 ms, one silent frame */
+    if (T.connected && rtc_audio(T.rtc, silence, sizeof silence, T.audio_pts) == 0)
+        T.audio_sent++;
+    T.audio_pts += 20000;
+}
+
 static void on_ctrl(void *ud, const char *json, size_t n) { LOGI("test: ctrl from agent: %.*s", (int)n, json); }
 
 static void on_link(void *ud, int up)
@@ -77,7 +87,7 @@ static void on_link(void *ud, int up)
 }
 
 static void on_session(void *ud, const char *sid, int state, const char *codec, const char *profile, const char *quality,
-                       const char *reason)
+                       const char *reason, int audio)
 {
     LOGI("test: session %s state %d codec %s profile %s reason %s", sid, state, codec ? codec : "-",
          profile ? profile : "-", reason ? reason : "-");
@@ -86,9 +96,12 @@ static void on_session(void *ud, const char *sid, int state, const char *codec, 
         T.connected = 1;
         T.next = 0;
         ev_timer_start(T.loop, &T.frame_timer);
+        if (audio)
+            ev_timer_start(T.loop, &T.audio_timer);
     } else if (state == RTC_SESSION_ENDED) {
         T.connected = 0;
         ev_timer_stop(T.loop, &T.frame_timer);
+        ev_timer_stop(T.loop, &T.audio_timer);
     }
 }
 
@@ -126,10 +139,10 @@ static void print_stats(void)
     rtc_get_stats(T.rtc, &s);
     printf("{\"frames_sent\":%d,\"codec\":\"%s\",\"packets\":%llu,\"bytes\":%llu,\"retransmits\":%llu,"
            "\"plis\":%llu,\"target_kbps\":%d,\"acked_kbps\":%d,\"rtt_ms\":%d,\"local\":\"%s\",\"remote\":\"%s\","
-           "\"cc\":\"%s\"}\n",
+           "\"cc\":\"%s\",\"audio_sent\":%d,\"audio_packets\":%llu}\n",
            T.sent, T.codec, (unsigned long long)s.packets, (unsigned long long)s.bytes,
            (unsigned long long)s.retransmits, (unsigned long long)s.plis, s.target_kbps, s.acked_kbps, s.rtt_ms,
-           s.local_type, s.remote_type, s.cc_state);
+           s.local_type, s.remote_type, s.cc_state, T.audio_sent, (unsigned long long)s.audio_packets);
     fflush(stdout);
 }
 
@@ -151,6 +164,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--frames")) frames = argv[i + 1];
         else if (!strcmp(argv[i], "--direct")) direct = atoi(argv[i + 1]);
         else if (!strcmp(argv[i], "--h265")) h265 = atoi(argv[i + 1]);
+        else if (!strcmp(argv[i], "--audio")) T.audio = atoi(argv[i + 1]);
         else if (!strcmp(argv[i], "--seconds")) seconds = atoi(argv[i + 1]);
         else if (!strcmp(argv[i], "--log")) rd_log_level = rd_log_parse_level(argv[i + 1], RD_LOG_INFO);
     }
@@ -161,12 +175,13 @@ int main(int argc, char **argv)
     }
     signal(SIGPIPE, SIG_IGN);
     T.loop = EV_DEFAULT;
-    rtc_opts_t o = { .listen = listen, .direct = direct, .offer_h265 = h265, .start_kbps = 1500 };
+    rtc_opts_t o = { .listen = listen, .direct = direct, .offer_h265 = h265, .offer_audio = T.audio, .start_kbps = 1500 };
     rtc_cb_t cb = { on_ctrl, on_link, on_session, on_channel_open, on_message, on_keyframe, on_bitrate };
     T.rtc = rtc_new(T.loop, &o, cb, NULL);
     if (!T.rtc)
         return 1;
     ev_timer_init(&T.frame_timer, on_frame, 1 / 30., 1 / 30.);
+    ev_timer_init(&T.audio_timer, on_audio, 0.02, 0.02);
     ev_timer_init(&T.stop_timer, on_stop, seconds, 0.);
     ev_timer_start(T.loop, &T.stop_timer);
     ev_signal sig_usr1, sig_term;

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="RemoDroid">
+<title>RemoDroid Panel</title>
+<meta name="description" content="Your phones, the agents they hang off, and this server's settings.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="setup.css">
+<link rel="stylesheet" href="panel.css">
+</head>
+<body class="panel">
+<header class="ptop" id="top"></header>
+<main id="main" aria-live="polite"></main>
+<nav class="tabbar" aria-label="Sections">
+  <a href="#devices" data-tab="devices"><span class="badge" id="devBadge"><svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg></span>Devices</a>
+  <a href="#agents" data-tab="agents"><svg viewBox="0 0 24 24"><rect x="3" y="12.5" width="18" height="7.5" rx="2"/><path d="M7 16.2h.01M10.5 16.2h.01"/><path d="M8.5 9a5 5 0 0 1 7 0M6 6.5a8.5 8.5 0 0 1 12 0"/></svg>Agents</a>
+  <a href="#server" data-tab="server"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="7" rx="2"/><rect x="3.5" y="13.5" width="17" height="7" rx="2"/><path d="M7.5 7h.01M7.5 17h.01M12 7h5M12 17h5"/></svg>Server</a>
+</nav>
+<script src="ice-list.js"></script>
+<script src="panel.js"></script>
+</body>
+</html>

@@ -39,13 +39,14 @@ public final class Server implements Native.Listener {
         s.jar = System.getProperty("java.class.path");
         System.load(lib);
         Native.listener = s;
-        boolean h265 = ScreenEncoder.hasHardwareHevc();
+        boolean h265 = ScreenEncoder.hasHardwareHevc(), audio = AudioCapture.supported();
         Ln.i("remodroid server starting (Android " + android.os.Build.VERSION.RELEASE + ", SDK " + Hidden.sdk()
-                + ", hardware H.265: " + h265 + ")");
-        if (!Native.start("abstract:" + socket, false, h265, s.cfg.maxKbps, Ln.level)) {
+                + ", hardware H.265: " + h265 + ", audio: " + audio + ")");
+        if (!Native.start("abstract:" + socket, false, h265, audio, s.cfg.maxKbps, Ln.level)) {
             Ln.e("cannot start the native stack (is another server running?)");
             System.exit(1);
         }
+        AudioCapture.init();
         s.startCleanup();
         s.device.watchClipboard(s::onClipboard);
         s.sched.scheduleAtFixedRate(s::reportStatus, 5, 30, TimeUnit.SECONDS);
@@ -138,12 +139,12 @@ public final class Server implements Native.Listener {
     public void onLink(boolean up) {
         if (!up) return;
         try {
-            JSONObject d = new JSONObject().put("proto", 1).put("version", "0.1.0")
+            JSONObject d = new JSONObject().put("proto", 1).put("version", "0.3.0")
                     .put("android", android.os.Build.VERSION.RELEASE).put("sdk", Hidden.sdk())
                     .put("model", android.os.Build.MODEL)
                     .put("codecs", ScreenEncoder.hasHardwareHevc() ? new org.json.JSONArray().put("h265").put("h264")
                                                                     : new org.json.JSONArray().put("h264"))
-                    .put("max_fps", 120);
+                    .put("max_fps", 120).put("audio", AudioCapture.supported());
             Native.sendCtrl(new JSONObject().put("t", "ready").put("d", d).toString());
         } catch (Exception ignored) { }
         statusChanged();
@@ -159,6 +160,8 @@ public final class Server implements Native.Listener {
                     Native.setDirect("wifi".equals(cfg.path));
                     Native.setMaxKbps(cfg.maxKbps);
                     cleanup("lock_on_exit=" + (cfg.lockOnDisconnect ? 1 : 0));
+                    Session cur = session;
+                    if (cur != null) cur.configChanged();
                     Ln.i("config applied");
                     break;
                 case "cmd": {
@@ -176,13 +179,13 @@ public final class Server implements Native.Listener {
     }
 
     @Override
-    public void onSession(String sid, int state, String codec, String profile, String quality, String reason) {
+    public void onSession(String sid, int state, String codec, String profile, String quality, String reason, boolean audio) {
         if (state == Native.SESSION_CONNECTING) {
             Ln.i("session " + sid + " connecting");
         } else if (state == Native.SESSION_CONNECTED) {
             Session s = new Session(this, device, cfg, sid);
             session = s;
-            s.connected(codec, profile, quality);
+            s.connected(codec, profile, quality, audio);
             event("session.connected", null);
         } else {
             Session s = session;

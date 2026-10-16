@@ -94,6 +94,10 @@ static ev_timer restart_timer;
 static void on_restart(struct ev_loop *loop, ev_timer *w, int revents)
 {
     LOGI("restarting with the new settings");
+    char path[400];
+    snprintf(path, sizeof path, "%s/sessions", S.state_dir);
+    if (rd_mkdirs(S.state_dir, 0700) == 0)
+        auth_save_sessions(path);
     execv("/proc/self/exe", S.argv);
     LOGE("re-exec failed (%s); exiting so the service manager restarts us", strerror(errno));
     exit(0);
@@ -204,8 +208,13 @@ int main(int argc, char **argv)
         return 0;
     }
     hub_init_devices();
+    {
+        char path[400];
+        snprintf(path, sizeof path, "%s/sessions", S.state_dir);
+        auth_load_sessions(path);
+    }
     if (S.ndevices == 0 && !S.setup)
-        LOGW("no routers yet: add one on the Routers page (/agent.html)");
+        LOGW("no routers yet: add one on the panel's Agents tab (/panel.html#agents)");
     S.loop = EV_DEFAULT;
     if (server_listen(rd_conf_get(S.conf, "http", "listen", "0.0.0.0:80"), 0) < 0)
         return 1;

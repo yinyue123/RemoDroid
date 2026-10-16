@@ -253,6 +253,18 @@ codec = auto
   second.send({ t: 'session.request', id: 3, d: { device: 'router1' } });
   const busy = await second.wait(m => m.t === 'error' && m.id === 3);
   ok(busy.d.code === 'busy', 'a second viewer gets busy');
+  second.send({ t: 'session.request', id: 4, d: { device: 'router1', takeover: true } });
+  const took = await second.wait(m => m.t === 'ack' && m.id === 4);
+  const kicked = await viewer.wait(m => m.t === 'session.ended');
+  ok(kicked.sid === sid && kicked.d.reason === 'taken_over', 'take over: the first viewer is told why it was disconnected');
+  await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.end' && e.data.sid === sid);
+  const st2 = await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.start' && e.data.sid === took.d.sid);
+  ok(st2 && took.d.sid !== sid, 'take over: the phone ends the old session and starts the new one');
+  const upd2 = await viewer.wait(m => m.t === 'device.update' && m.d.patch.session.sid === took.d.sid);
+  ok(upd2.d.patch.session.viewer === 'me', 'the device shows who holds the session');
+  viewer.send({ t: 'session.request', id: 5, d: { device: 'router1', takeover: true } }); // and back, for the lifecycle checks
+  const back = await viewer.wait(m => m.t === 'ack' && m.id === 5);
+  await second.wait(m => m.t === 'session.ended' && m.d.reason === 'taken_over');
   second.close();
 
   // UDP relay: phone -> router -> echo server -> router -> phone
@@ -305,7 +317,7 @@ codec = auto
 
   console.log('lifecycle');
   viewer.close();
-  const end = await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.end', 3000, 'session.end');
+  const end = await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.end' && e.data.sid === back.d.sid, 3000, 'session.end');
   ok(end.data.d.reason === 'viewer_left', 'closing the viewer ends the session on the phone');
   r = await fetch(base + '/api/v1/devices/router1/cmd', { method: 'POST', headers: { Cookie: cookie }, body: '{"cmd":"server.restart"}' });
   ok(r.status === 200, 'server.restart acknowledged');

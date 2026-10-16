@@ -1,6 +1,6 @@
 /* `remodroid enroll --panel https://your.panel/ --code X5SX-K3M7`
  *
- * Redeems a one-time code from the panel's Routers page (server/enroll.c, or
+ * Redeems a one-time code from the panel's Agents tab (server/enroll.c, or
  * the Cloudflare Worker): the panel answers with this router's device id and
  * secret, which go into agent.ini together with the WebSocket URL. A running
  * agent is told to reload and we wait until it is online. */
@@ -18,7 +18,7 @@ static void usage(void)
 {
     fprintf(stderr, "usage: remodroid-agent [-c agent.ini] enroll --panel https://your.panel/ --code XXXX-XXXX\n"
                     "                       [--name NAME] [--ca-file FILE]\n"
-                    "Get the command with its code on the panel: Routers → Add an agent.\n");
+                    "Get the command with its code on the panel: Agents → Add.\n");
 }
 
 int enroll_main(int argc, char **argv)

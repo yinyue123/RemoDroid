@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "crypt_blowfish.h"
 #include "picohttpparser.h"
@@ -175,6 +177,45 @@ static fail_t *fail_entry(const char *ip, int create)
     f->next = fails;
     fails = f;
     return f;
+}
+
+/* Sessions live in memory. Across our own re-exec (settings saved in the panel) they go
+ * through a 0600 file in the state directory, so nobody is logged out by a port change. */
+void auth_save_sessions(const char *path)
+{
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return;
+    fchmod(fileno(f), 0600);
+    for (asess_t *s = sessions; s; s = s->next)
+        if (session_valid(s))
+            fprintf(f, "%s %d %llu %s\n", s->id, s->device, (unsigned long long)s->created_ms, s->name);
+    fclose(f);
+}
+
+void auth_load_sessions(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return;
+    char line[160];
+    int n = 0;
+    while (fgets(line, sizeof line, f)) {
+        asess_t s = { 0 };
+        unsigned long long created;
+        if (sscanf(line, "%32s %d %llu %63s", s.id, &s.device, &created, s.name) != 4 || strlen(s.id) != 32)
+            continue;
+        s.created_ms = created;
+        asess_t *p = malloc(sizeof *p);
+        *p = s;
+        p->next = sessions;
+        sessions = p;
+        n++;
+    }
+    fclose(f);
+    unlink(path);
+    if (n)
+        LOGI("kept %d login session(s) across the restart", n);
 }
 
 const char *user_hash(const char *name) { return rd_conf_get(S.conf, "users", name, NULL); }

@@ -11,7 +11,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 const PROTO = 1;
-const VERSION = '0.1.0';
+const VERSION = '0.3.0';
 const CODE_TTL = 10 * 60 * 1000;
 const CODE_ABC = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const PBKDF2_ITER = 20000;   // keeps a login inside the Workers CPU budget; cookies make logins rare
@@ -205,6 +205,7 @@ export class Hub extends DurableObject {
       return new Response(null, { status: 204, headers: { 'set-cookie': 'rd_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0' } });
     }
     if (p === '/api/v1/setup') return this.setup(req, user);
+    if (p === '/api/v1/settings') return this.settings(req, user, sess);
     if (p === '/api/v1/devices' && m === 'GET') return json({ devices: this.all('SELECT * FROM devices ORDER BY created').map(d => this.deviceJson(d)) });
     if (p === '/api/v1/enroll/codes' && m === 'POST') {
       const b = await body();
@@ -310,6 +311,66 @@ export class Hub extends DurableObject {
     return json({ ok: true });
   }
 
+  /* The panel's Server tab: one setting at a time (setup.c: settings_patch). */
+  settingsJson(user) {
+    const turn = JSON.parse(this.kv('turn', '{}'));
+    return {
+      platform: 'worker', version: VERSION, username: user,
+      turn: { cloudflare: turn.cloudflare !== false && !!turn.api_token, key_id: turn.key_id || '', has_token: !!turn.api_token },
+      ice_servers: parseIce(this.kv('ice_extra')).map(s => ({ url: s.urls[0], username: s.username || '', has_credential: !!s.credential })),
+    };
+  }
+  async settings(req, user, sess) {
+    if (req.method === 'GET') return json(this.settingsJson(user));
+    if (req.method !== 'PATCH' && req.method !== 'POST') return err(404, 'not_found', 'no such endpoint');
+    let b;
+    try { b = await req.json(); } catch (_) { return err(400, 'bad_request', 'expected a JSON object'); }
+    if (!b || typeof b !== 'object') return err(400, 'bad_request', 'expected a JSON object');
+    const has = k => Object.prototype.hasOwnProperty.call(b, k);
+    let relogin = false;
+    if (has('username') || has('password')) { /* the login changes only with the current password */
+      if (this.locked(req)) return err(429, 'rate_limited', 'too many wrong passwords, try again later');
+      const row = this.one('SELECT hash FROM users WHERE name = ?', user);
+      if (!row || !(await checkPassword(row.hash, String(b.current_password || '')))) { this.fail(req); return err(403, 'wrong_password', 'the current password is wrong'); }
+      const uname = has('username') ? String(b.username) : user, pw = has('password') ? String(b.password) : '';
+      if (!/^[A-Za-z0-9._-]{1,32}$/.test(uname)) return err(400, 'bad_request', "the username may use letters, digits, '.', '_' and '-' (up to 32)");
+      if (has('password') && pw.length < 8) return err(400, 'bad_request', 'the password needs at least 8 characters');
+      if (uname !== user && this.one('SELECT name FROM users WHERE name = ?', uname)) return err(409, 'bad_request', 'that username is taken');
+      this.sql.exec('INSERT OR REPLACE INTO users VALUES (?, ?)', uname, pw ? await hashPassword(pw) : row.hash);
+      if (uname !== user) {
+        this.sql.exec('DELETE FROM users WHERE name = ?', user);
+        this.sql.exec('DELETE FROM sessions WHERE name = ? AND device = 0', user);
+        user = uname; relogin = true;
+      }
+    }
+    const old = JSON.parse(this.kv('turn', '{}'));
+    let turn = old, extra = this.kv('ice_extra');
+    if (has('turn')) {
+      const t = b.turn || {};
+      turn = t.cloudflare ? { cloudflare: true, key_id: String(t.key_id ?? old.key_id ?? '').trim(), api_token: String(t.api_token || '').trim() || old.api_token || '' } : { cloudflare: false };
+      if (turn.cloudflare && (!turn.key_id || !turn.api_token)) return err(400, 'bad_request', 'the Cloudflare TURN key ID and API token are both needed');
+      if (turn.cloudflare && (turn.key_id !== old.key_id || turn.api_token !== old.api_token) && !(await this.cloudflareIce(turn)))
+        return err(400, 'bad_request', 'Cloudflare refused the TURN key ID / API token');
+    }
+    if (has('ice_servers')) {
+      if (!Array.isArray(b.ice_servers) || b.ice_servers.length > 32) return err(400, 'bad_request', 'ice_servers must be a list of up to 32 servers');
+      const prev = parseIce(this.kv('ice_extra')), tok = s => /^[^\s,]*$/.test(s) && s.length <= 250;
+      const out = [];
+      for (const e of b.ice_servers) {
+        const url = String(e.url || ''), u = String(e.username || '');
+        let cred = String(e.credential || '');
+        if (!/^(stun|turns?):./.test(url) || !tok(url) || !tok(u) || !tok(cred)) return err(400, 'bad_request', 'a STUN/TURN server looks wrong (e.g. stun:203.0.113.10:3478)');
+        if (u && !cred) { const o = prev.find(x => x.urls[0] === String(e.was || url) && x.username === u); if (o) cred = o.credential; }
+        out.push(u && cred ? `${url} ${u} ${cred}` : url);
+      }
+      extra = out.join(', ');
+    }
+    if (!turn.cloudflare && !parseIce(extra).length) return err(400, 'bad_request', 'keep at least one STUN or TURN server (or Cloudflare TURN)');
+    this.setKv('turn', JSON.stringify(turn));
+    this.setKv('ice_extra', extra);
+    return json({ ...this.settingsJson(user), ok: true, restart_ms: 0, relogin });
+  }
+
   /* Short-lived TURN credentials from Cloudflare Realtime (1,000 GB/month free). */
   async cloudflareIce(turn) {
     const base = `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(turn.key_id)}/credentials`;
@@ -338,7 +399,7 @@ export class Hub extends DurableObject {
     const k = code && this.one('SELECT * FROM codes WHERE code = ?', code);
     if (!k || k.device || now() > k.expires) {
       this.fail(req);
-      return err(404, 'bad_code', 'this code is wrong, used or expired; make a new one on the Routers page');
+      return err(404, 'bad_code', 'this code is wrong, used or expired; make a new one on the panel (Agents → Add)');
     }
     const name = (k.name || String(b.name || '') || 'router').slice(0, 60);
     let base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'router', id = base;
@@ -362,7 +423,7 @@ export class Hub extends DurableObject {
       id: d.id, name: d.name, online, last_seen: d.last_seen || 0,
       agent: { ...(hello ? { version: hello.version || '', arch: hello.arch || '' } : {}), ...(online ? { uptime_s: Math.round((now() - d.online_since) / 1000) } : {}), public_ip: d.public_ip || '' },
       phone: status.phone && typeof status.phone === 'object' ? status.phone : { attached: false },
-      session: vs ? { active: true, sid: vs.sid, since: vs.since } : { active: false },
+      session: vs ? { active: true, sid: vs.sid, since: vs.since, viewer: vs.viewer } : { active: false },
     };
   }
   broadcast(text) { for (const ws of this.ctx.getWebSockets('viewer')) { try { ws.send(text); } catch (_) {} } }
@@ -418,7 +479,10 @@ export class Hub extends DurableObject {
       if (!dev) return reply('error', { code: 'not_found', msg: 'unknown device' });
       if (!this.online(dev.id)) return reply('error', { code: 'offline', msg: 'the router agent is offline' });
       const busy = this.one('SELECT * FROM vsessions WHERE device = ?', dev.id);
-      if (busy && busy.sid !== a.sid) return reply('error', { code: 'busy', msg: 'device is already in a session' });
+      if (busy && busy.sid !== a.sid) {
+        if (!d.takeover) return reply('error', { code: 'busy', msg: 'device is already in a session' });
+        this.endSession(busy.sid, 'taken_over', true, true); // "Take over": the other viewer is told why
+      }
       if (a.sid) this.endSession(a.sid, 'replaced', true, false);
       const sid = 's_' + hex(rand(8));
       this.sql.exec('INSERT INTO vsessions VALUES (?, ?, ?, ?)', sid, dev.id, a.user, now());

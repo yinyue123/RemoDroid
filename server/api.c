@@ -45,6 +45,10 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
         setup_api(c, r, user);
         return;
     }
+    if (r->path_len == 16 && !memcmp(r->path, "/api/v1/settings", 16)) {
+        settings_api(c, r, user);
+        return;
+    }
     if (enroll_api(c, r, user))
         return;
     if (req_is(r, "GET", "/api/v1/me")) {
