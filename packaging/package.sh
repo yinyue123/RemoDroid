@@ -32,7 +32,10 @@ mkdir -p "$OUT"
 
 pkg() { # packager, distro arch
     for p in server agent; do
-        PKG_ARCH=$2 VERSION=$VERSION BIN=$BIN PHONE=$PHONE nfpm package -f "packaging/nfpm-$p.yaml" -p "$1" -t "$OUT/"
+        # nFPM doesn't expand variables in every field (e.g. contents src), so fill them in here.
+        sed -e "s|\${PKG_ARCH}|$2|g" -e "s|\${VERSION}|$VERSION|g" -e "s|\${BIN}|$BIN|g" -e "s|\${PHONE}|$PHONE|g" \
+            "packaging/nfpm-$p.yaml" > "build/nfpm-$p.yaml"
+        nfpm package -f "build/nfpm-$p.yaml" -p "$1" -t "$OUT/"
     done
 }
 [ -n "$DEB" ] && pkg deb "$DEB"
