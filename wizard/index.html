@@ -48,9 +48,23 @@ try { Object.assign(S, JSON.parse(localStorage.getItem('rd-install') || '{}')); 
 const save = () => { try { localStorage.setItem('rd-install', JSON.stringify(S)); } catch (_) {} };
 
 const STEPS = [
-  { label: 'Server', sub: 'Meet' }, { label: 'Agent', sub: 'Install' }, { label: 'Connect', sub: 'Enroll' },
-  { label: 'Phone', sub: 'USB' }, { label: 'Done', sub: 'Play' },
+  { label: 'Server', sub: 'Install' }, { label: 'Panel', sub: 'Set up' }, { label: 'Agent', sub: 'Install' },
+  { label: 'Connect', sub: 'Enroll' }, { label: 'Phone', sub: 'USB' }, { label: 'Done', sub: 'Play' },
 ];
+/* "remodroid.example.com" / "http://1.2.3.4:5580/" → "https://remodroid.example.com" / "http://1.2.3.4:5580" */
+function panelUrl(v) {
+  v = String(v || '').trim().replace(/\/+$/, '').replace(/\/(wizard|agent)\.html.*$/, '');
+  if (!v) return '';
+  if (!/^https?:\/\//.test(v)) v = (/^[\d.]+(:\d+)?$/.test(v) ? 'http://' : 'https://') + v;
+  return v;
+}
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">Your panel's address</label>
+  <input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  or  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+  <div class="hint">Remembered here for the next steps.</div></div></div>`;
+function bindPanel(id, after) {
+  const el = document.getElementById(id);
+  el.addEventListener('change', () => { S.panel = panelUrl(el.value); el.value = S.panel; save(); if (after) after(); });
+}
 let step = Math.min(+(location.hash.match(/^#step(\d)$/) || [0, 1])[1] - 1, STEPS.length - 1);
 if (!(step >= 0)) step = 0;
 
@@ -118,10 +132,8 @@ function pageServer() {
       <p class="bullet">Downloads, installs and starts the server — all in one.</p>
       ${cmd(one)}
       <div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ downloading remodroid-server_…_amd64.deb</div><div class="d">▸ starting the service</div><div class="k">✓ the server is running. Open the setup wizard:</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
-      <div class="num"><i class="alt">2</i>Open the link it prints</div>
-      <p>The setup wizard asks for <b>a domain</b> (free HTTPS from Let's Encrypt, renewed by itself), <b>your login</b>, and the <b>STUN/TURN port</b>. It writes <code>/etc/remodroid/server.ini</code> and restarts the server on your ports. Later the same page edits the settings, behind your password.</p>
-      <div class="chips"><small>Open</small><span class="chip">TCP 5580 (setup)</span><span class="chip">TCP 80 · 443</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
-      <div class="num"><i class="alt">3</i>Or install a package</div>
+      <p class="note">Keep the link it prints: the next step opens it.</p>
+      <div class="num"><i class="alt">2</i>Or install a package</div>
       <div class="seg" id="sos">${['debian', 'rhel', 'alpine'].map(k => `<button type="button" data-os="${k}" aria-selected="${(S.sos || 'debian') === k}">${OS[k].name}</button>`).join('')}</div>
       <div class="seg" id="scpu">${['x86_64', 'aarch64'].map(k => `<button type="button" data-cpu="${k}" aria-selected="${(S.scpu || 'x86_64') === k}">${CPU[k]}</button>`).join('')}</div>
       <div id="sdl"><p class="note">Looking up the latest release…</p></div>
@@ -132,23 +144,56 @@ function pageServer() {
   } else {
     const deploy = `git clone https://github.com/${REPO} && cd RemoDroid/worker\nnpm install && npx wrangler deploy`;
     d.innerHTML = `<div class="num"><i>1</i>Make a TURN key</div>
-      <p>Cloudflare relays the video when a network blocks direct connections (1,000 GB a month free). In the <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">dashboard</a>: <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>. Keep the <b>Turn Token ID</b> and <b>API Token</b> for step 3.</p>
+      <p>Cloudflare relays the video when a network blocks direct connections (1,000 GB a month free). In the <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">dashboard</a>: <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>. Keep the <b>Turn Token ID</b> and <b>API Token</b> for the next step.</p>
       <div class="num"><i>2</i>Deploy the Worker</div>
       <p class="bullet">From a computer with Node.js — it asks you to log in to Cloudflare once.</p>
       ${cmd(deploy)}
       <div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ Uploaded remodroid (web assets, Durable Object "Hub")</div><div class="k">✓ Deployed: https://remodroid.&lt;you&gt;.workers.dev</div></div>
-      <p class="note">Or without a terminal: fork <a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a>, then in the dashboard <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → pick your fork → <b>Root directory: worker</b> → Deploy. Storage (the Durable Object's database) is created on its own.</p>
-      <div class="num"><i class="alt">3</i>Open your Worker</div>
-      <p>Go to <code>https://remodroid.&lt;you&gt;.workers.dev</code>: the setup wizard asks for <b>your login</b> and the <b>TURN key</b> from step 1 (or other STUN/TURN servers). Want your own address? Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → add a custom domain.</p>
-      <div class="callout">Set it up right after deploying: until then, the first visitor chooses the login. To be safe, add a variable <code>SETUP_TOKEN</code> to the Worker; the wizard then asks for it.</div>`;
+      <p class="note">Or without a terminal: fork <a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a>, then in the dashboard <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → pick your fork → <b>Root directory: worker</b> → Deploy. Storage (the Durable Object's database) is created on its own.</p>`;
   }
 }
 
-/* ---------- 2. agent ---------- */
+/* ---------- 2. panel: run it, open it, finish its setup ---------- */
+function pagePanel() {
+  const self = S.server === 'self';
+  if (self) {
+    main.innerHTML = `${eyebrow(2, 'panel')}<h1>Open your <em>panel</em></h1>
+      <p class="lede">The server is the panel: a web page on your server where you log in, add routers and play.</p>
+      <div class="num"><i>1</i>Run the server</div>
+      <p class="bullet">The one-line installer already started it. Installed a package yourself? Start it now:</p>
+      ${cmd('sudo systemctl enable --now remodroid-server')}
+      <p class="note">Alpine: <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · check it: <code>systemctl status remodroid-server</code></p>
+      <div class="num"><i>2</i>Open its web page</div>
+      <p>Open the link the installer printed: <code>http://&lt;server-ip&gt;:5580/wizard.html?token=…</code>. The <b>token</b> proves you own the server. Lost the link? Read the token on the server:</p>
+      ${cmd('sudo cat /var/lib/remodroid/setup-token')}
+      <div class="chips"><small>Open first</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443 (domain)</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+      <div class="num"><i>3</i>Finish the setup wizard</div>
+      <p>It asks for <b>a domain</b> (free HTTPS from Let's Encrypt, renewed by itself), <b>your login</b> and the <b>STUN/TURN port</b>, writes <code>/etc/remodroid/server.ini</code> and restarts the server on your address. Later the same page edits the settings, behind your password.</p>
+      <div class="num"><i class="alt">4</i>Where is it now?</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  } else {
+    main.innerHTML = `${eyebrow(2, 'panel')}<h1>Open your <em>panel</em></h1>
+      <p class="lede">Your Worker is the panel: a web page where you log in, add routers and play.</p>
+      <div class="num"><i>1</i>Open your Worker</div>
+      <p>Its address is printed by <code>wrangler deploy</code>, and in the dashboard: <b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b>. Usually <code>https://remodroid.&lt;you&gt;.workers.dev</code>.</p>
+      <div class="num"><i>2</i>Finish the setup wizard</div>
+      <p>It asks for <b>your login</b> and the <b>TURN key</b> from the previous step (or other STUN/TURN servers). Want your own address? Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → add a custom domain.</p>
+      <div class="callout">Do it right after deploying: until then, the first visitor chooses the login. To be safe, add a variable <code>SETUP_TOKEN</code> to the Worker; the wizard then asks for it.</div>
+      <div class="num"><i class="alt">3</i>Where is it?</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  }
+  const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Open ${esc(S.panel.replace(/^https?:\/\//, ''))} ↗</a>` : ''; };
+  bindPanel('panel', open);
+  open();
+}
+
+/* ---------- 3. agent ---------- */
 function pageAgent() {
   const o = OS[S.os];
   const cpu = o.cpus.includes(S.cpu) ? S.cpu : o.cpus[0];
-  main.innerHTML = `${eyebrow(2, 'agent')}<h1>Install the <em>agent</em></h1>
+  main.innerHTML = `${eyebrow(3, 'agent')}<h1>Install the <em>agent</em></h1>
     <p class="lede">It runs on the router the phone is plugged into and dials out to your panel. No open port, no public address.</p>
     <div class="seg">${Object.entries(OS).map(([k, v]) => `<button type="button" data-os="${k}" aria-selected="${k === S.os}">${v.name}</button>`).join('')}</div>
     <div class="num"><i>1</i>One command</div>
@@ -165,42 +210,59 @@ function pageAgent() {
   fillDownloads($('#adl'), 'agent', S.os, cpu);
 }
 
-/* ---------- 3. connect ---------- */
+/* ---------- 4. connect: the code comes from your panel ---------- */
 function pageConnect() {
-  const ex = 'remodroid enroll --panel https://your.panel --code X5SX-K3M7';
-  main.innerHTML = `${eyebrow(3, 'connect')}<h1>Paste this into <em>the router</em></h1>
-    <p class="lede">On your panel open <b>Routers</b> → <b>Add a router</b>. It shows this command with your address and a fresh one-time code.</p>
-    ${cmd(ex)}
-    <div class="term"><div><span class="p">$</span> ${esc(ex)}</div><div class="d">▸ contacting the panel https://your.panel…</div><div class="d">▸ enrolled as "OpenWrt" (openwrt); saved in /etc/remodroid/agent.ini</div><div class="k">✓ bound — this router is online</div></div>
-    <div class="link-anim ok"><div class="box" title="router"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div><div class="wire"></div><div class="box" title="panel"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18"/></svg></div></div>
-    <p class="small-print">codes expire after <b>10 minutes</b> · single use · the router keeps its own secret</p>
-    <p class="note" style="margin-top:22px">Not installed yet? The panel also offers both in one line: <code>… install_agent.sh | sh -s -- --panel … --code …</code>. Afterwards the router's video, phone and clipboard settings live on the panel's Routers page — no ini editing.</p>`;
+  main.innerHTML = `${eyebrow(4, 'connect')}<h1>Enroll <em>the router</em></h1>
+    <p class="lede">The router joins your panel with a one-time code that only your panel can make.</p>
+    ${S.panel ? '' : panelField('panel')}
+    <div class="num"><i>1</i>Open your panel's Routers page</div>
+    <p id="routers"></p>
+    <div class="num"><i>2</i>Add a router</div>
+    <p>That link opens <b>Add a router → Connect</b> (or click them yourself). Your panel shows a code such as <code>X5SX-K3M7</code>: single use, valid for <b>10 minutes</b>. The page there has the whole command with a copy button; or type the code here.</p>
+    <div class="form"><div class="field"><label for="code">Code from your panel</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+    <div class="num"><i>3</i>Run it on the router</div>
+    <div id="enroll"></div>
+    <div class="term" id="term"></div>
+    <p class="note">When it says <b>bound</b>, your panel's page turns green too. From then on the router's video, phone and clipboard settings live on the Routers page — no ini editing.</p>`;
+  const draw = () => {
+    const code = ($('#code').value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const c = code.length === 8 ? code.slice(0, 4) + '-' + code.slice(4) : '';
+    const p = S.panel || 'https://your.panel';
+    const line = `remodroid enroll --panel ${p} --code ${c || 'XXXX-XXXX'}`;
+    $('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">Open ${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html ↗</a>`
+      : 'Enter your panel\'s address above, or open it yourself and go to <b>Routers</b> (top right of the setup page).';
+    $('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? 'Type the code from your panel above.' : 'Enter your panel\'s address and the code.'}</p>`;
+    $('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ contacting the panel ${esc(p)}…</div><div class="d">▸ enrolled as "OpenWrt" (openwrt); saved in /etc/remodroid/agent.ini</div><div class="k">✓ bound — this router is online</div>`;
+  };
+  $('#code').addEventListener('input', draw);
+  if (!S.panel) bindPanel('panel', () => pageConnect());
+  draw();
 }
 
-/* ---------- 4. phone ---------- */
+/* ---------- 5. phone ---------- */
 function pagePhone() {
-  main.innerHTML = `${eyebrow(4, 'phone')}<h1>Plug in <em>the phone</em></h1>
+  main.innerHTML = `${eyebrow(5, 'phone')}<h1>Plug in <em>the phone</em></h1>
     <p class="lede">Once per phone. Android 8 or newer; a hardware H.265 encoder helps but isn't needed.</p>
     <div class="num"><i>1</i>Turn on USB debugging</div>
     <p>Settings → About phone → tap <b>Build number</b> seven times. Then Settings → System → <b>Developer options</b> → <b>USB debugging</b>.</p>
     <div class="num"><i>2</i>Connect it to the router's USB port</div>
     <p>A data cable, not a charge-only one. The agent finds the phone by itself and installs its small server on it (nothing from the Play Store).</p>
     <div class="num"><i>3</i>Allow the router</div>
-    <p>The phone asks <b>“Allow USB debugging?”</b>. Tick <b>Always allow from this computer</b>, then <b>Allow</b>. The Routers page shows the phone as ready.</p>`;
+    <p>The phone asks <b>“Allow USB debugging?”</b>. Tick <b>Always allow from this computer</b>, then <b>Allow</b>. ${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">The Routers page</a>` : 'The Routers page'} shows the phone as ready.</p>`;
 }
 
-/* ---------- 5. done ---------- */
+/* ---------- 6. done ---------- */
 function pageDone() {
-  main.innerHTML = `${eyebrow(5, 'done')}<h1>Time to <em>play</em></h1>
+  main.innerHTML = `${eyebrow(6, 'done')}<h1>Time to <em>play</em></h1>
     <p class="lede">Open your panel in Safari on the iPhone, log in, then <b>Share</b> → <b>Add to Home Screen</b> for full screen.</p>
     <dl class="kv"><dt>Touch</dt><dd>Multi-touch goes straight to the phone; the floating ball opens the menu.</dd>
       <dt>Quality</dt><dd>Menu → Settings: resolution, frame rate, bitrate, H.265 or H.264.</dd>
       <dt>Photos</dt><dd>Menu → Photo: from the iPhone into the phone's Gallery.</dd>
       <dt>Clipboard</dt><dd>Text both ways; one tap on HTTPS.</dd></dl>
-    <p style="margin-top:26px"><a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">Read the docs ↗</a></p>`;
+    <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Open your panel ↗</a> ` : ''}<a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">Read the docs ↗</a></p>`;
 }
 
-const PAGES = [pageServer, pageAgent, pageConnect, pagePhone, pageDone];
+const PAGES = [pageServer, pagePanel, pageAgent, pageConnect, pagePhone, pageDone];
 go(step);
 })();
 </script>

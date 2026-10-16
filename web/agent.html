@@ -323,7 +323,8 @@ async function showList() {
 
 (async () => {
   await loadDevices();
-  if (location.hash === '#add' || !devices.length) startAdd();
+  if (location.hash === '#connect') { startAdd(); go(1); } /* from the install site: straight to the code */
+  else if (location.hash === '#add' || !devices.length) startAdd();
   else showList();
 })();
 })();

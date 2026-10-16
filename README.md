@@ -4,6 +4,8 @@ Low-latency remote control of an Android phone from an iPhone (Safari), for clou
 The phone sits on a USB cable to an OpenWrt router; the iPhone connects through a small
 server on AWS. Design and decisions: [`plan.md`](plan.md).
 
+<a href="https://remodroid.pages.dev/"><img src="wizard/button.svg" alt="Install RemoDroid with the wizard: remodroid.pages.dev" width="318" height="64"></a>
+
 ```
 iPhone Safari ──WebRTC (UDP)──► AWS: remodroid-server (HTTP, WebSocket, TURN)
       ▲                                 ▲ ws:// control + keepalive
