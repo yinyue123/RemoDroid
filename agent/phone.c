@@ -660,8 +660,10 @@ static void launch_server(void)
     char cmd[1024];
     const char *dir = A.phone_dir;
     snprintf(cmd, sizeof cmd,
-             "pkill -f " SERVER_CLASS " >/dev/null 2>&1; "
-             "CLASSPATH=%s/remodroid-server.jar exec app_process /system/bin " SERVER_CLASS
+             /* The class name must not appear whole in this command: pkill -f also sees the shell's
+              * own command line and would kill it (exit 143). "$c.Server" expands only at run time. */
+             "c=io.remodroid; pkill -f \"$c.Server\" >/dev/null 2>&1; "
+             "CLASSPATH=%s/remodroid-server.jar exec app_process /system/bin \"$c.Server\""
              " socket=" SOCKET_NAME " lib=%s/libremodroid.so log=%s",
              dir, dir, agent_conf("phone", "log_level", "info"));
     P.server_stream = adb_shell(A.adb, cmd, server_output, server_exited, NULL);
