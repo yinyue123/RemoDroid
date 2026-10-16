@@ -178,7 +178,7 @@ function onWs(m) {
     if (st.device && d.id === st.device.id) {
       const msgs = { 'adb.unauthorized': 'Allow USB debugging on the phone', 'phone.detached': 'Phone unplugged',
         'phone.attached': 'Phone connected', 'agent.offline': 'Router agent went offline', 'server.exited': 'Phone server stopped',
-        'phone.overheat': 'The phone is getting hot', 'phone.locked': 'Phone locked' };
+        'phone.overheat': 'The phone is getting hot', 'phone.busy': 'Another program holds the phone (adb?)', 'phone.locked': 'Phone locked' };
       if (msgs[d.kind]) toast(msgs[d.kind]);
       if (d.kind === 'phone.locked') st.locked = true;
     }
@@ -209,7 +209,7 @@ function maybeStart() {
   if (DEMO || !wantSession || st.sid || !st.device) return;
   const ph = st.device.phone || {};
   if (!st.device.online) { setOverlay('Router offline', `${st.device.name} isn't connected to the server.`); return; }
-  if (!ph.attached) { setOverlay('No phone', 'Plug the phone into the router.'); return; }
+  if (!ph.attached) { setOverlay(ph.problem ? 'Phone busy' : 'No phone', ph.problem ? `The router sees the phone, but ${ph.problem}.` : 'Plug the phone into the router.'); return; }
   if (ph.adb_state === 'unauthorized') { setOverlay('Allow USB debugging', 'Accept the prompt on the phone (tick Always allow).'); return; }
   if (ph.server !== 'running') { setOverlay('Starting', 'The phone server is starting…'); return; }
   if (st.device.session && st.device.session.active) { setOverlay('In use', 'Another viewer is connected to this phone.', true); return; }

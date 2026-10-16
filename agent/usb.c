@@ -61,7 +61,65 @@ struct transport_mgr {
     usbt_t *usb;
     tcpt_t *tcp;
     int tcp_retry;
+    char problem[200]; /* why a phone that is plugged in can't be used, for the panel */
 };
+
+/* The process holding a USB device node open, e.g. "adb (pid 1234)". */
+static void find_holder(const char *node, char *out, size_t cap)
+{
+    out[0] = 0;
+    DIR *proc = opendir("/proc");
+    if (!proc)
+        return;
+    struct dirent *p;
+    while (!out[0] && (p = readdir(proc))) {
+        if (p->d_name[0] < '1' || p->d_name[0] > '9' || atoi(p->d_name) == getpid())
+            continue;
+        char dir[64];
+        snprintf(dir, sizeof dir, "/proc/%s/fd", p->d_name);
+        DIR *fds = opendir(dir);
+        if (!fds)
+            continue;
+        struct dirent *f;
+        while ((f = readdir(fds))) {
+            char link[400], target[256];
+            snprintf(link, sizeof link, "%s/%s", dir, f->d_name);
+            ssize_t n = readlink(link, target, sizeof target - 1);
+            if (n <= 0)
+                continue;
+            target[n] = 0;
+            if (strcmp(target, node))
+                continue;
+            char comm_path[64], comm[64] = "?";
+            snprintf(comm_path, sizeof comm_path, "/proc/%s/comm", p->d_name);
+            FILE *c = fopen(comm_path, "r");
+            if (c) {
+                if (fgets(comm, sizeof comm, c))
+                    comm[strcspn(comm, "\n")] = 0;
+                fclose(c);
+            }
+            snprintf(out, cap, "%s (pid %s)", comm, p->d_name);
+            break;
+        }
+        closedir(fds);
+    }
+    closedir(proc);
+}
+
+static void set_problem(transport_mgr_t *m, const char *why)
+{
+    if (!strcmp(m->problem, why))
+        return;
+    snprintf(m->problem, sizeof m->problem, "%s", why);
+    if (*why) {
+        cJSON *info = cJSON_CreateObject();
+        cJSON_AddStringToObject(info, "problem", why);
+        agent_event("phone.busy", info);
+    }
+    agent_status_changed();
+}
+
+const char *transport_problem(const transport_mgr_t *m) { return m && m->problem[0] ? m->problem : NULL; }
 
 /* ---------------- sysfs helpers ---------------- */
 
@@ -326,21 +384,38 @@ static void try_usb(transport_mgr_t *m)
     if (m->usb || m->tcp_target[0])
         return;
     usb_found_t f;
-    if (scan_usb(m->serial_filter, &f) < 0)
+    if (scan_usb(m->serial_filter, &f) < 0) {
+        set_problem(m, ""); /* no phone at all: nothing to explain */
         return;
+    }
     char node[64];
     snprintf(node, sizeof node, "/dev/bus/usb/%03d/%03d", f.bus, f.devnum);
     int fd = open(node, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
-        LOGW("usb: open %s: %s", node, strerror(errno));
+        char why[200];
+        snprintf(why, sizeof why, "cannot open the phone's USB device %s: %s", node, strerror(errno));
+        if (strcmp(why, m->problem))
+            LOGW("usb: %s", why);
+        set_problem(m, why);
         return;
     }
     int ifnum = f.ifnum;
     if (ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifnum) < 0) {
-        LOGW("usb: claim interface on %s: %s (is another adb server running?)", node, strerror(errno));
+        int e = errno;
+        char holder[100], why[200];
+        find_holder(node, holder, sizeof holder);
+        if (e == EBUSY) /* only one program can drive the ADB interface; usually a running `adb` server */
+            snprintf(why, sizeof why, "the phone is held by another program%s%s; stop it (adb kill-server) and use remodroid-agent shell/devices instead",
+                     holder[0] ? ": " : "", holder);
+        else
+            snprintf(why, sizeof why, "cannot use the phone's USB interface: %s", strerror(e));
+        if (strcmp(why, m->problem))
+            LOGW("usb: %s", why);
+        set_problem(m, why);
         close(fd);
         return;
     }
+    set_problem(m, "");
     usbt_t *t = calloc(1, sizeof *t);
     t->m = m;
     t->fd = fd;
@@ -400,8 +475,8 @@ static void on_rescan(struct ev_loop *loop, ev_timer *w, int revents)
 {
     transport_mgr_t *m = w->data;
     try_usb(m);
-    /* With netlink events this is only a slow safety net. */
-    w->repeat = m->nl_fd >= 0 ? 30. : 3.;
+    /* With netlink events this is only a slow safety net; a busy phone frees up without one. */
+    w->repeat = m->nl_fd >= 0 && !m->problem[0] ? 30. : 3.;
     ev_timer_again(loop, w);
 }
 

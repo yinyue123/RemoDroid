@@ -69,7 +69,7 @@ let devices = [], view = 'list', step = 0, os = 'openwrt', code = null, codeTime
 const PHONE_STATE = d => {
   const p = d.phone || {};
   if (!d.online) return ['off', 'router offline'];
-  if (!p.attached) return ['wait', 'no phone on USB'];
+  if (!p.attached) return p.problem ? ['off', p.problem] : ['wait', 'no phone on USB'];
   if (p.adb_state === 'unauthorized') return ['wait', 'tap “Allow USB debugging” on the phone'];
   if (p.server !== 'running') return ['wait', 'phone server ' + (p.server || 'starting')];
   return ['on', `${p.model || 'phone'} · Android ${p.android || '?'}`];

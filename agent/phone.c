@@ -132,6 +132,9 @@ cJSON *phone_status_json(void)
     cJSON *j = cJSON_CreateObject();
     int attached = P.adb_state != ADB_OFFLINE || P.link_up;
     cJSON_AddBoolToObject(j, "attached", attached);
+    const char *problem = attached ? NULL : transport_problem(A.tm);
+    if (problem)
+        cJSON_AddStringToObject(j, "problem", problem);
     if (P.serial[0])
         cJSON_AddStringToObject(j, "serial", P.serial);
     if (P.model[0])
