@@ -5,17 +5,25 @@
   let busy = false, dirty = false, loaded = false, running = false, auto = false;
   const encode = text => btoa(Array.from(new TextEncoder().encode(text), b => String.fromCharCode(b)).join(''));
   const decode = text => new TextDecoder().decode(Uint8Array.from(atob(text), c => c.charCodeAt(0)));
+  function fitEditor(id) {
+    const field = el(id);
+    if (!field.clientWidth) return;
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(field.scrollHeight + 2, id === 'config' ? 640 : 180)}px`;
+  }
   function message(text, error = false) {
     el('message').hidden = !text;
     el('message').textContent = text;
     el('message').className = error ? 'error' : '';
   }
   function controls() {
-    for (const id of ['start','restart','stop','save','reload','refresh','clearlog','autostart']) el(id).disabled = busy;
+    for (const id of ['start','restart','stop','save','reload','refresh','clearlog','autostart','enroll']) el(id).disabled = busy;
+    el('enroll').disabled = busy || !loaded || running;
     el('start').disabled = busy || !loaded || running;
     el('stop').disabled = busy || !running;
     el('restart').disabled = busy || !loaded || !running;
     el('save').disabled = busy || !loaded;
+    el('config').disabled = !loaded;
   }
   function render(data, action) {
     running = data.running; auto = data.autostart;
@@ -26,18 +34,23 @@
     el('version').textContent = `Agent ${data.version}`;
     el('logs').textContent = data.logs || '还没有日志。配置完成并启动后，连接信息会显示在这里。';
     el('updated').textContent = `更新于 ${new Date().toLocaleTimeString()}`;
-    if (data.ok && (action === 'config' || action === 'save')) {
+    if (data.config && (action === 'config' || action === 'save' || action === 'enroll')) {
       el('config').value = data.config;
+      fitEditor('config');
       loaded = true; dirty = false;
     }
+    if (data.ok && action === 'enroll') { el('enroll-command').value = ''; fitEditor('enroll-command'); }
     if (data.message) message(data.message, !data.ok);
   }
   async function request(action, fields = {}, silent = false) {
     if (busy) return;
     busy = true; controls();
+    if (action === 'config' || action === 'save' || action === 'enroll') el('config').disabled = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
     try {
       const response = await fetch('/_api/', {
-        method:'POST', credentials:'same-origin', cache:'no-store',
+        method:'POST', credentials:'same-origin', cache:'no-store', signal:controller.signal,
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({id:Math.floor(Math.random()*90000000)+10000000,
           method:'remodroid_control.sh', params:[action], fields})
@@ -53,9 +66,21 @@
       el('state').querySelector('strong').textContent = '无法读取状态';
       el('process').textContent = '检查连接和路由器登录状态后，点击刷新';
       if (!silent || !el('message').textContent) message(`操作未完成：${error.message}。如果登录已过期，请返回软件中心重新登录。`, true);
-    } finally { busy = false; controls(); }
+    } finally { clearTimeout(timeout); busy = false; controls(); }
   }
-  el('config').addEventListener('input', () => { dirty = true; });
+  el('config').addEventListener('input', () => { dirty = true; fitEditor('config'); });
+  el('enroll-command').addEventListener('input', () => fitEditor('enroll-command'));
+  el('advanced').addEventListener('toggle', () => fitEditor('config'));
+  window.addEventListener('resize', () => { fitEditor('config'); fitEditor('enroll-command'); });
+  fitEditor('enroll-command');
+  el('enroll').onclick = () => {
+    if (dirty) return message('请先保存高级配置，或重新读取以放弃修改。', true);
+    const command = el('enroll-command').value.trim().replace(/^\$\s*/, '');
+    const match = /^(?:remodroid|remodroid-agent)\s+enroll\s+--panel\s+(https?:\/\/[A-Za-z0-9.\[\]:_-]+\/?)[ \t]+--code\s+([A-Za-z0-9-]{1,64})\s*$/.exec(command);
+    if (!match) return message('请粘贴完整命令：remodroid enroll --panel http://面板地址:端口 --code XXXX-XXXX', true);
+    message('正在绑定面板，请稍候…');
+    request('enroll', {remodroid_enrollment:encode(JSON.stringify({panel:match[1], code:match[2]}))});
+  };
   el('save').onclick = () => {
     if (new TextEncoder().encode(el('config').value).length > 16384) return message('配置不能超过 16KB', true);
     request('save', {remodroid_payload:encode(el('config').value)});
@@ -69,5 +94,5 @@
   el('autostart').onchange = () => { const wanted = el('autostart').checked; el('autostart').checked = auto; request(wanted ? 'auto_on' : 'auto_off'); };
   window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   request('config');
-  setInterval(() => { if (!document.hidden && !busy) request('status', {}, true); }, 5000);
+  setInterval(() => { if (!document.hidden && !busy) request(loaded ? 'status' : 'config', {}, true); }, 5000);
 })();

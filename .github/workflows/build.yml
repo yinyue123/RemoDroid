@@ -1,7 +1,7 @@
 # Builds RemoDroid for every target and packages it:
 #   static binaries  x86, x86_64, armv7, aarch64 (+ mipsel, mips for OpenWrt routers)
 #   phone files      remodroid-server.jar + libremodroid.so (arm64-v8a, armeabi-v7a)
-#   packages         .deb (Debian/Ubuntu), .rpm (CentOS/RHEL), .apk (Alpine), .ipk (OpenWrt), .tar.gz
+#   packages         .deb, .rpm, .apk, .ipk (OpenWrt), .tar.gz, Merlin agent offline installers
 # A pushed tag v* publishes a GitHub release; the annotated tag's message is the release notes.
 name: build
 
@@ -52,6 +52,10 @@ jobs:
         run: node tests/tls.mjs build/host
       - name: Setup wizard and router enrollment tests
         run: node tests/setup.mjs build/host
+      - name: Merlin agent packaging and lifecycle tests
+        run: |
+          python3 tests/merlin.py
+          node --check packaging/merlin/deploy/res/remodroid.js
       - name: Cloudflare Worker tests (wrangler dev)
         run: |
           (cd worker && npm install --no-audit --no-fund)
@@ -129,7 +133,7 @@ jobs:
             *) v="0.1.${GITHUB_RUN_NUMBER}" ;;   # development builds
           esac
           echo "VERSION=$v" >> "$GITHUB_ENV"
-      - name: Build packages
+      - name: Build Linux and OpenWrt packages
         run: |
           mkdir -p build/out build/android
           cp -r artifacts/phone/. build/android/
@@ -137,6 +141,13 @@ jobs:
             mkdir -p "build/out/$a" && cp artifacts/bin-$a/* "build/out/$a/"
             ./packaging/package.sh "$VERSION" "$a"
           done
+      - name: Build Merlin agent offline packages
+        run: |
+          for a in armv7 aarch64; do
+            ./packaging/merlin/build.sh "$VERSION" "$a"
+          done
+      - name: Package checksums
+        run: |
           cd build/packages && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - uses: actions/upload-artifact@v5
         with:

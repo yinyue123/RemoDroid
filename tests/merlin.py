@@ -28,18 +28,19 @@ class MerlinTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def build(self):
+    def build(self, arch='armv7'):
         bins, phone = self.work / 'bin', self.work / 'phone'
         bins.mkdir(); phone.mkdir()
         (bins / 'remodroid-agent').write_text('#!/bin/sh\nexit 0\n')
+        (bins / 'remodroid-server').write_text('must not ship in the Merlin agent package')
         (phone / 'remodroid-server.jar').write_bytes(b'fixture jar')
         for abi in ('arm64-v8a', 'armeabi-v7a'):
             (phone / abi).mkdir()
             (phone / abi / 'libremodroid.so').write_bytes(b'fixture lib')
         env = dict(os.environ, BIN=str(bins), PHONE=str(phone), OUT=str(self.work / 'out'))
-        result = run('sh', str(ROOT / 'packaging/merlin/build.sh'), '0.3.4', 'armv7', env=env)
+        result = run('sh', str(ROOT / 'packaging/merlin/build.sh'), '0.3.4', arch, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
-        return self.work / 'out/remodroid-0.3.4-merlin-armv7.tar.gz'
+        return self.work / f'out/remodroid-0.3.4-merlin-{arch}.tar.gz'
 
     def test_archive_contract(self):
         archive = self.build()
@@ -52,12 +53,21 @@ class MerlinTests(unittest.TestCase):
                          'remodroid/phone/armeabi-v7a/libremodroid.so'):
                 self.assertIn('remodroid/' + name, members)
             self.assertTrue(members['remodroid/install.sh'].mode & 0o100)
+            self.assertEqual(tf.extractfile('remodroid/.valid').read().strip(), b'hnd')
             self.assertTrue(all(n == 'remodroid' or n.startswith('remodroid/') for n in members))
             self.assertFalse(any('..' in Path(n).parts or '/._' in n for n in members))
             self.assertNotIn('remodroid/remodroid/agent.ini', members)
+            self.assertNotIn('remodroid/remodroid/bin/remodroid-server', members)
+            self.assertFalse(any('/web/' in name for name in members))
             config = tf.extractfile('remodroid/remodroid/agent.ini.example').read().decode()
             self.assertIn('/jffs/configs/remodroid/adbkey', config)
             self.assertIn('device_secret = ', config)
+
+    def test_aarch64_agent_package(self):
+        with tarfile.open(self.build('aarch64')) as tf:
+            self.assertEqual(tf.extractfile('remodroid/remodroid/arch').read().strip(), b'aarch64')
+            self.assertIn('remodroid/remodroid/bin/remodroid-agent', tf.getnames())
+            self.assertFalse(any(name.endswith('/remodroid-server') for name in tf.getnames()))
 
     def test_normalize_validation(self):
         original = (ROOT / 'deploy/agent.ini.example').read_text()
@@ -120,6 +130,9 @@ with open(os.environ['FIXTURE_RESPONSE'],'w') as f:
         c = self.work / 'agent.c'
         c.write_text('#include <stdio.h>\n#include <string.h>\n#include <unistd.h>\n'
                      'int main(int argc,char**argv){if(argc>1&&!strcmp(argv[1],"-h"))return 0;'
+                     'if(argc>3&&!strcmp(argv[3],"enroll")){FILE*f=fopen(argv[2],"w");'
+                     'if(!f)return 1;fputs("[server]\\nurl = ws://127.0.0.1:9/ws/agent\\n'
+                     'device_id = fixture\\ndevice_secret = fixture\\n[agent]\\n",f);fclose(f);return 0;}'
                      'puts("fixture started");fflush(stdout);while(1)pause();}\n')
         subprocess.run(['cc', str(c), '-o', str(package / 'remodroid/bin/remodroid-agent')], check=True)
         env = dict(os.environ, FIXTURE_DB=str(self.work/'db.json'), FIXTURE_RESPONSE=str(self.work/'rpc'))
@@ -137,12 +150,46 @@ with open(os.environ['FIXTURE_RESPONSE'],'w') as f:
             self.assertFalse(control('status')['autostart'])
             control('start', success=False)  # Empty credentials must not launch anything.
             original = (configdir/'agent.ini').read_text()
+            # INI templates have inline comments after empty credential values.
+            # A configured URL must not make those comments count as credentials.
+            (configdir/'agent.ini').write_text(original.replace('url = ', 'url = ws://127.0.0.1:9/ws/agent '))
+            control('start', success=False)
+            (configdir/'agent.ini').write_text(original)
             def save(text, success=True):
                 encoded = base64.b64encode(text.encode()).decode()
                 subprocess.run([str(bindir/'dbus'), 'set', 'remodroid_payload='+encoded], env=env, check=True)
                 return control('save', success=success)
+            def enroll(data, success=False):
+                encoded = base64.b64encode(json.dumps(data).encode()).decode()
+                subprocess.run([str(bindir/'dbus'), 'set', 'remodroid_enrollment='+encoded], env=env, check=True)
+                response = control('enroll', success=success)
+                self.assertNotIn('remodroid_enrollment', json.loads((self.work/'db.json').read_text()))
+                return response
+            for data in ({'panel': 'http://localhost;touch /tmp/no', 'code': 'ABCD-EFGH'},
+                         {'panel': 'http://localhost', 'code': '$(touch /tmp/no)'},
+                         {'panel': [], 'code': 'ABCD-EFGH'}):
+                enroll(data)
+                self.assertEqual((configdir/'agent.ini').read_text(), original)
             save('[broken', success=False)
             self.assertEqual((configdir/'agent.ini').read_text(), original)
+            agent = package / 'remodroid/bin/remodroid-agent'
+            installed_agent = ks / 'remodroid/bin/remodroid-agent'
+            fixture = '#!/bin/sh\n[ "$3" = enroll ] || exit 2\nprintf "refused fixture code\\n"\nexit 1\n'
+            installed_agent.write_text(fixture)
+            installed_agent.chmod(0o755)
+            enroll({'panel':'http://127.0.0.1:9', 'code':'ABCD-EFGH'})
+            self.assertEqual((configdir/'agent.ini').read_text(), original)
+            self.assertTrue((fs/'tmp/remodroid/enroll.log').exists())
+            self.assertFalse((fs/'tmp/remodroid/enroll.ini').exists())
+            shutil.copyfile(agent, installed_agent)
+            bound = enroll({'panel':'http://127.0.0.1:9', 'code':'ABCD-EFGH'}, success=True)
+            self.assertTrue(bound['running'])
+            self.assertIn('device_secret = fixture', bound['config'])
+            self.assertIn('files_dir = ', bound['config'])
+            enroll({'panel':'http://127.0.0.1:9', 'code':'ABCD-EFGH'})  # Stop before rebind.
+            control('stop')
+            save(original)
+
             marker = self.work/'must-not-exist'
             literal = f'$(touch {marker})'
             config = '[server]\nurl = ws://127.0.0.1:9/ws/agent\ndevice_id = '+literal+'\ndevice_secret = fixture\n[agent]\nfiles_dir = /wrong\n'

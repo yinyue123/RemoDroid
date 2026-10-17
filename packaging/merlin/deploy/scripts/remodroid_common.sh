@@ -23,7 +23,7 @@ rd_value() {
     {sub(/\r$/, "")}
     /^[ \t]*\[/ {s=$0; sub(/^[ \t]*\[/,"",s); sub(/\].*$/, "",s); next}
     s==section && index($0,"=") {k=$0; sub(/=.*/,"",k); gsub(/^[ \t]+|[ \t]+$/,"",k);
-      if(k==key){v=substr($0,index($0,"=")+1); sub(/[ \t]+;.*/,"",v); gsub(/^[ \t]+|[ \t]+$/,"",v); print v; exit}}
+      if(k==key){v=substr($0,index($0,"=")+1); sub(/[ \t]+;.*/,"",v); gsub(/^[ \t]+|[ \t]+$/,"",v); if(v ~ /^;/) v=""; print v; exit}}
     ' "$RD_INI"
 }
 rd_stop() {

@@ -52,7 +52,6 @@ cp deploy/*.example deploy/*.service deploy/*.init "build/$T/etc/"
 cp -r deploy/openrc "build/$T/etc/openrc"
 cp -r "$PHONE/remodroid-server.jar" "$PHONE/arm64-v8a" "$PHONE/armeabi-v7a" "build/$T/phone/"
 tar -C build -czf "$OUT/$T.tar.gz" "$T"
-case "$ARCH" in
-    armv7|aarch64) OUT="$OUT" ./packaging/merlin/build.sh "$VERSION" "$ARCH" ;;
-esac
+# CI builds Merlin agent installers in a separate step after these OpenWrt packages.
+# For a local Merlin build, use packaging/merlin/build.sh VERSION ARCH.
 ls -l "$OUT"
