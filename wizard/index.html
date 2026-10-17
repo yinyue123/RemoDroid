@@ -112,6 +112,13 @@ const OS = {
   rhel: { name: 'CentOS · Fedora', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo dnf install ./remodroid-*.rpm', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
   alpine: { name: 'Alpine', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'apk add --allow-untrusted ./remodroid-*.apk', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
 };
+/* starting a server installed from a package, and printing its wizard link */
+const LINK = get => `echo "http://$(${get} https://1.1.1.1/cdn-cgi/trace | sed -n 's/^ip=//p'):5580/wizard.html?token=$(${get === 'curl -fsS' ? 'sudo ' : ''}cat /var/lib/remodroid/setup-token)"`;
+const SERVE = {
+  debian: { start: 'sudo systemctl enable --now remodroid-server', link: LINK('curl -fsS'), status: 'systemctl status remodroid-server', log: 'journalctl -u remodroid-server' },
+  rhel: { start: 'sudo systemctl enable --now remodroid-server', link: LINK('curl -fsS'), status: 'systemctl status remodroid-server', log: 'journalctl -u remodroid-server' },
+  alpine: { start: 'rc-update add remodroid-server && rc-service remodroid-server start', link: LINK('wget -qO-'), status: 'rc-service remodroid-server status', log: 'tail /var/log/remodroid-server.log' },
+};
 const CPU = { mipsel: 'MIPS (LE)', mips: 'MIPS (BE)', armv7: 'ARMv7', aarch64: 'ARM64', x86_64: 'x86_64', x86: 'x86' };
 
 /* ---------- 1. server ---------- */
@@ -137,7 +144,13 @@ function pageServer() {
       <div class="seg" id="sos">${['debian', 'rhel', 'alpine'].map(k => `<button type="button" data-os="${k}" aria-selected="${(S.sos || 'debian') === k}">${OS[k].name}</button>`).join('')}</div>
       <div class="seg" id="scpu">${['x86_64', 'aarch64'].map(k => `<button type="button" data-cpu="${k}" aria-selected="${(S.scpu || 'x86_64') === k}">${CPU[k]}</button>`).join('')}</div>
       <div id="sdl"><p class="note">Looking up the latest release…</p></div>
-      ${cmd(OS[S.sos || 'debian'].install.replace('remodroid-', 'remodroid-server').replace('-*', '*'))}`;
+      ${cmd(OS[S.sos || 'debian'].install.replace('remodroid-', 'remodroid-server').replace('-*', '*'))}
+      <div class="num"><i class="alt">3</i>Start it</div>
+      <p class="bullet">A package only installs the server. Start it, and have it start again after a reboot:</p>
+      ${cmd(SERVE[S.sos || 'debian'].start)}
+      <p class="bullet">Then print the setup wizard's link (the address the internet sees, the port and the token):</p>
+      ${cmd(SERVE[S.sos || 'debian'].link)}
+      <p class="note">It prints something like <code>http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</code>; open it after opening TCP 5580 in the firewall. Check the server: <code>${esc(SERVE[S.sos || 'debian'].status)}</code> · its log: <code>${esc(SERVE[S.sos || 'debian'].log)}</code></p>`;
     d.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.sos = b.dataset.os; save(); pageServer(); });
     d.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.scpu = b.dataset.cpu; save(); pageServer(); });
     fillDownloads($('#sdl'), 'server', S.sos || 'debian', S.scpu || 'x86_64');
@@ -162,7 +175,7 @@ function pagePanel() {
       <div class="num"><i>1</i>Run the server</div>
       <p class="bullet">The one-line installer already started it. Installed a package yourself? Start it now:</p>
       ${cmd('sudo systemctl enable --now remodroid-server')}
-      <p class="note">Alpine: <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · check it: <code>systemctl status remodroid-server</code></p>
+      <p class="note">Alpine: <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · check it: <code>systemctl status remodroid-server</code> (Alpine: <code>rc-service remodroid-server status</code>)</p>
       <div class="num"><i>2</i>Open its web page</div>
       <p>Open the link the installer printed: <code>http://&lt;server-ip&gt;:5580/wizard.html?token=…</code>. The <b>token</b> proves you own the server. Lost the link? Read the token on the server:</p>
       ${cmd('sudo cat /var/lib/remodroid/setup-token')}
