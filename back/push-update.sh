@@ -3,8 +3,8 @@
 # computer downloads the release package and copies it there, so the machine itself needs no
 # access to GitHub (e.g. a server in mainland China).
 #
-#   build/push-update.sh root@47.107.89.35 -p 36000           ssh options after the address
-#   REMODROID_VERSION=0.3.4 build/push-update.sh root@host    a specific release (default: latest)
+#   back/push-update.sh root@47.107.89.35 -p 36000           ssh options after the address
+#   REMODROID_VERSION=0.3.4 back/push-update.sh root@host    a specific release (default: latest)
 #
 # Log in as root. deb, rpm, apk and OpenWrt ipk; the edited server.ini / agent.ini is kept.
 set -eu
