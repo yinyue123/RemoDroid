@@ -245,9 +245,9 @@ int auth_fail(conn_t *c)
     fail_t *f = fail_entry(c->ip, 1);
     f->last_ms = now;
     if (++f->count >= S.max_failed) {
-        f->until_ms = now + (uint64_t)S.lockout_min * 60000;
+        f->until_ms = now + (uint64_t)S.lockout_sec * 1000;
         f->count = 0;
-        LOGW("lockout for %s (%d minutes)", c->ip, S.lockout_min);
+        LOGW("lockout for %s (%d seconds)", c->ip, S.lockout_sec);
         return 1;
     }
     return 0;

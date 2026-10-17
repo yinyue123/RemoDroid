@@ -76,7 +76,7 @@ typedef struct {
     char state_dir[256]; /* [server] state_dir: setup token, ACME files */
     char **argv;         /* for the restart after the wizard */
     /* settings */
-    int session_days, max_failed, lockout_min, ping_s, timeout_s, heartbeat_s;
+    int session_days, max_failed, lockout_sec, ping_s, timeout_s, heartbeat_s;
     char cookie_name[64];
     char *web_root, *turn_urls, *turn_secret, *origins;
     int turn_ttl_min;

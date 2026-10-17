@@ -43,7 +43,9 @@ static int load_config(void)
     snprintf(S.state_dir, sizeof S.state_dir, "%s", rd_conf_get(c, "server", "state_dir", "/var/lib/remodroid"));
     S.session_days = (int)rd_conf_int(c, "auth", "session_days", 30);
     S.max_failed = (int)rd_conf_int(c, "auth", "max_failed_logins", 5);
-    S.lockout_min = (int)rd_conf_int(c, "auth", "lockout_minutes", 15);
+    /* lockout_seconds wins when set; otherwise fall back to lockout_minutes (default 15 min). */
+    S.lockout_sec = (int)rd_conf_int(c, "auth", "lockout_seconds",
+                                     (int)rd_conf_int(c, "auth", "lockout_minutes", 15) * 60);
     snprintf(S.cookie_name, sizeof S.cookie_name, "%s", rd_conf_get(c, "auth", "cookie_name", "rd_session"));
     S.ping_s = (int)rd_conf_int(c, "keepalive", "ping_seconds", 20);
     S.timeout_s = (int)rd_conf_int(c, "keepalive", "timeout_seconds", 60);

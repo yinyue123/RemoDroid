@@ -33,7 +33,8 @@ email =                            ; optional contact address for the CA
 session_days = 30                  ; how long a login stays valid
 cookie_name = rd_session
 max_failed_logins = 5              ; per IP, then a temporary lockout
-lockout_minutes = 15
+lockout_minutes = 15               ; lockout_seconds overrides this when set (e.g. for testing)
+;lockout_seconds = 900
 
 [users]
 ; username = bcrypt hash   (made by the setup wizard, or: remodroid-server hashpw)

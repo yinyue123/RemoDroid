@@ -345,7 +345,7 @@ Safari → every later request carries Cookie: rd_session=3f9c…e1
 - **Cookie lifetime:** `Max-Age` = `[auth] session_days` × 86400. The default is 30 days.
 - **Cookie attributes:** `HttpOnly` means JavaScript can't read the cookie. `SameSite=Strict` means other
   sites can't send requests that carry it.
-- **Lockout:** after `max_failed_logins` failures from one IP, that IP is locked out for `lockout_minutes`
+- **Lockout:** after `max_failed_logins` failures from one IP, that IP is locked out for `lockout_seconds` (or `lockout_minutes` when the former is unset)
   (HTTP 429).
 - **Sessions are in memory only:** if the server restarts, everyone logs in again.
 - **Plain HTTP by default:** Basic credentials and the cookie travel in clear text. Setting `[acme] domains`
