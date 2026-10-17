@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 
-#define RD_VERSION "0.3.2"
+#define RD_VERSION "0.3.3"
 #define RD_PROTO   1
 
 #define RD_ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))

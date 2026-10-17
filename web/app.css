@@ -28,6 +28,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 #stage{position:fixed;inset:0;background:#000;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overflow:hidden}
 #screen,#video{position:absolute;touch-action:none;background:#000;-webkit-user-select:none;user-select:none}
 #video{object-fit:fill;pointer-events:auto}
+/* layout check (hold the chip) */
+html.lc{background:#e00!important}
+html.lc body{background:#0c0!important}
+html.lc #stage{background:#06f!important}
+html.lc #video,html.lc #screen{opacity:.4;outline:3px solid #ff0;outline-offset:-3px}
+#lc{position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:70;pointer-events:none}
+#lc i{position:absolute;top:0;width:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+#lc pre{position:absolute;top:30vh;left:72px;width:calc(100vw - 88px);margin:0;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.8);color:#fff;font:11px/1.5 var(--mono);white-space:pre-wrap}
 #tapToPlay{position:fixed;inset:0;z-index:45;display:flex;align-items:center;justify-content:center;background:rgba(5,6,8,.7)}
 
 .hud{position:fixed;z-index:20;top:calc(env(safe-area-inset-top,0px) + 10px);left:calc(env(safe-area-inset-left,0px) + 10px);
@@ -38,7 +46,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .hud .rtc{color:var(--accent)}
 .hud .hex{display:block;margin-top:3px;color:var(--accent);max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-.chip{position:fixed;z-index:21;top:calc(env(safe-area-inset-top,0px) + 10px);right:calc(env(safe-area-inset-right,0px) + 10px);
+.chip{position:fixed;z-index:21;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;top:calc(env(safe-area-inset-top,0px) + 10px);right:calc(env(safe-area-inset-right,0px) + 10px);
   display:flex;align-items:center;gap:7px;padding:6px 10px 6px 8px;border-radius:999px;border:0;background:rgba(8,10,13,.62);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font:500 12px var(--sans);color:#DCE3EA}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(92,208,141,.18)}

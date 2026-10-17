@@ -410,6 +410,29 @@ function layout() {
     e.style.width = cw + 'px'; e.style.height = ch + 'px';
     e.style.left = Math.floor(ins.l + (W - cw) / 2) + 'px'; e.style.top = Math.floor(ins.t + (H - ch) / 2) + 'px';
   }
+  if (S.lc) layoutCheck(true);
+}
+/* Layout check: colours each layer (red: page canvas, green: body, blue: stage, yellow: picture),
+ * draws bars as tall as each CSS viewport unit and prints what iOS reports, so a photo of the
+ * screen shows which layer stops short. */
+function layoutCheck(on) {
+  document.documentElement.classList.toggle('lc', on);
+  let box = $('#lc');
+  if (!on) { if (box) box.remove(); return; }
+  const bars = [['100vh', '#fff'], ['100dvh', '#0ff'], ['100lvh', '#f0f'], ['100svh', '#f80'], [innerHeight + 'px', '#000']];
+  if (!box) { box = document.createElement('div'); box.id = 'lc'; document.body.append(box); }
+  const safe = bounds(), vv = window.visualViewport, mm = q => matchMedia(q).matches;
+  box.innerHTML = bars.map(([h, c], i) => `<i style="height:${h};left:${6 + i * 12}px;background:${c}"></i>`).join('') + '<pre></pre>';
+  box.querySelector('pre').textContent = [
+    'bars: vh white · dvh cyan · lvh magenta · svh orange · innerHeight black',
+    `screen ${screen.width}x${screen.height} @${devicePixelRatio}x`,
+    `inner ${innerWidth}x${innerHeight} · visualViewport ${vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) : '-'}`,
+    `html ${document.documentElement.clientHeight} · stage ${stage.clientHeight}${stage.style.height ? ' (stretched)' : ''}`,
+    `safe area t${safe.t} r${safe.r} b${safe.b} l${safe.l}`,
+    `standalone ${navigator.standalone} · display ${mm('(display-mode: fullscreen)') ? 'fullscreen' : mm('(display-mode: standalone)') ? 'standalone' : 'browser'}`,
+    `picture ${video.style.width} x ${video.style.height} at ${video.style.left}, ${video.style.top}`,
+    navigator.userAgent.replace(/^[^(]*\(|\).*$/g, ''),
+  ].join('\n');
 }
 window.addEventListener('resize', layout);
 window.addEventListener('orientationchange', () => setTimeout(layout, 150));
@@ -568,7 +591,17 @@ async function tickStats() {
   if (statusRefresh) statusRefresh();
 }
 setInterval(tickStats, 1000);
-$('#chip').addEventListener('click', () => { S.stats = !S.stats; save(); tickStats(); syncMenuStates(); });
+/* Hold the chip for the layout check; a tap toggles the stats. */
+let chipHold = 0, chipHeld = false;
+$('#chip').addEventListener('pointerdown', () => {
+  chipHeld = false;
+  chipHold = setTimeout(() => {
+    chipHeld = true; S.lc = !S.lc; save(); layoutCheck(S.lc);
+    toast(S.lc ? 'Layout check on. Hold the chip again to hide it.' : 'Layout check off');
+  }, 700);
+});
+for (const t of ['pointerup', 'pointercancel', 'pointerleave']) $('#chip').addEventListener(t, () => clearTimeout(chipHold));
+$('#chip').addEventListener('click', () => { if (chipHeld) { chipHeld = false; return; } S.stats = !S.stats; save(); tickStats(); syncMenuStates(); });
 
 /* ================= floating ball + menu ================= */
 const ball = $('#ball'), menu = $('#menu');
