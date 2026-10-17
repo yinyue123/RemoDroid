@@ -25,7 +25,7 @@ iPhone Safari ──WebRTC (UDP)──► AWS: remodroid-server (HTTP, WebSocket
 | `android/java/` | Phone server: screen capture, MediaCodec, input injection, clipboard, screen power, files, logcat | Java (app_process) |
 | `web/` | iPhone client (PWA): video, sound, multi-touch, floating-ball menu (lock, reconnect, full screen), photo upload, clipboard, all settings; `panel.html` (bottom tabs: Devices, Agents with enroll and settings, Server settings one item at a time) and `wizard.html` (first-run setup) | HTML/CSS/JS |
 | `worker/` | The same panel on Cloudflare Workers + a Durable Object, with Cloudflare TURN, for people without a server | JS |
-| `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev) and `install_server.sh` / `install_agent.sh` | HTML, sh |
+| `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev) , `install_server.sh` / `install_agent.sh` and `update.sh` | HTML, sh |
 | `common/` | Shared C: WebSocket framing, tunnel frames, STUN, JSON envelope, ini, utilities | C |
 | `third_party/` | Vendored libraries, compiled in statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp | C |
 | `deploy/` | Example `server.ini` / `agent.ini`, systemd units, OpenRC and procd scripts | |
@@ -102,6 +102,10 @@ through the same steps with copy buttons.
 
 Firewall for a self-hosted server: TCP 5580 (setup), then your web port (80) and 443 with a domain,
 UDP 3478 and UDP 49152–49252 for TURN.
+
+To update later, run on the server or router: `curl -fsSL https://remodroid.pages.dev/update.sh | sudo sh`
+(or `wget -qO- … | sh` on OpenWrt). It updates whichever of the server and agent are installed to
+the latest release, keeps `server.ini` / `agent.ini`, and restarts them.
 
 On the router, `remodroid-agent devices | status | shell … | push | pull | logcat | key | restart-server`
 talk to the running agent (no adb needed).
