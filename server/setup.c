@@ -268,6 +268,14 @@ static cJSON *settings_get(const http_req_t *r, const char *user)
         cJSON_AddBoolToObject(o, "has_credential", e[i].cred[0] != 0); /* never sent back */
         cJSON_AddItemToArray(arr, o);
     }
+    /* this server's own STUN/TURN, as handed to phones; the panel lists them with the others */
+    cJSON *bi = cJSON_AddArrayToObject(j, "builtin_ice");
+    if (*rd_conf_get(S.conf, "turn", "listen", "")) {
+        char *list = rd_strdup(rd_conf_get(S.conf, "turn", "urls", "")), *save = NULL;
+        for (char *u = strtok_r(list, ", ", &save); u; u = strtok_r(NULL, ", ", &save))
+            cJSON_AddItemToArray(bi, cJSON_CreateString(u));
+        free(list);
+    }
     cJSON_AddBoolToObject(j, "https", tls_ready());
     return j;
 }
@@ -379,9 +387,32 @@ static void settings_patch(conn_t *c, cJSON *in, const char *user)
         }
     }
 
+    /* which of STUN and TURN this server hands out: kept across port/address changes, both when first
+     * turned on; "builtin_ice" (the URLs left after removing some from the list) narrows it, and
+     * removing both turns the built-in server off */
+    const char *cur_urls = rd_conf_get(S.conf, "turn", "urls", "");
+    int want_stun = !*tl || !*cur_urls || strstr(cur_urls, "stun:") != NULL;
+    int want_turn = !*tl || !*cur_urls || strstr(cur_urls, "turn:") != NULL;
+    cJSON *bl = cJSON_GetObjectItemCaseSensitive(in, "builtin_ice");
+    if (bl) {
+        if (!cJSON_IsArray(bl)) {
+            http_error(c, 400, "bad_request", "builtin_ice must be a list of URLs");
+            return;
+        }
+        want_stun = want_turn = 0;
+        cJSON *it;
+        cJSON_ArrayForEach(it, bl) {
+            const char *u = cJSON_IsString(it) ? it->valuestring : "";
+            want_stun |= !strncmp(u, "stun:", 5);
+            want_turn |= !strncmp(u, "turn:", 5);
+        }
+        if (!want_stun && !want_turn)
+            turn_on = 0;
+    }
+
     int ok = 1, restart = 0, changed = 0;
     int web = HAS("http_port") || HAS("domain") || HAS("email") || HAS("tls_port") || HAS("redirect_http");
-    int turn = HAS("turn_enabled") || HAS("turn_port") || HAS("public_ip") || HAS("domain"); /* urls name the domain */
+    int turn = HAS("turn_enabled") || HAS("turn_port") || HAS("public_ip") || HAS("domain") || bl; /* urls name the domain */
     char v[300];
     if (HAS("http_port")) {
         snprintf(v, sizeof v, "0.0.0.0:%d", http_port);
@@ -406,8 +437,19 @@ static void settings_patch(conn_t *c, cJSON *in, const char *user)
             ok &= set_if_changed("turn", "listen", v, &restart) == 0;
         ok &= set_if_changed("turn", "public_ip", pub, &restart) == 0;
         const char *h = *domain ? domain : pub;
-        snprintf(v, sizeof v, "stun:%s:%d, turn:%s:%d?transport=udp", h, turn_port, h, turn_port);
-        ok &= set_if_changed("turn", "urls", v, &restart) == 0;
+        char su[140] = "", tu[150] = "";
+        if (want_stun)
+            snprintf(su, sizeof su, "stun:%s:%d", h, turn_port);
+        if (want_turn)
+            snprintf(tu, sizeof tu, "turn:%s:%d?transport=udp", h, turn_port);
+        snprintf(v, sizeof v, "%s%s%s", su, *su && *tu ? ", " : "", tu);
+        int urls_changed = 0; /* read for every new session: no restart */
+        ok &= set_if_changed("turn", "urls", v, &urls_changed) == 0;
+        if (urls_changed) {
+            free(S.turn_urls);
+            S.turn_urls = rd_strdup(v);
+            changed = 1;
+        }
         if (!*rd_conf_get(S.conf, "turn", "shared_secret", "")) {
             uint8_t r[24];
             char s[40];

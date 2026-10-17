@@ -108,7 +108,13 @@ button.item:active,a.item:active{background:var(--paper-2)}
 .ice-edit .seg{margin:0}
 .ice-edit .seg button{padding:8px 14px;font-size:13px}
 .ice-edit[data-type="stun"] .turn-only{display:none}
+.ice-edit:not(.tls) .tls-only{display:none}
+.ice-edit.tls.nostun .port-field{display:none}
+.ice-kinds{display:flex;gap:24px}
+.ice-kinds .check{align-items:center}
+.ice-kinds .check input{margin:0}
 .ice-edit .ice-btns{display:flex;gap:8px;align-items:center}
 .ice-edit .ice-btns .spacer{flex:1}
 .ice-edit .callout{margin:0}
+.ice-note{margin:0;font-size:14px;color:var(--muted)}
 .ice-more{display:grid;gap:12px}

@@ -408,6 +408,7 @@ function renderServer() {
   if (!cfg) { main.innerHTML = '<p class="note">Loading…</p>'; loadSettings().then(() => { if (route().tab === 'server') renderServer(); }); return; }
   if (cfg.error) { main.innerHTML = `<div class="callout bad">${esc(cfg.error)}</div>`; return; }
   const worker = cfg.platform === 'worker';
+  const builtinOn = (cfg.builtin_ice || []).length > 0;
   let html = '';
   if (!worker) {
     const dom = cfg.domain;
@@ -434,7 +435,7 @@ function renderServer() {
       t.cloudflare ? item({ act: 'cf_token', html: '<span class="txt"><b>API token</b></span>', val: t.has_token ? 'saved' : 'not set' }) : '',
     ].filter(Boolean), 'Cloudflare dashboard → Realtime → TURN Server → Create.');
   }
-  html += `<h2 class="gtitle">Other STUN / TURN servers</h2><div id="ice"></div><p class="gfoot">Phones use UDP TURN; add your own coturn here, or a public STUN server such as stun.cloudflare.com.</p>`;
+  html += `<h2 class="gtitle">${builtinOn ? 'STUN / TURN servers' : 'Other STUN / TURN servers'}</h2><div id="ice"></div><p class="gfoot">Phones use UDP TURN; add your own coturn here, or a public STUN server such as stun.cloudflare.com.</p>`;
   html += group('About', [
     item({ html: '<span class="txt"><b>Version</b></span>', val: cfg.version || '' }),
     !worker && cfg.config_file ? item({ html: '<span class="txt"><b>Config file</b></span>', val: cfg.config_file }) : '',
@@ -442,12 +443,16 @@ function renderServer() {
   html += `<h2 class="gtitle"></h2><div class="group"><button class="item danger" type="button" data-act="logout">Log out</button></div>`;
   main.innerHTML = html;
 
-  IceList.mount($('#ice'), cfg.ice_servers || [], {
+  /* this server's own STUN/TURN heads the list; removing both turns it off */
+  const builtin = cfg.builtin_ice || [];
+  IceList.mount($('#ice'), builtin.map(url => ({ url, builtin: true })).concat(cfg.ice_servers || []), {
     empty: 'None. Add one with just its address.',
     toast,
     onChange: async list => {
-      const r = await patch({ ice_servers: list.map(e => ({ url: e.url, username: e.username || '', credential: e.credential || '', was: e.was || e.url })) });
-      return (r && r.ice_servers) || list;
+      const mine = list.filter(e => e.builtin).map(e => e.url), body = {};
+      body.ice_servers = list.filter(e => !e.builtin).map(e => ({ url: e.url, username: e.username || '', credential: e.credential || '', was: e.was || e.url }));
+      if (mine.length !== builtin.length) body.builtin_ice = mine;
+      await patch(body); /* re-renders the list from the saved settings */
     },
   });
   main.querySelectorAll('input.sw').forEach(el => el.onchange = async () => {

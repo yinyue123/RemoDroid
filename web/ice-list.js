@@ -1,11 +1,13 @@
 /* The "other STUN/TURN servers" list, shared by wizard.html and panel.html.
- * Adding a server needs only its address: STUN on port 3478 unless you change
- * the type, port or login. Editing keeps whatever you don't touch, including a
+ * Adding a server needs only its address: STUN and TURN on port 3478 (both
+ * ticked, since one coturn usually serves both) unless you change the ticks,
+ * port, transport or login. Editing keeps whatever you don't touch, including a
  * TURN password the browser never sees (the server fills it back in from the
  * entry's old URL, sent as "was").
  *
  *   IceList.mount(box, entries, { onChange(entries) → Promise|void })
- *   entries: [{ url: "turn:203.0.113.5:3478?transport=udp", username, credential, has_credential }] */
+ *   entries: [{ url: "turn:203.0.113.5:3478?transport=udp", username, credential, has_credential }]
+ *   An entry with builtin: true is this server's own STUN/TURN: it can only be removed. */
 (() => {
 'use strict';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -24,7 +26,8 @@ function build(p) {
 }
 function label(e) {
   const p = parse(e.url);
-  return { title: `${p.host}:${p.port}`, sub: p.type === 'stun' ? 'STUN' : `${p.type.toUpperCase()} · ${p.transport.toUpperCase()}${e.username ? ' · ' + e.username : ''}` };
+  const sub = p.type === 'stun' ? 'STUN' : `${p.type.toUpperCase()} · ${p.transport.toUpperCase()}${e.username ? ' · ' + e.username : ''}`;
+  return { title: `${p.host}:${p.port}`, sub: e.builtin ? 'This server · ' + sub : sub };
 }
 
 function mount(box, initial, opts) {
@@ -50,18 +53,41 @@ function mount(box, initial, opts) {
     } finally { busy = false; }
   }
 
+  function builtinEditor(i) {
+    const last = list.filter(e => e.builtin).length === 1;
+    return `<div class="ice-edit">
+      <p class="ice-note">Built into this server; its port and address are set above.${last ? ' Removing it turns the built-in STUN/TURN off.' : ' Removing it stops handing it to phones.'}</p>
+      <p class="ice-err callout bad" hidden></p>
+      <div class="ice-btns">
+        <button class="btn small ghost" type="button" data-ice="cancel">Cancel</button>
+        <span class="spacer"></span><button class="btn small danger" type="button" data-ice="delete">Remove</button>
+      </div>
+    </div>`;
+  }
   function editor(i) {
+    if (i >= 0 && list[i].builtin) return builtinEditor(i);
     const e = i >= 0 ? list[i] : { url: '', username: '', credential: '' };
-    const p = i >= 0 ? parse(e.url) : { type: 'stun', host: '', port: 3478, transport: 'udp' };
+    const p = i >= 0 ? parse(e.url) : { type: 'turn', host: '', port: 3478, transport: 'udp' };
     const kept = i >= 0 && (e.has_credential || e.credential);
+    /* a new address can become a STUN and a TURN entry at once; an existing entry is one URL */
+    const kind = i >= 0
+      ? `<div class="seg ice-type" role="group" aria-label="Type">${['stun', 'turn', 'turns'].map(t => `<button type="button" data-t="${t}" aria-selected="${p.type === t}">${t.toUpperCase()}</button>`).join('')}</div>`
+      : `<div class="ice-kinds">
+          <label class="check"><input type="checkbox" id="ice-stun" checked><span>STUN</span></label>
+          <label class="check"><input type="checkbox" id="ice-turn" checked><span>TURN</span></label>
+        </div>`;
+    const tls = i < 0 ? '<option value="tls">TLS</option>' : '';
     return `<div class="ice-edit" data-type="${p.type}">
       <div class="field"><label for="ice-host">Address</label>
         <input id="ice-host" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="203.0.113.10 or stun.example.com" value="${esc(p.host)}"></div>
       <div class="ice-more">
-        <div class="seg ice-type" role="group" aria-label="Type">${['stun', 'turn', 'turns'].map(t => `<button type="button" data-t="${t}" aria-selected="${p.type === t}">${t.toUpperCase()}</button>`).join('')}</div>
+        ${kind}
         <div class="row2">
-          <div class="field"><label for="ice-port">Port</label><input id="ice-port" type="number" min="1" max="65535" value="${esc(p.port)}"></div>
-          <div class="field turn-only"><label for="ice-tr">Transport</label><select id="ice-tr"><option value="udp" ${p.transport === 'udp' ? 'selected' : ''}>UDP</option><option value="tcp" ${p.transport === 'tcp' ? 'selected' : ''}>TCP</option></select></div>
+          <div class="field port-field"><label for="ice-port">Port</label><input id="ice-port" type="number" min="1" max="65535" value="${esc(p.port)}"></div>
+          <div class="field turn-only"><label for="ice-tr">Transport</label><select id="ice-tr"><option value="udp" ${p.transport === 'udp' ? 'selected' : ''}>UDP</option><option value="tcp" ${p.transport === 'tcp' ? 'selected' : ''}>TCP</option>${tls}</select></div>
+        </div>
+        <div class="row2 tls-only">
+          <div class="field"><label for="ice-tlsport">TLS port</label><input id="ice-tlsport" type="number" min="1" max="65535" value="${DEF_PORT.turns}"></div>
         </div>
         <div class="row2 turn-only">
           <div class="field"><label for="ice-user">Username</label><input id="ice-user" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(e.username)}"></div>
@@ -98,9 +124,20 @@ function mount(box, initial, opts) {
       if (+port.value === DEF_PORT[was]) port.value = DEF_PORT[b.dataset.t];
       if (b.dataset.t === 'turns') ed.querySelector('#ice-tr').value = 'tcp';
     });
+    const kinds = () => ({ stun: !!ed.querySelector('#ice-stun')?.checked, turn: !!ed.querySelector('#ice-turn')?.checked });
+    const syncNew = () => {
+      ed.dataset.type = kinds().turn ? 'turn' : 'stun';
+      ed.classList.toggle('tls', kinds().turn && ed.querySelector('#ice-tr').value === 'tls');
+      ed.classList.toggle('nostun', !kinds().stun);
+    };
+    if (open === -1) {
+      ed.querySelectorAll('.ice-kinds input, #ice-tr').forEach(x => x.onchange = syncNew);
+      syncNew();
+    }
     ed.querySelector('[data-ice="cancel"]').onclick = () => { open = -2; render(); };
     const del = ed.querySelector('[data-ice="delete"]');
     if (del) del.onclick = () => commit(list.filter((_, k) => k !== open), 'Server removed');
+    if (open >= 0 && list[open].builtin) return;
     ed.querySelector('#ice-host').onkeydown = ev => { if (ev.key === 'Enter') ed.querySelector('[data-ice="save"]').click(); };
     ed.querySelector('[data-ice="save"]').onclick = () => {
       const err = ed.querySelector('.ice-err');
@@ -108,7 +145,8 @@ function mount(box, initial, opts) {
       const type = ed.dataset.type, port = +ed.querySelector('#ice-port').value || DEF_PORT[type];
       if (!/^(\[[0-9a-f:.]+\]|[0-9a-f:]*:[0-9a-f:.]+|[A-Za-z0-9.-]+)$/i.test(host)) { err.textContent = 'Enter an IP address or host name, e.g. 203.0.113.10'; err.hidden = false; return; }
       if (port < 1 || port > 65535) { err.textContent = 'The port must be 1-65535'; err.hidden = false; return; }
-      const prev = open >= 0 ? list[open] : null;
+      if (open === -1) return addNew(ed, err, host, port);
+      const prev = list[open];
       const url = build({ type, host, port, transport: ed.querySelector('#ice-tr').value });
       const entry = { url, username: '', credential: '' };
       if (type !== 'stun') {
@@ -123,9 +161,28 @@ function mount(box, initial, opts) {
         if (/[\s,]/.test(entry.username + entry.credential)) { err.textContent = 'Username and password can\'t contain spaces or commas'; err.hidden = false; return; }
       }
       const next = list.slice();
-      if (open >= 0) next[open] = entry; else next.push(entry);
-      commit(next, open >= 0 ? 'Server saved' : 'Server added');
+      next[open] = entry;
+      commit(next, 'Server saved');
     };
+  }
+  /* "+ Add a server": one entry per ticked kind, skipping URLs already in the list */
+  function addNew(ed, err, host, port) {
+    const stun = ed.querySelector('#ice-stun').checked, turn = ed.querySelector('#ice-turn').checked;
+    const fail = m => { err.textContent = m; err.hidden = false; };
+    if (!stun && !turn) return fail('Tick STUN, TURN or both');
+    const add = [];
+    if (stun) add.push({ url: build({ type: 'stun', host, port }), username: '', credential: '' });
+    if (turn) {
+      const tr = ed.querySelector('#ice-tr').value, tls = tr === 'tls';
+      const tport = tls ? +ed.querySelector('#ice-tlsport').value || DEF_PORT.turns : port;
+      if (tport < 1 || tport > 65535) return fail('The TLS port must be 1-65535');
+      const username = ed.querySelector('#ice-user').value.trim(), credential = ed.querySelector('#ice-pass').value;
+      if (/[\s,]/.test(username + credential)) return fail('Username and password can\'t contain spaces or commas');
+      add.push({ url: build({ type: tls ? 'turns' : 'turn', host, port: tport, transport: tr }), username, credential });
+    }
+    const fresh = add.filter(a => !list.some(e => e.url === a.url));
+    if (!fresh.length) return fail(add.length > 1 ? 'Both are already in the list' : 'That server is already in the list');
+    commit(list.concat(fresh), fresh.length > 1 ? 'STUN and TURN servers added' : 'Server added');
   }
   function focusHost() { const h = box.querySelector('#ice-host'); if (h) h.focus(); }
   render();
