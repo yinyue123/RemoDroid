@@ -388,8 +388,10 @@ function onChannel(label, data) {
 
 /* ================= stream area + input ================= */
 const stage = $('#stage'), video = $('#video'), cv = $('#screen'), ctx = cv.getContext('2d');
-/* iOS Home Screen apps with a see-through status bar can lay the page out as the screen minus the
- * status bar, leaving an empty band at the bottom: stretch the stage over it. */
+/* iOS 26 Home Screen apps with the "black-translucent" status bar get a page as tall as the screen
+ * minus the status bar, so the bottom of the picture is cut off; index.html uses "default", which
+ * still draws under the status bar but gets the whole screen. If a page still comes out short,
+ * stretch the stage over the band. */
 function fitStage(ins) {
   const full = innerWidth > innerHeight ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
   const short = navigator.standalone === true && ins.t > 0 && Math.abs(innerHeight + ins.t - full) < 2;
