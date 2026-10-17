@@ -112,12 +112,17 @@ const OS = {
   rhel: { name: 'CentOS · Fedora', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo dnf install ./remodroid-*.rpm', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
   alpine: { name: 'Alpine', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'apk add --allow-untrusted ./remodroid-*.apk', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
 };
-/* starting a server installed from a package, and printing its wizard link */
-const LINK = get => `echo "http://$(${get} https://1.1.1.1/cdn-cgi/trace | sed -n 's/^ip=//p'):5580/wizard.html?token=$(${get === 'curl -fsS' ? 'sudo ' : ''}cat /var/lib/remodroid/setup-token)"`;
-const SERVE = {
-  debian: { start: 'sudo systemctl enable --now remodroid-server', link: LINK('curl -fsS'), status: 'systemctl status remodroid-server', log: 'journalctl -u remodroid-server' },
-  rhel: { start: 'sudo systemctl enable --now remodroid-server', link: LINK('curl -fsS'), status: 'systemctl status remodroid-server', log: 'journalctl -u remodroid-server' },
-  alpine: { start: 'rc-update add remodroid-server && rc-service remodroid-server start', link: LINK('wget -qO-'), status: 'rc-service remodroid-server status', log: 'tail /var/log/remodroid-server.log' },
+/* starting what a package installed */
+const SERVER_START = {
+  debian: 'sudo systemctl enable --now remodroid-server',
+  rhel: 'sudo systemctl enable --now remodroid-server',
+  alpine: 'rc-update add remodroid-server && rc-service remodroid-server start',
+};
+const AGENT_START = {
+  openwrt: '/etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent start',
+  debian: 'sudo systemctl enable --now remodroid-agent',
+  rhel: 'sudo systemctl enable --now remodroid-agent',
+  alpine: 'rc-update add remodroid-agent && rc-service remodroid-agent start',
 };
 const CPU = { mipsel: 'MIPS (LE)', mips: 'MIPS (BE)', armv7: 'ARMv7', aarch64: 'ARM64', x86_64: 'x86_64', x86: 'x86' };
 
@@ -147,10 +152,8 @@ function pageServer() {
       ${cmd(OS[S.sos || 'debian'].install.replace('remodroid-', 'remodroid-server').replace('-*', '*'))}
       <div class="num"><i class="alt">3</i>Start it</div>
       <p class="bullet">A package only installs the server. Start it, and have it start again after a reboot:</p>
-      ${cmd(SERVE[S.sos || 'debian'].start)}
-      <p class="bullet">Then print the setup wizard's link (the address the internet sees, the port and the token):</p>
-      ${cmd(SERVE[S.sos || 'debian'].link)}
-      <p class="note">It prints something like <code>http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</code>; open it after opening TCP 5580 in the firewall. Check the server: <code>${esc(SERVE[S.sos || 'debian'].status)}</code> · its log: <code>${esc(SERVE[S.sos || 'debian'].log)}</code></p>`;
+      ${cmd(SERVER_START[S.sos || 'debian'])}
+      <p>Then open <code>http://&lt;server-ip&gt;:5580/wizard.html</code>. The setup code is in <code>/var/lib/remodroid/setup-token</code>; the port is <code>listen</code> in <code>/etc/remodroid/server.ini</code>.</p>`;
     d.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.sos = b.dataset.os; save(); pageServer(); });
     d.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.scpu = b.dataset.cpu; save(); pageServer(); });
     fillDownloads($('#sdl'), 'server', S.sos || 'debian', S.scpu || 'x86_64');
@@ -217,6 +220,10 @@ function pageAgent() {
     <div class="seg">${o.cpus.map(k => `<button type="button" data-cpu="${k}" aria-selected="${k === cpu}">${CPU[k]}</button>`).join('')}</div>
     <div id="adl"><p class="note">Looking up the latest release…</p></div>
     ${cmd(o.install.replace('remodroid-*', 'remodroid-agent*').replace('remodroid-agent_*', 'remodroid-agent_*'))}
+    <div class="num"><i class="alt">3</i>Start it</div>
+    <p class="bullet">A package only installs the agent. Start it, and have it start again after a reboot:</p>
+    ${cmd(AGENT_START[S.os])}
+    <p class="note">Then connect it to your panel: the next step.</p>
     <div class="chips"><small>Needs</small><span class="chip">a USB port</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle (installed with it)' : 'ca-certificates'}</span><span class="chip">the right clock (HTTPS)</span></div>`;
   main.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.os = b.dataset.os; save(); pageAgent(); });
   main.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.cpu = b.dataset.cpu; save(); pageAgent(); });
