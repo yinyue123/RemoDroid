@@ -118,9 +118,11 @@ async function api(method, path, body) {
   if (DEMO) return { ok: true, status: 200, json: async () => ({ result: {} }) };
   const r = await fetch('/api/v1' + path, { method, headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
-  if (r.status === 401) { location.href = '/login'; throw new Error('login required'); }
+  if (r.status === 401) { toLogin(); throw new Error('login required'); }
   return r;
 }
+/* The login page brings you back here, to the same phone. */
+function toLogin() { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); }
 async function cmd(name, args, msg) {
   if (!st.device) { toast('No device selected'); return; }
   try {
@@ -144,6 +146,8 @@ function connectWs() {
   ws.onclose = () => {
     st.ws = null;
     setOverlay('Server unreachable', `Retrying in ${st.wsBackoff} s…`, true);
+    /* a refused upgrade looks the same as a dead server: a logged-out browser goes to the login page */
+    fetch('/api/v1/me', { credentials: 'same-origin' }).then(r => { if (r.status === 401) toLogin(); }).catch(() => {});
     setTimeout(connectWs, st.wsBackoff * 1000);
     st.wsBackoff = Math.min(st.wsBackoff * 2, 30);
   };
@@ -323,7 +327,7 @@ function setOverlay(title, text, showReconnect, showTakeover) {
   $('#reconnect').hidden = !showReconnect;
   $('#takeover').hidden = !showTakeover;
   $('#discLink').hidden = title !== 'No routers yet';
-  ball.hidden = true;
+  ball.hidden = !!openId; /* above the overlay: a tap goes to the device list */
 }
 $('#reconnect').addEventListener('click', () => {
   if (DEMO) { $('#disc').hidden = true; ball.hidden = false; return; }
@@ -656,12 +660,13 @@ ball.addEventListener('pointermove', e => {
 function ballUp(e) {
   if (!drag || e.pointerId !== drag.id) return;
   const moved = drag.moved; drag = null; ball.classList.remove('drag');
-  if (moved) settleBall(); else toggleMenu();
+  if (moved) settleBall(); else if (!$('#disc').hidden) toDevices(); else toggleMenu();
   armIdle();
 }
 ball.addEventListener('pointerup', ballUp);
 ball.addEventListener('pointercancel', ballUp);
-ball.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMenu(); } });
+ball.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#disc').hidden ? toggleMenu() : toDevices(); } });
+function toDevices() { location.href = '/panel.html#devices'; }
 window.addEventListener('resize', () => { restoreBall(); if (!menu.hidden) positionMenu(); });
 function positionMenu() {
   const r = ball.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight, W = innerWidth, H = innerHeight;
@@ -747,7 +752,7 @@ menu.addEventListener('click', e => {
   }
   else if (a === 'reconnect') { closeMenu(); reconnectStream(); }
   else if (a === 'fullscreen') { closeMenu(); toggleFullscreen(); }
-  else if (a === 'devices') { location.href = '/panel.html'; }
+  else if (a === 'devices') { toDevices(); }
 });
 
 /* ================= sheets ================= */
@@ -765,7 +770,7 @@ function openSheet(id) {
 function closeSheet() {
   if (!openId) return;
   $('#sheet-' + openId).hidden = true; $('#backdrop').hidden = true;
-  openId = null; ball.hidden = !$('#disc').hidden; armIdle();
+  openId = null; ball.hidden = false; armIdle();
   stopLogcat();
 }
 $('#backdrop').addEventListener('click', closeSheet);
@@ -1143,7 +1148,7 @@ function renderTab(id) {
     ]))));
     add(el('div', { class: 'btns' },
       el('button', { class: 'btn wide', type: 'button', text: st.sid ? 'Disconnect' : 'Connect', onclick: () => { closeSheet(); if (st.sid) endSession(); else { wantSession = true; maybeStart(); } } }),
-      el('button', { class: 'btn danger wide', type: 'button', text: 'Log out', onclick: async () => { await api('POST', '/logout').catch(() => {}); location.href = '/login'; } })));
+      el('button', { class: 'btn danger wide', type: 'button', text: 'Log out', onclick: async () => { await api('POST', '/logout').catch(() => {}); location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); } })));
   }
   body.scrollTop = 0;
 }

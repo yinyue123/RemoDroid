@@ -212,8 +212,8 @@ Not on this WebSocket: video, audio, touch input, quality changes and photos. Th
 As requested, **no TLS** is used for the web page, the API or the WebSockets: everything is `http://` and `ws://` on the AWS server. The router agent then needs no TLS library. WebRTC itself still encrypts video, audio, input and photos (DTLS-SRTP is mandatory in every browser and can't be turned off).
 
 **Viewer (Safari)**
-1. Safari opens `http://<aws-host>/`. The server answers `401` with `WWW-Authenticate: Basic realm="RemoDroid"`, and Safari shows its built-in login prompt.
-2. On a correct username/password, the server creates a random 128-bit session ID and sets
+1. Safari opens `http://<aws-host>/`. Without a cookie the server redirects to its own login page (`/login?next=/`); the browser's Basic auth prompt is not used.
+2. The page posts the username/password to `POST /login`. If they are right, the server creates a random 128-bit session ID and sets
    `Set-Cookie: rd_session=<id>; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`.
    The login lasts **30 days by default**; change `session_days` in `server.ini` (§4.7).
 3. Every later request, including the `ws://…/ws/viewer` upgrade, is authenticated by that cookie. A cookie is needed here because browsers can't add an `Authorization` header to a WebSocket, but they do send cookies with it automatically.
@@ -629,7 +629,8 @@ All endpoints except `/login` require the `rd_session` cookie (§4.6). Bodies ar
 
 | Method | Path | Request | Response | Notes |
 |---|---|---|---|---|
-| `GET` | `/login` | Basic auth header | `302 /` + `Set-Cookie` | Without a valid header: `401` + `WWW-Authenticate: Basic` |
+| `GET` | `/login` | — | the login page | Pages without a cookie redirect here with `?next=` |
+| `POST` | `/login` | `{"user","password"}` | `200 {"user"}` + `Set-Cookie` | `401` wrong, `429` locked out, `403` foreign Origin |
 | `POST` | `/api/v1/logout` | — | `204` | Deletes the session |
 | `GET` | `/api/v1/me` | — | `{"user":"me","session_expires":1767225600000}` | |
 | `GET` | `/api/v1/devices` | — | `{"devices":[Device,…]}` | All devices in `server.ini` |

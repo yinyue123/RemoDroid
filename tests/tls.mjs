@@ -69,7 +69,7 @@ function get(url, opts = {}) {
       r.on('end', () => res({ status: r.statusCode, headers: r.headers, body: Buffer.concat(chunks) }));
     });
     req.on('error', rej);
-    req.end();
+    req.end(opts.body);
   });
 }
 
@@ -160,14 +160,13 @@ key = ${dir}/srv.key
 ${users}`);
   const srv = start('server', server, ['-c', path.join(dir, 'server.ini'), '-v']);
   await until(() => get(`https://localhost:${tlsPort}/`).then(() => true), 5000, 'server up');
-  const basic = { Authorization: 'Basic ' + Buffer.from('me:pw-user').toString('base64') };
 
   console.log('HTTPS');
   let r = await get(`http://127.0.0.1:${httpPort}/page?x=1`);
   ok(r.status === 308 && r.headers.location === `https://127.0.0.1:${tlsPort}/page?x=1`, 'plain HTTP redirects to HTTPS (308, same path and query)');
   r = await get(`http://127.0.0.1:${httpPort}/.well-known/acme-challenge/none`);
   ok(r.status === 404, 'ACME challenge path is answered on plain HTTP, not redirected');
-  r = await get(`https://localhost:${tlsPort}/`, { headers: basic });
+  r = await get(`https://localhost:${tlsPort}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: 'me', password: 'pw-user' }) });
   const setCookie = r.headers['set-cookie']?.[0] || '';
   ok(r.status === 200 && /; Secure/.test(setCookie) && /HttpOnly/.test(setCookie), 'HTTPS login sets a Secure, HttpOnly cookie');
   const cookie = setCookie.split(';')[0];

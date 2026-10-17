@@ -72,7 +72,7 @@ web_root = ${ROOT}/web
     http_port: p2, username: 'admin', password: 'correct-horse', turn_enabled: false,
     ice_extra: 'stun:stun.cloudflare.com:3478, turn:turn.example.com:3478?transport=udp alice s3cret' }) });
   ok(r.status === 200, 'saving the wizard is accepted');
-  await until(() => fetch(B + '/').then(r2 => r2.status === 401), 6000, 'restart on the new port');
+  await until(() => fetch(B + '/', { redirect: 'manual' }).then(r2 => r2.status === 302), 6000, 'restart on the new port');
   ok(true, 'the server restarts itself on the chosen port');
   const conf = fs.readFileSync(ini, 'utf8');
   ok(/^; RemoDroid server \(test\)/.test(conf) && /\[users\]\nadmin = \$2b\$10\$/.test(conf) && new RegExp(`listen = 0\\.0\\.0\\.0:${p2}`).test(conf),
@@ -82,9 +82,10 @@ web_root = ${ROOT}/web
   console.log('after setup');
   r = await fetch(B + '/api/v1/setup', { headers: T });
   ok(r.status === 401, 'the wizard now needs a login, not the token');
-  r = await fetch(B + '/login?next=/agent.html', { redirect: 'manual', headers: { Authorization: 'Basic ' + Buffer.from('admin:correct-horse').toString('base64') } });
+  const login = pw => fetch(B + '/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: 'admin', password: pw }) });
+  r = await login('correct-horse');
   const cookie = (r.headers.get('set-cookie') || '').split(';')[0];
-  ok(r.status === 302 && r.headers.get('location') === '/agent.html' && cookie, 'login returns to the page that needed it');
+  ok(r.status === 200 && cookie, 'the login page logs the new admin in');
   const H = { Cookie: cookie };
   j = await (await fetch(B + '/api/v1/setup', { headers: H })).json();
   ok(j.configured && j.username === 'admin' && j.turn_enabled === false && /alice/.test(j.ice_extra), 'settings can be read back');
@@ -145,8 +146,7 @@ web_root = ${ROOT}/web
   ok(r.status === 403, 'a new password needs the current one');
   r = await PATCH({ current_password: 'correct-horse', password: 'new-password-1' });
   j = await r.json();
-  const basic = pw => fetch(B + '/', { headers: { Authorization: 'Basic ' + Buffer.from('admin:' + pw).toString('base64') } }).then(x => x.status);
-  ok(r.status === 200 && j.restart_ms === 0 && await basic('new-password-1') === 200 && await basic('correct-horse') === 401,
+  ok(r.status === 200 && j.restart_ms === 0 && (await login('new-password-1')).status === 200 && (await login('correct-horse')).status === 401,
     'the password changes on its own, nothing else does');
   const tport = 20000 + Math.floor(Math.random() * 20000);
   r = await PATCH({ turn_enabled: true, public_ip: '203.0.113.7', turn_port: tport });

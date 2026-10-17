@@ -55,6 +55,7 @@ static struct {
     char model[64], android[16], serial[64], abi[32];
     int sdk;
     cJSON *phone_status;         /* fields reported by the phone */
+    char sid[64];                /* the viewer session the phone is in, "" if none */
     cJSON *ready_info;
     /* server log ring */
     char *log[LOG_LINES];
@@ -405,7 +406,10 @@ static void handle_ctrl(const uint8_t *p, size_t n)
         cJSON *d = msg_d(m);
         agent_event(msg_str(d, "kind", "unknown"), cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(d, "info"), 1));
     } else if (!strcmp(t, "signal") || !strcmp(t, "session.ended")) {
-        cJSON *f = msg_new(t, 0, msg_sid(m) ? msg_sid(m) : msg_str(msg_d(m), "sid", NULL));
+        const char *sid = msg_sid(m) ? msg_sid(m) : msg_str(msg_d(m), "sid", NULL);
+        if (!strcmp(t, "session.ended") && sid && !strcmp(sid, P.sid))
+            P.sid[0] = 0;
+        cJSON *f = msg_new(t, 0, sid);
         cJSON_ReplaceItemInObjectCaseSensitive(f, "d", cJSON_Duplicate(msg_d(m), 1));
         wsc_send(f);
     } else if (!strcmp(t, "error")) {
@@ -466,6 +470,7 @@ static void link_down(const char *why)
         LOGI("tunnel closed: %s", why);
     P.link_up = 0;
     P.ready = 0;
+    P.sid[0] = 0; /* the phone ends its session with the tunnel */
     ev_timer_stop(A.loop, &P.ping);
     if (P.tunnel) {
         adb_stream_t *t = P.tunnel;
@@ -855,10 +860,32 @@ void phone_on_server_msg(cJSON *m)
         }
         return;
     }
+    const char *sid = msg_sid(m) ? msg_sid(m) : msg_str(msg_d(m), "sid", "");
+    if (!strcmp(t, "session.start"))
+        snprintf(P.sid, sizeof P.sid, "%s", sid);
+    else if (!strcmp(t, "session.end") && !strcmp(sid, P.sid))
+        P.sid[0] = 0;
     cJSON *c = cJSON_Duplicate(m, 1);
     if (!strcmp(t, "session.start"))
         resolve_ice_hosts(cJSON_GetObjectItemCaseSensitive(msg_d(c), "ice_servers"));
     send_ctrl(c);
+}
+
+/* The server connection broke: the server has already ended the session and told the
+ * viewer, so end it on the phone too. The phone then locks after [phone] lock_grace_seconds
+ * (lock_on_disconnect) instead of waiting for WebRTC to notice the viewer is gone. */
+void phone_server_lost(void)
+{
+    if (!P.sid[0])
+        return;
+    if (P.link_up && P.ready) {
+        LOGI("phone: ending session %s (server connection lost)", P.sid);
+        cJSON *e = msg_new("session.end", 0, P.sid);
+        cJSON_AddStringToObject(msg_d(e), "sid", P.sid);
+        cJSON_AddStringToObject(msg_d(e), "reason", "server_lost");
+        send_ctrl(e);
+    }
+    P.sid[0] = 0;
 }
 
 typedef struct {

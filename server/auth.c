@@ -1,4 +1,4 @@
-/* Basic auth + session cookies (plan §4.6). Plain HTTP, no TLS. */
+/* Logins (the /login page; Basic auth for routers) + session cookies (plan §4.6). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -253,39 +253,77 @@ int auth_fail(conn_t *c)
     return 0;
 }
 
+/* Checks one name/password pair against [users] (or [devices]), with the per-IP lockout:
+ * 1 = good, 0 = wrong (counted), -2 = locked out. */
+int auth_password(conn_t *c, int device, const char *name, const char *pass)
+{
+    fail_t *f = fail_entry(c->ip, 0);
+    if (f && f->until_ms > rd_now_ms())
+        return -2;
+    const char *hash = *name ? rd_conf_get(S.conf, device ? "devices" : "users", name, NULL) : NULL;
+    if (!hash || !auth_check_password(hash, pass)) {
+        if (!auth_fail(c))
+            LOGW("failed %s login from %s", device ? "device" : "user", c->ip);
+        return 0;
+    }
+    if (f)
+        f->count = 0;
+    return 1;
+}
+
+/* Routers only (agent.ini secret on /ws/agent); people log in on the /login page. */
 int auth_basic(const http_req_t *r, conn_t *c, int device, char *name_out, size_t name_cap)
 {
     size_t vl;
     const char *v = req_header(r, "Authorization", &vl);
     if (!v || vl < 6 || strncasecmp(v, "Basic ", 6) != 0)
         return -1;
-    fail_t *f = fail_entry(c->ip, 0);
-    uint64_t now = rd_now_ms();
-    if (f && f->until_ms > now)
-        return -2;
     uint8_t dec[256];
     size_t dl = 0;
     const char *b = v + 6;
     size_t bl = vl - 6;
     while (bl && *b == ' ')
         b++, bl--;
-    if (rd_b64_decode(b, bl, dec, sizeof dec - 1, &dl) < 0)
-        goto bad;
-    dec[dl] = 0;
-    char *colon = strchr((char *)dec, ':');
-    if (!colon)
-        goto bad;
+    char *colon = NULL;
+    if (rd_b64_decode(b, bl, dec, sizeof dec - 1, &dl) == 0) {
+        dec[dl] = 0;
+        colon = strchr((char *)dec, ':');
+    }
+    if (!colon) {
+        if (auth_locked(c))
+            return -2;
+        if (!auth_fail(c))
+            LOGW("failed %s login from %s", device ? "device" : "user", c->ip);
+        return 0;
+    }
     *colon = 0;
-    const char *name = (const char *)dec, *pass = colon + 1;
-    const char *hash = rd_conf_get(S.conf, device ? "devices" : "users", name, NULL);
-    if (!hash || !auth_check_password(hash, pass))
-        goto bad;
-    if (f)
-        f->count = 0;
-    snprintf(name_out, name_cap, "%s", name);
-    return 1;
-bad:
-    if (!auth_fail(c))
-        LOGW("failed %s login from %s", device ? "device" : "user", c->ip);
-    return 0;
+    int a = auth_password(c, device, (const char *)dec, colon + 1);
+    if (a == 1)
+        snprintf(name_out, name_cap, "%s", (const char *)dec);
+    return a;
+}
+
+/* POST /login {"user", "password"} from the login page (web/login.html) → the session cookie. */
+void auth_login_request(conn_t *c, const http_req_t *r)
+{
+    cJSON *j = cJSON_ParseWithLength((const char *)r->body, r->body_len);
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "user"));
+    const char *pass = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "password"));
+    if (!name || !pass || strlen(name) >= 64 || strpbrk(name, " \t\r\n")) {
+        http_error(c, 400, "bad_request", "user and password required");
+    } else {
+        int a = auth_password(c, 0, name, pass);
+        if (a == -2) {
+            http_error(c, 429, "rate_limited", "too many failed logins, try again later");
+        } else if (a != 1) {
+            http_error(c, 401, "unauthorized", "wrong user name or password");
+        } else {
+            char cookie[256];
+            auth_cookie_header(auth_new_session(name, 0), c->tls, cookie, sizeof cookie);
+            cJSON *b = cJSON_CreateObject();
+            cJSON_AddStringToObject(b, "user", name);
+            http_json(c, 200, b, cookie);
+        }
+    }
+    cJSON_Delete(j);
 }

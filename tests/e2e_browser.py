@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Browser end-to-end test: the real web client (web/) in headless Chrome,
-logged in with Basic auth, streaming from the phone-side C WebRTC stack
+logged in on the login page, streaming from the phone-side C WebRTC stack
 (rtc_test) through remodroid-server and remodroid-agent (Path A tunnel).
 
   PLAYWRIGHT_BROWSERS_PATH=... python tests/e2e_browser.py --bin build/host
@@ -68,13 +68,16 @@ link = tcp:127.0.0.1:{tun_port}
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
-            ctx = await browser.new_context(http_credentials={"username": "me", "password": "pw"},
-                                            viewport={"width": 390, "height": 844}, has_touch=True)
+            ctx = await browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
             page = await ctx.new_page()
             logs = []
             page.on("console", lambda m: logs.append(m.text))
             page.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
-            await page.goto(f"http://127.0.0.1:{http_port}/")
+            await page.goto(f"http://127.0.0.1:{http_port}/")  # -> the login page, then back here
+            await page.fill("#user", "me")
+            await page.fill("#password", "pw")
+            await page.click("#go")
+            await page.wait_for_url(f"http://127.0.0.1:{http_port}/")
             # wait for real decoded frames
             t0 = time.time()
             try:

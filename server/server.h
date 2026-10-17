@@ -123,6 +123,8 @@ const char *auth_cookie_session(const http_req_t *r, int want_device, char *name
 /* Returns 1 ok, 0 bad credentials, -1 no header, -2 locked out. On success
  * name_out gets the user/device name. */
 int         auth_basic(const http_req_t *r, conn_t *c, int device, char *name_out, size_t name_cap);
+int         auth_password(conn_t *c, int device, const char *name, const char *pass);
+void        auth_login_request(conn_t *c, const http_req_t *r);
 const char *auth_new_session(const char *name, int device); /* returns session id */
 void        auth_drop_session(const char *id);
 void        auth_cookie_header(const char *id, int secure, char *out, size_t cap);

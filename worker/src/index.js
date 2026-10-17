@@ -1,6 +1,6 @@
 // RemoDroid panel on Cloudflare Workers.
 //
-// Static files (web/: the client, panel.html, wizard.html) are served as assets.
+// Static files (web/: the client, panel.html, wizard.html, login.html) are served as assets.
 // Everything with state (login, setup, routers, WebSockets, signaling) goes to one
 // Durable Object, the Hub (hub.js), which speaks the same protocol as remodroid-server,
 // so the web client and remodroid-agent work unchanged.
@@ -18,7 +18,8 @@ export default {
     const res = await hub.fetch(request);
     // the Hub approved a page (logged in, set up): serve it, keeping its Set-Cookie
     if (res.headers.get('x-rd-asset')) {
-      const page = await env.ASSETS.fetch(new Request(new URL('/', url), request)); // "/index.html" would redirect to "/"
+      const asset = res.headers.get('x-rd-asset'); // "/" or "/login": "/index.html", "/login.html" would redirect there
+      const page = await env.ASSETS.fetch(new Request(new URL(asset, url), request));
       const out = new Response(page.body, page);
       const cookie = res.headers.get('set-cookie');
       if (cookie) out.headers.append('set-cookie', cookie);

@@ -58,6 +58,7 @@ void wsc_restart(void);
 void   phone_init(void);
 void   phone_adb_state(int state);
 void   phone_on_server_msg(cJSON *m);  /* session.*, signal, cmd from the server */
+void   phone_server_lost(void);    /* ends the phone's session: it locks after the grace period */
 cJSON *phone_status_json(void);
 cJSON *phone_config_json(void);
 cJSON *phone_server_log_tail(int lines);

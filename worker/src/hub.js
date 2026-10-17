@@ -2,7 +2,7 @@
 //
 // It mirrors remodroid-server (server/*.c) on the wire, so web/ and remodroid-agent
 // work unchanged:
-//   login      Basic auth → rd_session cookie (30 days), per-IP lockout   (auth.c)
+//   login      /login page (routers: Basic auth) → rd_session cookie (30 days), per-IP lockout   (auth.c)
 //   setup      /api/v1/setup: admin account, Cloudflare TURN / other ICE  (setup.c)
 //   routers    one-time codes, /api/v1/enroll, rename, remove            (enroll.c, api.c)
 //   relay      /ws/viewer and /ws/agent: devices, session.*, signal, cmd (hub.c)
@@ -113,11 +113,14 @@ export class Hub extends DurableObject {
     if (!s || now() > s.created + this.sessionDays() * 864e5) return null;
     return s;
   }
-  async basic(req, device) { /* → name, null (no header), or false (wrong) */
+  async basic(req) { /* routers only: → name, null (no header), or false (wrong) */
     const h = req.headers.get('authorization') || '';
     if (!/^Basic /i.test(h)) return null;
     let user = '', pass = '';
-    try { [user, ...pass] = atob(h.slice(6).trim()).split(':'); pass = pass.join(':'); } catch (_) { return false; }
+    try { [user, ...pass] = atob(h.slice(6).trim()).split(':'); pass = pass.join(':'); } catch (_) { this.fail(req); return false; }
+    return this.password(req, user, pass, true);
+  }
+  async password(req, user, pass, device) { /* → name, or false (wrong) */
     let ok = false;
     if (device) {
       const d = this.one('SELECT hash FROM devices WHERE id = ?', user);
@@ -129,6 +132,15 @@ export class Hub extends DurableObject {
     if (!ok) { this.fail(req); return false; }
     this.sql.exec('DELETE FROM fails WHERE ip = ?', this.ip(req));
     return user;
+  }
+  async login(req) { /* POST /login {user, password} from the login page → the session cookie */
+    const origin = req.headers.get('origin');
+    if (origin && new URL(origin).host !== new URL(req.url).host) return err(403, 'forbidden', 'origin not allowed');
+    const b = await req.json().catch(() => null);
+    if (!b || typeof b.user !== 'string' || typeof b.password !== 'string' || !b.user) return err(400, 'bad_request', 'user and password required');
+    if (this.locked(req)) return err(429, 'rate_limited', 'too many failed logins, try again later');
+    if (!await this.password(req, b.user, b.password, false)) return err(401, 'unauthorized', 'wrong user name or password');
+    return new Response(JSON.stringify({ user: b.user }), { status: 200, headers: { 'content-type': 'application/json', 'set-cookie': this.newSession(b.user, false) } });
   }
   newSession(name, device) {
     const id = hex(rand(16));
@@ -147,7 +159,7 @@ export class Hub extends DurableObject {
       if (s) name = s.name;
       else {
         if (this.locked(req)) return err(429, 'rate_limited', 'too many failed logins');
-        name = await this.basic(req, true);
+        name = await this.basic(req);
         if (!name) return err(401, 'unauthorized', 'device credentials required');
         cookie = this.newSession(name, true);
       }
@@ -179,20 +191,16 @@ export class Hub extends DurableObject {
       if (!user) return err(401, 'unauthorized', 'log in first');
       return this.api(req, url, user, sess);
     }
-    /* pages: cookie, or Basic auth that makes the cookie, or a 401 challenge */
-    let cookie = null;
-    if (!user) {
-      if (this.locked(req)) return new Response('Too many failed logins, try again later\n', { status: 429 });
-      const name = await this.basic(req, false);
-      if (!name) return new Response('Login required\n', { status: 401, headers: { 'www-authenticate': 'Basic realm="RemoDroid", charset="UTF-8"' } });
-      cookie = this.newSession(name, false);
-    }
+    /* pages: the login page (web/login.html), or a cookie, or off to the login page */
     if (p === '/login') {
-      const next = url.searchParams.get('next');
-      const to = next && /^\/[^/\\]/.test(next) ? next : '/';
-      return new Response(null, { status: 302, headers: { location: to, ...(cookie ? { 'set-cookie': cookie } : {}) } });
+      if (m === 'POST') return this.login(req);
+      return new Response(null, { status: 200, headers: { 'x-rd-asset': '/login' } });
     }
-    return new Response(null, { status: 200, headers: { 'x-rd-asset': '1', ...(cookie ? { 'set-cookie': cookie } : {}) } });
+    if (!user) {
+      const back = p + url.search;
+      return new Response(null, { status: 302, headers: { location: back === '/' ? '/login' : '/login?next=' + encodeURIComponent(back).replace(/%2F/g, '/') } });
+    }
+    return new Response(null, { status: 200, headers: { 'x-rd-asset': '/' } });
   }
 
   /* ---------------- REST (api.c) ---------------- */

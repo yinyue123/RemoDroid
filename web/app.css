@@ -70,6 +70,7 @@ html.lc #video,html.lc #screen{opacity:.4;outline:3px solid #ff0;outline-offset:
 #ball.idle{opacity:.42}
 #ball.drag{transition:none;transform:scale(1.06)}
 #ball[aria-expanded="true"]{opacity:1}
+body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, a way back to the list */
 
 .menu{position:fixed;z-index:31;width:min(320px,calc(100vw - 24px));padding:10px;border-radius:24px;background:var(--glass);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);
@@ -133,6 +134,7 @@ input[type=text]:focus,textarea:focus{outline:2px solid var(--accent);outline-of
 
 .btns{display:flex;flex-wrap:wrap;gap:8px}
 .btn{min-height:42px;padding:0 15px;border-radius:11px;border:1px solid var(--line);background:var(--surface-2);font:500 14px var(--sans);display:inline-flex;align-items:center;justify-content:center;gap:8px}
+a.btn{color:var(--text);text-decoration:none}
 .btn.primary{background:var(--accent);border-color:transparent;color:var(--accent-ink)}
 .btn.danger{color:var(--bad)}
 .btn.wide{flex:1}

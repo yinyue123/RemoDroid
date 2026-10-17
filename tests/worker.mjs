@@ -107,10 +107,15 @@ async function main() {
 
   console.log('login');
   r = await fetch(B + '/', { redirect: 'manual' });
-  ok(r.status === 401 && /Basic/.test(r.headers.get('www-authenticate')), 'pages ask for a login after setup');
-  r = await fetch(B + '/login?next=/agent.html', { redirect: 'manual', headers: { Authorization: 'Basic ' + Buffer.from('admin:correct-horse').toString('base64') } });
+  ok(r.status === 302 && r.headers.get('location') === '/login', 'pages send you to the login page after setup');
+  r = await fetch(B + '/?device=r1', { redirect: 'manual' });
+  ok(r.headers.get('location') === '/login?next=/%3Fdevice%3Dr1', 'the login page is told where to come back to');
+  r = await fetch(B + '/login');
+  ok(r.status === 200 && /id="password"/.test(await r.text()), 'the login page is served without a cookie');
+  const login = pw => fetch(B + '/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: 'admin', password: pw }) });
+  r = await login('correct-horse');
   const cookie = (r.headers.get('set-cookie') || '').split(';')[0];
-  ok(r.status === 302 && r.headers.get('location') === '/agent.html' && /^rd_session=[0-9a-f]{32}$/.test(cookie), 'login sets the cookie and returns to the page');
+  ok(r.status === 200 && /^rd_session=[0-9a-f]{32}$/.test(cookie), 'login sets the cookie');
   const H = { Cookie: cookie };
   r = await fetch(B + '/', { headers: H });
   ok(r.status === 200 && /<html/i.test(await r.text()), 'the panel page is served with the cookie');
@@ -134,8 +139,7 @@ async function main() {
   r = await PATCH({ current_password: 'wrong-one', password: 'new-password-1' });
   ok(r.status === 403, 'a new password needs the current one');
   r = await PATCH({ current_password: 'correct-horse', password: 'new-password-1' });
-  const basic = pw => fetch(B + '/', { redirect: 'manual', headers: { Authorization: 'Basic ' + Buffer.from('admin:' + pw).toString('base64') } }).then(x => x.status);
-  ok(r.status === 200 && await basic('new-password-1') === 200 && await basic('correct-horse') === 401, 'the password changes, the session stays');
+  ok(r.status === 200 && (await login('new-password-1')).status === 200 && (await login('correct-horse')).status === 401, 'the password changes, the session stays');
   r = await PATCH({ current_password: 'new-password-1', password: 'correct-horse' });
   ok(r.status === 200, 'and back');
 

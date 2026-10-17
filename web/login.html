@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="RemoDroid">
+<title>RemoDroid Login</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="setup.css">
+<style>
+main.login{max-width:420px;padding-top:max(56px,12vh)}
+.login .brand{margin:0 0 34px}
+.login h1{font-size:clamp(34px,9vw,44px)}
+.login .form{margin-top:26px}
+.login .btn.wide{margin-top:6px}
+.login .callout{margin:18px 0 0}
+</style>
+</head>
+<body>
+<main class="login">
+  <div class="brand"><i>RD</i>RemoDroid</div>
+  <h1>Log <em>in</em></h1>
+  <p class="note">Your phone is a tap away once you're signed in. You stay logged in on this device.</p>
+  <form class="form" id="form" novalidate>
+    <div class="field">
+      <label for="user">User name</label>
+      <input type="text" id="user" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+    </div>
+    <button class="btn wide" id="go" type="submit">Log in</button>
+  </form>
+  <div class="callout bad" id="err" role="alert" hidden></div>
+</main>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+/* Only a path on this site: "/panel.html", "/?device=r1" — never "//host" or "/\host". */
+const next = (() => {
+  const n = new URLSearchParams(location.search).get('next') || '/';
+  return /^\/(?![/\\])/.test(n) ? n : '/';
+})();
+fetch('/api/v1/me', { credentials: 'same-origin' }).then(r => { if (r.ok) location.replace(next); }).catch(() => {});
+try { $('#user').value = localStorage.getItem('rd-login-user') || ''; } catch (_) {}
+($('#user').value ? $('#password') : $('#user')).focus();
+
+function fail(msg, field) {
+  $('#err').textContent = msg;
+  $('#err').hidden = false;
+  for (const f of ['#user', '#password']) $(f).setAttribute('aria-invalid', String(f === field));
+  if (field) { $(field).focus(); $(field).select(); }
+}
+$('#form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const user = $('#user').value.trim(), password = $('#password').value;
+  if (!user) return fail('Enter your user name.', '#user');
+  if (!password) return fail('Enter your password.', '#password');
+  $('#go').disabled = true;
+  $('#go').textContent = 'Logging in…';
+  try {
+    const r = await fetch('/login', { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user, password }) });
+    if (r.ok) {
+      try { localStorage.setItem('rd-login-user', user); } catch (_) {}
+      location.replace(next);
+      return;
+    }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) fail('Wrong user name or password.', '#password');
+    else if (r.status === 429) fail('Too many wrong passwords from this network. Wait a little, then try again.');
+    else fail(j.msg || `Login failed (${r.status}).`);
+  } catch (err) {
+    fail('Cannot reach the server. Check your connection and try again.');
+  }
+  $('#go').disabled = false;
+  $('#go').textContent = 'Log in';
+});
+</script>
+</body>
+</html>

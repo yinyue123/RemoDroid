@@ -69,7 +69,7 @@ These are the places where the obvious mental model differs from what the code d
 | Program | Runs on | Language | Source | Job |
 |---|---|---|---|---|
 | Web client | iPhone Safari | JS/HTML/CSS | `web/` | Login page, video, touch input, floating-ball menu; the WebRTC *answerer* |
-| `remodroid-server` | AWS (any Linux server) | C + libev | `server/` | HTTP(S) + Basic auth + cookies, static files, viewer/agent WebSockets, signaling relay, REST API, TURN relay, setup wizard and router enrollment API |
+| `remodroid-server` | AWS (any Linux server) | C + libev | `server/` | HTTP(S) + login page + cookies (Basic auth for routers), static files, viewer/agent WebSockets, signaling relay, REST API, TURN relay, setup wizard and router enrollment API |
 | Worker (alternative to the server) | Cloudflare | JS | `worker/` | The same panel on a Durable Object, with Cloudflare TURN |
 | `remodroid-agent` | Router | C + libev | `agent/` | ADB client over USB, installs and supervises the phone server, UDP relay ("tunnel"), WebSocket to AWS, local CLI |
 | Phone server (Java) | Phone, as shell user | Java 8 bytecode (dex) | `android/java/` | Screen capture + hardware encoder, input injection, clipboard, screen power, files, shell, logcat |
@@ -330,17 +330,19 @@ server→ {"t":"welcome","d":{"proto":1,"server_time":…,"ping_s":20,"timeout_s
 ### 4.1 Login
 
 ```
-Safari → GET / HTTP/1.1                                      (no cookie yet)
-server → 401 Unauthorized
-         WWW-Authenticate: Basic realm="RemoDroid", charset="UTF-8"
-         → Safari shows its username/password dialog
-Safari → GET /  Authorization: Basic bWU6cGFzc3dvcmQ=        (base64 of "me:password")
-server   auth_basic(): bcrypt-check "password" against [users] me = $2b$10$…
+Safari → GET /?device=r1 HTTP/1.1                            (no cookie yet)
+server → 302 Location: /login?next=/%3Fdevice%3Dr1           (login_redirect)
+Safari → GET /login                                          → web/login.html (public, like setup.css)
+Safari → POST /login  {"user":"me","password":"password"}    (fetch from the page, Origin checked)
+server   auth_login_request() → auth_password(): bcrypt-check "password" against [users] me = $2b$10$…
          auth_new_session(): 16 random bytes → 32 hex chars, kept in memory with the creation time
-server → 200 OK  Set-Cookie: rd_session=3f9c…e1; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000
-         (index.html from [http] web_root, sent with sendfile())
-Safari → every later request carries Cookie: rd_session=3f9c…e1
+server → 200 {"user":"me"}  Set-Cookie: rd_session=3f9c…e1; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000
+Safari → the page goes on to ?next= (only a path on this site); every request carries Cookie: rd_session=3f9c…e1
 ```
+
+Wrong password: `401`; locked out: `429`. People never see a Basic auth prompt; only routers use Basic
+(§3.7). A viewer whose WebSocket keeps failing asks `/api/v1/me`, and a `401` sends it to the login page.
+The login page itself checks `/api/v1/me` first and moves straight on when the cookie is still good.
 
 - **Cookie lifetime:** `Max-Age` = `[auth] session_days` × 86400. The default is 30 days.
 - **Cookie attributes:** `HttpOnly` means JavaScript can't read the cookie. `SameSite=Strict` means other
@@ -348,7 +350,7 @@ Safari → every later request carries Cookie: rd_session=3f9c…e1
 - **Lockout:** after `max_failed_logins` failures from one IP, that IP is locked out for `lockout_seconds` (or `lockout_minutes` when the former is unset)
   (HTTP 429).
 - **Sessions are in memory only:** if the server restarts, everyone logs in again.
-- **Plain HTTP by default:** Basic credentials and the cookie travel in clear text. Setting `[acme] domains`
+- **Plain HTTP by default:** the password and the cookie travel in clear text. Setting `[acme] domains`
   turns on HTTPS with an automatic certificate (§11.5); cookies then get `Secure`. `webrtc.md` §2 explains why
   HTTPS matters, including the WebRTC fingerprint.
 
@@ -827,8 +829,9 @@ in the phone's framework at runtime, so `Hidden` and `Device` look them up by na
 | `GET /ws/agent` | Device cookie, or Basic against `[devices]` | `ws_upgrade` → `hub_agent_open` |
 | `GET /ws/viewer` | User cookie + Origin check | `ws_upgrade` → `hub_viewer_open` |
 | `/api/v1/*` | User cookie (else 401 JSON) | `api_handle` (`api.c`): `me`, `logout`, `devices`, `devices/{id}`, `/adb`, `/cmd`, `/diag` |
-| `GET /login` | Basic → 302 to `/` with `Set-Cookie` | |
-| any other `GET` | Cookie, or Basic (creates the cookie), or a 401 challenge | `serve_static` (files from `web_root`, `sendfile`) |
+| `POST /login` | Name + password (JSON) + Origin check → `Set-Cookie` | `auth_login_request` |
+| `GET /login` | None: the login page (`web/login.html`); also `setup.css`, icons, manifest | `serve_static` |
+| any other `GET` | Cookie, or 302 to `/login?next=…` | `serve_static` (files from `web_root`, `sendfile`) |
 
 **After the upgrade:**
 - the same `conn_t` switches to `CONN_WS`;
@@ -844,8 +847,8 @@ returns. Nothing ever frees an object while a caller further up the stack still 
   in constant time.
 - **Sessions:** a linked list of `{id (32 hex), user/device name, is_device, created}`. They are valid for
   `session_days`, swept periodically, and `logout` deletes one.
-- **Lockout:** a failure counter per client IP. After `max_failed_logins` failures, Basic logins from that IP
-  get 429 for `lockout_minutes`.
+- **Lockout:** a failure counter per client IP. After `max_failed_logins` failures, logins from that IP
+  (the login page and routers' Basic auth alike) get 429 for `lockout_seconds` (or `lockout_minutes`).
 
 ### 11.3 Hub (`hub.c`): who is connected, and relaying
 

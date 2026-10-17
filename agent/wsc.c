@@ -302,9 +302,10 @@ static void ws_close_conn(const char *why)
 {
     if (W.state == W_IDLE)
         return;
-    if (W.state == W_OPEN)
+    if (W.state == W_OPEN) {
         LOGW("server connection lost: %s", why);
-    else
+        phone_server_lost();
+    } else
         LOGD("server connect failed: %s", why);
     ev_io_stop(A.loop, &W.rio);
     ev_io_stop(A.loop, &W.wio);

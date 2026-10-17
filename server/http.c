@@ -1,5 +1,6 @@
 /* HTTP/1.1 + WebSocket connections on one libev loop. */
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -376,6 +377,29 @@ static void redirect_https(conn_t *c, const http_req_t *r)
     http_respond(c, 308, "text/plain; charset=utf-8", "Use HTTPS\n", 10, extra);
 }
 
+/* A page without a login: off to /login, which comes back here (?next=, path and query). */
+static void login_redirect(conn_t *c, const http_req_t *r)
+{
+    static const char HEX[] = "0123456789ABCDEF";
+    char loc[700] = "Location: /login";
+    size_t n = strlen(loc), pl = r->path_len + (r->query_len ? r->query_len + 1 : 0);
+    if (pl > 1 && pl < 150 && r->path[1] != '/') {
+        n += (size_t)snprintf(loc + n, sizeof loc - n, "?next=");
+        for (size_t i = 0; i < pl; i++) {
+            unsigned char ch = (unsigned char)r->path[i]; /* path and query are contiguous */
+            if (isalnum(ch) || strchr("/-._~", ch)) {
+                loc[n++] = (char)ch;
+            } else {
+                loc[n++] = '%';
+                loc[n++] = HEX[ch >> 4];
+                loc[n++] = HEX[ch & 15];
+            }
+        }
+    }
+    snprintf(loc + n, sizeof loc - n, "\r\n");
+    http_respond(c, 302, NULL, "", 0, loc);
+}
+
 static void handle_request(conn_t *c, const http_req_t *r)
 {
     char name[64] = "", cookie[256] = "";
@@ -404,6 +428,12 @@ static void handle_request(conn_t *c, const http_req_t *r)
     }
     if (req_is(r, "POST", "/api/v1/enroll")) { /* a router redeeming a code: no login */
         enroll_public(c, r);
+        return;
+    }
+
+    if (req_is(r, "POST", "/login")) {
+        if (!origin_ok(r)) { http_error(c, 403, "forbidden", "origin not allowed"); return; }
+        auth_login_request(c, r);
         return;
     }
 
@@ -444,33 +474,21 @@ static void handle_request(conn_t *c, const http_req_t *r)
         http_error(c, 405, "bad_request", "method not allowed");
         return;
     }
-    /* The Home Screen icon and manifest: iOS fetches them without the login cookie. */
-    if (!sess && (req_is(r, "GET", "/manifest.webmanifest") || req_is(r, "GET", "/icon.svg") || req_is(r, "GET", "/icon-180.png"))) {
-        http_serve_static(c, r, NULL);
+    /* The login page (already logged in, it goes straight on to ?next=), the stylesheet it
+     * uses, and the Home Screen icon and manifest, which iOS fetches without the cookie. */
+    if (req_is(r, "GET", "/login") || req_is(r, "HEAD", "/login")) {
+        http_req_t lr = *r;
+        lr.path = "/login.html";
+        lr.path_len = 11;
+        http_serve_static(c, &lr, NULL);
         return;
     }
-    /* Pages: cookie, or Basic auth that creates the cookie, or a 401 challenge. */
-    if (!sess) {
-        int a = auth_basic(r, c, 0, name, sizeof name);
-        if (a == -2) { http_error(c, 429, "rate_limited", "too many failed logins, try again later"); return; }
-        if (a != 1) {
-            http_respond(c, 401, "text/plain; charset=utf-8", "Login required\n", 15,
-                         "WWW-Authenticate: Basic realm=\"RemoDroid\", charset=\"UTF-8\"\r\n");
-            return;
-        }
-        auth_cookie_header(auth_new_session(name, 0), c->tls, cookie, sizeof cookie);
-    }
-    if (req_is(r, "GET", "/login")) { /* ?next=/agent.html: back to the page that needed the login */
-        char extra[600], next[200] = "/";
-        if (r->query_len > 5 && !memcmp(r->query, "next=/", 6) && r->query[6] != '/' && r->query_len < 150) {
-            snprintf(next, sizeof next, "%.*s", (int)r->query_len - 5, r->query + 5);
-            next[strcspn(next, "&\r\n\\ ")] = 0;
-        }
-        snprintf(extra, sizeof extra, "Location: %s\r\n%s", next, cookie);
-        http_respond(c, 302, NULL, "", 0, extra);
+    if (!sess && !req_is(r, "GET", "/setup.css") && !req_is(r, "GET", "/manifest.webmanifest") &&
+        !req_is(r, "GET", "/icon.svg") && !req_is(r, "GET", "/icon-180.png")) {
+        login_redirect(c, r);
         return;
     }
-    http_serve_static(c, r, cookie);
+    http_serve_static(c, r, NULL);
 }
 
 /* ---------------- input ---------------- */

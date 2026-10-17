@@ -163,10 +163,10 @@ link = tcp:127.0.0.1:{tun_port}
     res = {}
     try:
         await asyncio.sleep(0.5)
-        # login: Basic -> cookie
+        # login: the login page's POST -> cookie
         r, w = await asyncio.open_connection("127.0.0.1", http_port)
-        auth = base64.b64encode(b"me:pw").decode()
-        w.write(f"GET /login HTTP/1.1\r\nHost: x\r\nAuthorization: Basic {auth}\r\n\r\n".encode())
+        body = json.dumps({"user": "me", "password": "pw"}).encode()
+        w.write(f"POST /login HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
         head = (await r.readuntil(b"\r\n\r\n")).decode()
         cookie = [l.split(":", 1)[1].split(";")[0].strip() for l in head.split("\r\n") if l.lower().startswith("set-cookie")][0]
         w.close()

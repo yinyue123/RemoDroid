@@ -51,7 +51,7 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
 
 | Path | What | Language |
 |---|---|---|
-| `server/` | Control server: Basic auth + cookies, REST API, viewer/agent WebSockets, built-in TURN relay, optional HTTPS with automatic Let's Encrypt (ACME) certificates | C + libev + mbedTLS |
+| `server/` | Control server: login page + cookies (Basic auth for routers), REST API, viewer/agent WebSockets, built-in TURN relay, optional HTTPS with automatic Let's Encrypt (ACME) certificates | C + libev + mbedTLS |
 | `agent/` | Router agent: built-in ADB client (usbfs), phone supervisor, UDP relay, WebSocket client, CLI | C + libev |
 | `android/native/` | Phone WebRTC stack: ICE + TURN client, DTLS-SRTP, SCTP data channels, H.265/H.264 RTP, congestion control | C |
 | `android/java/` | Phone server: screen capture, MediaCodec, input injection, clipboard, screen power, files, logcat | Java (app_process) |

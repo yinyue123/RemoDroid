@@ -115,6 +115,7 @@ async function main() {
   const hash = pw => { const [cmd, ...pre] = exe('remodroid-server'); return execFileSync(cmd, [...pre, 'hashpw', pw]).toString().trim(); };
   fs.mkdirSync(path.join(dir, 'web'));
   fs.writeFileSync(path.join(dir, 'web', 'index.html'), '<!doctype html><title>RemoDroid</title>');
+  for (const f of ['login.html', 'setup.css']) fs.copyFileSync(new URL('../web/' + f, import.meta.url), path.join(dir, 'web', f));
   fs.writeFileSync(path.join(dir, 'server.ini'), `[http]
 listen = 127.0.0.1:${httpPort}
 web_root = ${dir}/web
@@ -174,18 +175,33 @@ lock_grace_seconds = 10
 codec = auto
 `);
 
-  start('server', [...exe('remodroid-server'), '-c', path.join(dir, 'server.ini')]);
+  const server = start('server', [...exe('remodroid-server'), '-c', path.join(dir, 'server.ini')]);
   await until(() => fetch(`http://127.0.0.1:${httpPort}/`).then(() => true, () => false), 5000, 'server up');
   const base = `http://127.0.0.1:${httpPort}`;
 
   console.log('server: auth and REST');
-  let r = await fetch(base + '/');
-  ok(r.status === 401 && /Basic realm/.test(r.headers.get('www-authenticate')), 'unauthenticated page gets a Basic challenge');
-  r = await fetch(base + '/', { headers: { Authorization: 'Basic ' + Buffer.from('me:pw-user').toString('base64') } });
+  let r = await fetch(base + '/', { redirect: 'manual' });
+  ok(r.status === 302 && r.headers.get('location') === '/login', 'a page without a login goes to the login page');
+  r = await fetch(base + '/?device=router1', { redirect: 'manual' });
+  ok(r.headers.get('location') === '/login?next=/%3Fdevice%3Drouter1', 'the login page is told where to come back to');
+  r = await fetch(base + '/login');
+  ok(r.status === 200 && /id="password"/.test(await r.text()), 'the login page is served without a cookie');
+  r = await fetch(base + '/setup.css');
+  ok(r.status === 200, 'so is its stylesheet');
+  r = await fetch(base + '/', { redirect: 'manual', headers: { Authorization: 'Basic ' + Buffer.from('me:pw-user').toString('base64') } });
+  ok(r.status === 302 && !r.headers.get('set-cookie'), 'Basic auth no longer logs a browser in');
+  const login = (body, h = {}) => fetch(base + '/login', { method: 'POST', headers: { 'Content-Type': 'application/json', ...h }, body: JSON.stringify(body) });
+  r = await login({ user: 'me', password: 'pw-user' }, { Origin: 'http://evil.example' });
+  ok(r.status === 403, 'a login posted from another site is refused');
+  r = await login({ user: 'me', password: 'wrong' });
+  ok(r.status === 401 && (await r.json()).error === 'unauthorized' && !r.headers.get('set-cookie'), 'a wrong password is 401, no cookie');
+  r = await login({ user: 'me', password: 'pw-user' }, { Origin: base });
   const setCookie = r.headers.get('set-cookie') || '';
   const cookie = setCookie.split(';')[0];
-  ok(r.status === 200 && /HttpOnly/.test(setCookie) && /SameSite=Strict/.test(setCookie) && /Max-Age=2592000/.test(setCookie),
-    'Basic login sets an HttpOnly, SameSite=Strict, 30-day cookie');
+  ok(r.status === 200 && (await r.json()).user === 'me' && /HttpOnly/.test(setCookie) && /SameSite=Strict/.test(setCookie) && /Max-Age=2592000/.test(setCookie),
+    'login sets an HttpOnly, SameSite=Strict, 30-day cookie');
+  r = await fetch(base + '/', { headers: { Cookie: cookie } });
+  ok(r.status === 200 && /<title>RemoDroid</.test(await r.text()), 'pages are served with the cookie');
   r = await fetch(base + '/api/v1/devices');
   ok(r.status === 401, 'API without cookie is 401');
   r = await fetch(base + '/api/v1/me', { headers: { Cookie: cookie } });
@@ -340,6 +356,17 @@ codec = auto
   r = await fetch(base + '/api/v1/me', { headers: { Cookie: cookie } });
   ok(r.status === 401, 'cookie is invalid after logout');
   v2.close();
+
+  console.log('server connection lost');
+  r = await login({ user: 'me', password: 'pw-user' });
+  const v3 = await wsConnect(httpPort, '/ws/viewer', { Cookie: (r.headers.get('set-cookie') || '').split(';')[0] });
+  await until(() => phone.ctrl.some(m => m.t === 'config') && phone.readySent, 5000, 'phone ready');
+  v3.send({ t: 'session.request', id: 9, d: { device: 'router1' } });
+  const lost = (await v3.wait(m => m.t === 'ack' && m.id === 9)).d.sid;
+  await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.start' && e.data.sid === lost, 5000, 'session.start');
+  server.kill('SIGKILL');
+  const gone = await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.end' && e.data.sid === lost, 5000, 'session.end');
+  ok(gone.data.d.reason === 'server_lost', 'losing the server ends the session on the phone, which then locks');
 }
 
 const timer = setTimeout(() => { console.log('  ✗ overall timeout'); failures++; finish(); }, 90000);
