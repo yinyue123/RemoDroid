@@ -156,8 +156,11 @@ package whose arch matches `opkg print-architecture` on your router.
 
 ### ASUS Merlin / Koolshare
 
-Use the dedicated `remodroid-<version>-merlin-armv7.tar.gz` (RT-AC86U) or
-`-merlin-aarch64.tar.gz` package in **Software Center → Manual installation**.
+Use the dedicated `remodroid-<version>-merlin-aarch64.tar.gz` (64-bit HND models:
+RT-AC86U, RT-AX88U, …) or `-merlin-armv7.tar.gz` (32-bit ARM models: RT-AC68U, …)
+package in **Software Center → Manual installation**. Match the package to your
+router's architecture (`uname -m`: `aarch64` → aarch64, `armv7l` → armv7); the
+installer refuses a mismatched package.
 It provides a router management page for configuration, start/stop, logs, and optional
 autostart. Installation does not start the agent. Stock Asuswrt-Merlin without the
 Koolshare/KoolCenter software center is not supported by this installer.

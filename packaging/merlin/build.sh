@@ -29,6 +29,13 @@ sed -e 's|/usr/share/remodroid|/koolshare/remodroid/phone|g' \
     deploy/agent.ini.example > "$P/remodroid/agent.ini.example"
 printf '%s\n' "$VERSION" > "$P/remodroid/version"
 printf '%s\n' "$ARCH" > "$P/remodroid/arch"
+# Software-center platform marker: HND (BCM490x) routers are 64-bit and take the
+# aarch64 package; the pre-HND 32-bit ARM models take armv7. Shipping the same
+# `.valid=hnd` in both packages is what let an armv7 build land on an RT-AC86U.
+case "$ARCH" in
+    aarch64) printf 'hnd\n' > "$P/.valid" ;;
+    armv7)   printf 'arm\n' > "$P/.valid" ;;
+esac
 chmod 755 "$P/install.sh" "$P"/scripts/*.sh "$P"/init.d/*.sh "$P/remodroid/bin/remodroid-agent"
 # Exclude macOS resource forks; the software center expects remodroid/install.sh.
 COPYFILE_DISABLE=1 tar --format=ustar -C "$STAGE" -czf "$OUT/remodroid-${VERSION}-merlin-${ARCH}.tar.gz" remodroid

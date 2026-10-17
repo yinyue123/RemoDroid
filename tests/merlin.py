@@ -53,7 +53,8 @@ class MerlinTests(unittest.TestCase):
                          'remodroid/phone/armeabi-v7a/libremodroid.so'):
                 self.assertIn('remodroid/' + name, members)
             self.assertTrue(members['remodroid/install.sh'].mode & 0o100)
-            self.assertEqual(tf.extractfile('remodroid/.valid').read().strip(), b'hnd')
+            # The armv7 package targets 32-bit ARM routers, not HND (that is aarch64).
+            self.assertEqual(tf.extractfile('remodroid/.valid').read().strip(), b'arm')
             self.assertTrue(all(n == 'remodroid' or n.startswith('remodroid/') for n in members))
             self.assertFalse(any('..' in Path(n).parts or '/._' in n for n in members))
             self.assertNotIn('remodroid/remodroid/agent.ini', members)
@@ -66,8 +67,38 @@ class MerlinTests(unittest.TestCase):
     def test_aarch64_agent_package(self):
         with tarfile.open(self.build('aarch64')) as tf:
             self.assertEqual(tf.extractfile('remodroid/remodroid/arch').read().strip(), b'aarch64')
+            self.assertEqual(tf.extractfile('remodroid/.valid').read().strip(), b'hnd')
             self.assertIn('remodroid/remodroid/bin/remodroid-agent', tf.getnames())
             self.assertFalse(any(name.endswith('/remodroid-server') for name in tf.getnames()))
+
+    @unittest.skipUnless(sys.platform.startswith('linux') and shutil.which('jq'),
+                         'arch-guard check requires Linux and jq')
+    def test_arch_mismatch_refused(self):
+        # The RT-AC86U regression: an armv7 package must be refused on a 64-bit
+        # router instead of installing and crash-looping at runtime.
+        stage = self.work / 'stage'; stage.mkdir()
+        with tarfile.open(self.build('armv7')) as tf:
+            tf.extractall(stage, filter='data')
+        package = stage / 'remodroid'
+        fs = self.work / 'root'; fs.mkdir()
+        ks = fs / 'koolshare'; ks.mkdir()
+        for directory in ('scripts', 'webs', 'res', 'init.d', 'bin'):
+            (ks / directory).mkdir()
+        (ks / 'scripts/base.sh').write_text('# fixture\n')
+        (ks / 'bin/jq').symlink_to(shutil.which('jq'))
+        (fs / 'jffs').mkdir(); (fs / 'tmp').mkdir()
+        for f in package.rglob('*'):
+            if f.is_file() and f.suffix in ('.sh', '.awk', '.example'):
+                text = re.sub(r'/koolshare|/jffs|/tmp/remodroid',
+                              lambda m: str(fs) + m[0], f.read_text())
+                f.write_text(text)
+        env = dict(os.environ, REMODROID_DEV_ARCH='aarch64')
+        result = run('sh', str(package / 'install.sh'), env=env)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('aarch64', result.stdout + result.stderr)
+        # A refused install must not have written anything into the tree.
+        self.assertFalse((ks / 'remodroid').exists())
+        self.assertFalse((ks / 'scripts/remodroid_control.sh').exists())
 
     def test_normalize_validation(self):
         original = (ROOT / 'deploy/agent.ini.example').read_text()
@@ -135,7 +166,10 @@ with open(os.environ['FIXTURE_RESPONSE'],'w') as f:
                      'device_id = fixture\\ndevice_secret = fixture\\n[agent]\\n",f);fclose(f);return 0;}'
                      'puts("fixture started");fflush(stdout);while(1)pause();}\n')
         subprocess.run(['cc', str(c), '-o', str(package / 'remodroid/bin/remodroid-agent')], check=True)
-        env = dict(os.environ, FIXTURE_DB=str(self.work/'db.json'), FIXTURE_RESPONSE=str(self.work/'rpc'))
+        # The fixture package is armv7; tell install.sh's arch guard to treat this
+        # host as armv7 so the lifecycle runs regardless of the CI runner's real arch.
+        env = dict(os.environ, FIXTURE_DB=str(self.work/'db.json'), FIXTURE_RESPONSE=str(self.work/'rpc'),
+                   REMODROID_DEV_ARCH='armv7')
         def install():
             result = run('sh', str(package/'install.sh'), env=env)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

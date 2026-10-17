@@ -6,9 +6,24 @@ HERE=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
     echo '需要 Koolshare / KoolCenter 软件中心，原版梅林不能直接安装此包。'; exit 1;
 }
 [ -x /koolshare/bin/jq ] || { echo '软件中心缺少 jq，安装中止。'; exit 1; }
-# Execute only the help command, before touching an existing installation.
+# Match the package architecture to the router BEFORE touching an existing install.
+# A 32-bit agent will run under AArch64 compat long enough to pass `-h`, then die
+# at runtime on a missing time64 syscall, so `-h` alone cannot tell the archs apart.
+PKG_ARCH=$(cat "$HERE/remodroid/arch" 2>/dev/null || echo unknown)
+case "${REMODROID_DEV_ARCH:-$(uname -m)}" in
+    aarch64|arm64)            DEV_ARCH=aarch64 ;;
+    armv7*|armv6*|armv5*|arm) DEV_ARCH=armv7 ;;
+    *)                        DEV_ARCH=${REMODROID_DEV_ARCH:-$(uname -m)} ;;
+esac
+if [ "$PKG_ARCH" != "$DEV_ARCH" ]; then
+    echo "架构不匹配：本机为 $DEV_ARCH，此安装包是 $PKG_ARCH 版本。"
+    echo "RT-AC86U / RT-AX 等 64 位机型请使用 aarch64 包；RT-AC68U 等 32 位机型请使用 armv7 包。"
+    echo "Arch mismatch: this router is $DEV_ARCH but the package is $PKG_ARCH; install the $DEV_ARCH package."
+    exit 1
+fi
+# Secondary sanity check: the binary must at least exec on this firmware.
 "$HERE/remodroid/bin/remodroid-agent" -h >/dev/null 2>&1 || {
-    echo '程序与此固件不兼容，请检查 ARM 架构。RT-AC86U 使用 armv7 包。'; exit 1;
+    echo '程序无法在此固件上运行，请确认架构与固件匹配。'; exit 1;
 }
 FREE=$(df -k /jffs | awk 'END {print $4}')
 NEED=$(du -sk "$HERE" | awk '{print $1}')
