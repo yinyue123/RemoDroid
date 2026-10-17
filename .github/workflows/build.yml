@@ -164,6 +164,10 @@ jobs:
         with:
           name: packages
           path: packages
+      - name: Download grids (which file for which system and CPU)
+        run: |
+          printf '\n' >> notes.md
+          python3 doc/downloads.py "${GITHUB_REF_NAME#v}" packages >> notes.md
       - uses: softprops/action-gh-release@v2
         with:
           name: RemoDroid ${{ github.ref_name }}
