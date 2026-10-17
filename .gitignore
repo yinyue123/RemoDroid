@@ -5,3 +5,6 @@
 .DS_Store
 __pycache__/
 *.pyc
+# wrangler (Cloudflare Pages / Worker deploys)
+.wrangler/
+/worker/package-lock.json
