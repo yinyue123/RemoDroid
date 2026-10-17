@@ -388,19 +388,19 @@ function onChannel(label, data) {
 
 /* ================= stream area + input ================= */
 const stage = $('#stage'), video = $('#video'), cv = $('#screen'), ctx = cv.getContext('2d');
-/* iOS Home Screen apps with a see-through status bar lay the page out as the screen minus the
- * status bar, leaving an empty band at the bottom. index.html asks for an opaque bar, which avoids
- * that; if iOS draws under the bar anyway, stretch the stage over the band. */
+/* iOS Home Screen apps with a see-through status bar can lay the page out as the screen minus the
+ * status bar, leaving an empty band at the bottom: stretch the stage over it. */
 function fitStage(ins) {
   const full = innerWidth > innerHeight ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
   const short = navigator.standalone === true && ins.t > 0 && Math.abs(innerHeight + ins.t - full) < 2;
   stage.style.height = short ? full + 'px' : '';
 }
-/* The picture stays inside the safe area: under the status bar (and Safari's toolbars) iOS
- * blurs whatever is drawn there, which made the top of the phone's screen unreadable. */
+/* In the Home Screen app the picture fills the whole screen, under the status bar and the home
+ * indicator, like a full-screen app. In Safari it stays inside the safe area, clear of the toolbars. */
 function layout() {
-  const ins = bounds();
-  fitStage(ins);
+  const safe = bounds();
+  fitStage(safe);
+  const ins = standalone() ? { t: 0, r: 0, b: 0, l: 0 } : safe;
   const W = stage.clientWidth - ins.l - ins.r, H = stage.clientHeight - ins.t - ins.b;
   let w, h;
   if (DEMO) { w = cv.width; h = cv.height; }
