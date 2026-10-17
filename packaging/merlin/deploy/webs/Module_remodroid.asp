@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta http-equiv="Cache-Control" content="no-store">
-<title>RemoDroid - 梅林软件中心</title>
+<title>RemoDroid - Merlin Software Center</title>
 <link rel="icon" href="/images/favicon.png">
 <link rel="stylesheet" href="/index_style.css">
 <link rel="stylesheet" href="/form_style.css">
@@ -35,28 +35,28 @@ function menu_hook() {
 <table width="98%" border="0" align="left" cellpadding="0" cellspacing="0"><tr><td valign="top">
 <table width="760" border="0" cellpadding="5" cellspacing="0" class="FormTitle" id="FormTitle"><tr><td bgcolor="#4D595D" valign="top">
 <main id="remodroid">
-<div class="rd-title"><h1 class="formfonttitle">RemoDroid</h1><a href="/Module_Softcenter.asp" title="返回软件中心"><img src="/images/backprev.png" width="40" height="40" alt="返回软件中心"></a></div>
+<div class="rd-title"><h1 class="formfonttitle">RemoDroid</h1><a href="/Module_Softcenter.asp" title="Back to Software Center"><img src="/images/backprev.png" width="40" height="40" alt="Back to Software Center"></a></div>
 <div class="splitLine"></div>
-<p class="rd-description">Android 远程连接代理。复制面板提供的配对命令，即可将本路由器添加到面板。</p>
-<table class="FormTable" width="100%" cellpadding="4" cellspacing="0"><thead><tr><td colspan="2">状态</td></tr></thead><tbody>
-<tr><th>运行状态</th><td><div id="state" role="status"><strong>正在读取状态…</strong></div><p id="process">正在连接路由器</p><span id="version"></span></td></tr>
-<tr><th>代理控制</th><td class="rd-actions"><button id="start" class="button_gen" disabled>启动</button> <button id="restart" class="button_gen" disabled>重启</button> <button id="stop" class="button_gen" disabled>停止</button></td></tr>
-<tr><th>开机启动</th><td><label><input id="autostart" type="checkbox" disabled> 启用开机自动启动</label></td></tr>
+<p class="rd-description">Android remote-control agent. Paste the pairing command from your panel to add this router to it.</p>
+<table class="FormTable" width="100%" cellpadding="4" cellspacing="0"><thead><tr><td colspan="2">Status</td></tr></thead><tbody>
+<tr><th>State</th><td><div id="state" role="status"><strong>Reading status…</strong></div><p id="process">Connecting to the router…</p><span id="version"></span></td></tr>
+<tr><th>Agent control</th><td class="rd-actions"><button id="start" class="button_gen" disabled>Start</button> <button id="restart" class="button_gen" disabled>Restart</button> <button id="stop" class="button_gen" disabled>Stop</button></td></tr>
+<tr><th>Start on boot</th><td><label><input id="autostart" type="checkbox" disabled> Start automatically on boot</label></td></tr>
 </tbody></table>
 <div id="message" role="status" aria-live="polite" hidden></div>
-<table class="FormTable" width="100%" cellpadding="4" cellspacing="0"><thead><tr><td colspan="2">绑定面板</td></tr></thead><tbody>
-<tr><th><label for="enroll-command">配对命令</label></th><td><textarea id="enroll-command" rows="2" spellcheck="false" autocomplete="off" placeholder="remodroid enroll --panel http://你的面板:5580 --code XXXX-XXXX"></textarea><p>粘贴面板生成的整行命令，配对成功后自动启动。更换面板前请先停止代理。</p><button id="enroll" class="button_gen" disabled>绑定并启动</button></td></tr>
+<table class="FormTable" width="100%" cellpadding="4" cellspacing="0"><thead><tr><td colspan="2">Pair with a panel</td></tr></thead><tbody>
+<tr><th><label for="enroll-command">Pairing command</label></th><td><textarea id="enroll-command" rows="2" spellcheck="false" autocomplete="off" placeholder="remodroid enroll --panel http://your-panel:5580 --code XXXX-XXXX"></textarea><p>Paste the whole command from the panel; it starts automatically once paired. Stop the agent before switching panels.</p><button id="enroll" class="button_gen" disabled>Pair and start</button></td></tr>
 </tbody></table>
-<details id="advanced"><summary>高级配置 · agent.ini</summary>
-<p>可粘贴已有配置；保存时自动调整本机路径。含设备密钥，请勿分享截图。</p>
-<textarea id="config" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="agent.ini" placeholder="正在读取配置…"></textarea>
-<div class="rd-toolbar"><span>保存后重启代理生效。</span><button id="reload" class="button_gen">重新读取</button><button id="save" class="button_gen" disabled>保存配置</button></div>
-<p>从 NAS 迁移时，请先停止 NAS 上使用同一身份的 agent。</p>
+<details id="advanced"><summary>Advanced · agent.ini</summary>
+<p>Paste an existing config; local paths are adjusted on save. It contains the device secret — don't share screenshots.</p>
+<textarea id="config" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="agent.ini" placeholder="Reading config…"></textarea>
+<div class="rd-toolbar"><span>Restart the agent for changes to take effect.</span><button id="reload" class="button_gen">Reload</button><button id="save" class="button_gen" disabled>Save config</button></div>
+<p>When migrating from a NAS, first stop any agent there that uses the same identity.</p>
 </details>
-<table class="FormTable" width="100%" cellpadding="4" cellspacing="0"><thead><tr><td>运行日志</td></tr></thead><tbody><tr><td>
-<div class="rd-toolbar"><span id="updated">每 5 秒更新</span><button id="refresh" class="button_gen">刷新</button><button id="clearlog" class="button_gen">清空</button></div>
-<pre id="logs" tabindex="0" aria-label="最近运行日志">正在读取日志…</pre>
-<p>仅保存在 /tmp 内存中，不写入 JFFS。显示最近 150 行，重启路由器后清空。</p>
+<table class="FormTable" width="100%" cellpadding="4" cellspacing="0"><thead><tr><td>Logs</td></tr></thead><tbody><tr><td>
+<div class="rd-toolbar"><span id="updated">Updates every 5s</span><button id="refresh" class="button_gen">Refresh</button><button id="clearlog" class="button_gen">Clear</button></div>
+<pre id="logs" tabindex="0" aria-label="Recent logs">Reading logs…</pre>
+<p>Kept in /tmp (RAM) only, never written to JFFS. Shows the last 150 lines; cleared when the router reboots.</p>
 </td></tr></tbody></table>
 </main>
 </td></tr></table></td></tr></table></td><td width="10"></td>

@@ -10,5 +10,5 @@ rm -f /koolshare/scripts/remodroid_common.sh /koolshare/scripts/remodroid_contro
 for k in name title description version install; do dbus remove "softcenter_module_remodroid_$k"; done
 dbus remove remodroid_payload
 dbus remove remodroid_enrollment
-echo '已卸载。配置与 ADB 密钥保留在 /jffs/configs/remodroid，便于重新安装。'
+echo 'Uninstalled. Config and ADB key are kept in /jffs/configs/remodroid for reinstalling.'
 rm -f /koolshare/scripts/uninstall_remodroid.sh

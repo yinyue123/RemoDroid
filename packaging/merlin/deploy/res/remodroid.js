@@ -28,12 +28,12 @@
   function render(data, action) {
     running = data.running; auto = data.autostart;
     el('state').className = running ? 'running' : '';
-    el('state').querySelector('strong').textContent = running ? '代理正在运行' : '代理未启动';
-    el('process').textContent = running ? `进程 PID ${data.pid} · 面板连接状态请查看日志` : '保存连接配置后，点击“启动”';
+    el('state').querySelector('strong').textContent = running ? 'Agent running' : 'Agent stopped';
+    el('process').textContent = running ? `Process PID ${data.pid} · see logs for panel connection status` : 'Save the connection config, then click Start';
     el('autostart').checked = auto;
     el('version').textContent = `Agent ${data.version}`;
-    el('logs').textContent = data.logs || '还没有日志。配置完成并启动后，连接信息会显示在这里。';
-    el('updated').textContent = `更新于 ${new Date().toLocaleTimeString()}`;
+    el('logs').textContent = data.logs || 'No logs yet. Connection details appear here once configured and started.';
+    el('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
     if (data.config && (action === 'config' || action === 'save' || action === 'enroll')) {
       el('config').value = data.config;
       fitEditor('config');
@@ -55,17 +55,17 @@
         body:JSON.stringify({id:Math.floor(Math.random()*90000000)+10000000,
           method:'remodroid_control.sh', params:[action], fields})
       });
-      if (!response.ok) throw new Error(`路由器返回 HTTP ${response.status}`);
+      if (!response.ok) throw new Error(`Router returned HTTP ${response.status}`);
       const envelope = await response.json();
-      if (typeof envelope.result !== 'string') throw new Error('管理接口没有返回有效结果');
+      if (typeof envelope.result !== 'string') throw new Error('The management API returned no valid result');
       const data = JSON.parse(decode(envelope.result.trim()));
       render(data, action);
     } catch (error) {
       // A login redirect returns HTML rather than JSON; don't silently display stale status.
       el('state').className = '';
-      el('state').querySelector('strong').textContent = '无法读取状态';
-      el('process').textContent = '检查连接和路由器登录状态后，点击刷新';
-      if (!silent || !el('message').textContent) message(`操作未完成：${error.message}。如果登录已过期，请返回软件中心重新登录。`, true);
+      el('state').querySelector('strong').textContent = "Can't read status";
+      el('process').textContent = "Check the connection and that you're logged in, then click Refresh";
+      if (!silent || !el('message').textContent) message(`Action didn't complete: ${error.message}. If your login expired, go back to the software center and sign in again.`, true);
     } finally { clearTimeout(timeout); busy = false; controls(); }
   }
   el('config').addEventListener('input', () => { dirty = true; fitEditor('config'); });
@@ -74,20 +74,20 @@
   window.addEventListener('resize', () => { fitEditor('config'); fitEditor('enroll-command'); });
   fitEditor('enroll-command');
   el('enroll').onclick = () => {
-    if (dirty) return message('请先保存高级配置，或重新读取以放弃修改。', true);
+    if (dirty) return message('Save the advanced config first, or reload to discard changes.', true);
     const command = el('enroll-command').value.trim().replace(/^\$\s*/, '');
     const match = /^(?:remodroid|remodroid-agent)\s+enroll\s+--panel\s+(https?:\/\/[A-Za-z0-9.\[\]:_-]+\/?)[ \t]+--code\s+([A-Za-z0-9-]{1,64})\s*$/.exec(command);
-    if (!match) return message('请粘贴完整命令：remodroid enroll --panel http://面板地址:端口 --code XXXX-XXXX', true);
-    message('正在绑定面板，请稍候…');
+    if (!match) return message('Paste the full command: remodroid enroll --panel http://panel-host:port --code XXXX-XXXX', true);
+    message('Pairing with the panel…');
     request('enroll', {remodroid_enrollment:encode(JSON.stringify({panel:match[1], code:match[2]}))});
   };
   el('save').onclick = () => {
-    if (new TextEncoder().encode(el('config').value).length > 16384) return message('配置不能超过 16KB', true);
+    if (new TextEncoder().encode(el('config').value).length > 16384) return message("Config can't exceed 16KB", true);
     request('save', {remodroid_payload:encode(el('config').value)});
   };
-  el('reload').onclick = () => { if (!dirty || confirm('放弃未保存的修改，重新读取配置？')) request('config'); };
+  el('reload').onclick = () => { if (!dirty || confirm('Discard unsaved changes and reload the config?')) request('config'); };
   for (const action of ['start','stop','restart','clearlog']) el(action).onclick = () => {
-    if ((action === 'start' || action === 'restart') && dirty) return message('有未保存的配置，请先点击“保存配置”。', true);
+    if ((action === 'start' || action === 'restart') && dirty) return message('You have unsaved config; click Save config first.', true);
     request(action);
   };
   el('refresh').onclick = () => request(loaded ? 'status' : 'config');

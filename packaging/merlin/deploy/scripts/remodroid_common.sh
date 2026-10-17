@@ -36,13 +36,13 @@ rd_stop() {
 }
 rd_start() {
     rd_pid >/dev/null && return 0
-    [ -r "$RD_INI" ] || { echo '请先保存配置'; return 1; }
-    case "$(rd_value server url)" in ws://?*|wss://?*) ;; *) echo '请填写 ws:// 或 wss:// 服务器地址'; return 1;; esac
+    [ -r "$RD_INI" ] || { echo 'Save the config first'; return 1; }
+    case "$(rd_value server url)" in ws://?*|wss://?*) ;; *) echo 'Enter a ws:// or wss:// server address'; return 1;; esac
     [ -n "$(rd_value server device_id)" ] && [ -n "$(rd_value server device_secret)" ] || {
-        echo '请填写设备 ID 和设备密钥'; return 1;
+        echo 'Enter the device ID and device secret'; return 1;
     }
-    [ -z "$(pidof remodroid-agent 2>/dev/null)" ] || { echo '已有其他 remodroid-agent 进程，请先停止手动启动的实例'; return 1; }
+    [ -z "$(pidof remodroid-agent 2>/dev/null)" ] || { echo 'Another remodroid-agent process is already running; stop the manually started instance first'; return 1; }
     nohup /koolshare/scripts/remodroid_watch.sh </dev/null >/dev/null 2>&1 9>&- &
     sleep 1
-    rd_pid >/dev/null || { echo '程序启动后退出，请查看日志'; return 1; }
+    rd_pid >/dev/null || { echo 'The agent exited right after starting; check the logs'; return 1; }
 }
