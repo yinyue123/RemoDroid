@@ -56,13 +56,18 @@ def grid(part, names, ver):
 
 
 def markdown(names, ver):
+    merlin = [f'[Merlin {arch}](https://github.com/{REPO}/releases/download/v{ver}/{name})'
+              for arch in ('armv7', 'aarch64')
+              if (name := f'remodroid-{ver}-merlin-{arch}.tar.gz') in names]
+    merlin_note = ('Koolshare / KoolCenter offline installers: ' + ' · '.join(merlin)
+                   + '. RT-AC86U: choose armv7. These are agent-only plugins, not OpenWrt packages.') if merlin else ''
     return '\n'.join([
         f'### Downloads (v{ver})', '',
         'Pick the row for the machine\'s CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, '
         '`i686` = x86) and the column for its system. OpenWrt: take the build that `opkg print-architecture` '
         'lists. *Any Linux* holds both the server and the agent.', '',
         grid('server', names, ver), '',
-        grid('agent', names, ver), '',
+        grid('agent', names, ver), '', merlin_note, '',
         f'Checksums: [SHA256SUMS](https://github.com/{REPO}/releases/download/v{ver}/SHA256SUMS)',
     ])
 

@@ -154,6 +154,15 @@ and phone files under `/usr/share/remodroid/`, and a service for the distro's in
 (systemd, OpenRC or procd). Edit the ini file, then enable the service. Pick the OpenWrt
 package whose arch matches `opkg print-architecture` on your router.
 
+### ASUS Merlin / Koolshare
+
+Use the dedicated `remodroid-<version>-merlin-armv7.tar.gz` (RT-AC86U) or
+`-merlin-aarch64.tar.gz` package in **Software Center → Manual installation**.
+It provides a router management page for configuration, start/stop, logs, and optional
+autostart. Installation does not start the agent. Stock Asuswrt-Merlin without the
+Koolshare/KoolCenter software center is not supported by this installer.
+See [Merlin packaging](packaging/merlin/README.md) for building, migration, and limitations.
+
 ## Status
 
 Verified on this machine: everything in the test table above, including real Chrome as the viewer.
