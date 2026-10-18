@@ -5,9 +5,9 @@
 iPhone の Safari から Android スマートフォンを低遅延で操作できます。クラウドゲームにも十分使える応答速度です。
 スマートフォンは自宅に置き、USB ケーブルでルーターにつなぎます。どこからでも画面を見てタップできます。
 
-<p align="center"><a href="https://remodroid.pages.dev/ja/"><img src="../../wizard/button.svg" alt="ウィザードで RemoDroid をインストール：remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/ja/"><img src="button.svg" alt="ウィザードで RemoDroid をインストール：remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="../architecture.svg" alt="RemoDroid の仕組み：iPhone の Safari が制御サーバーにログインし、自宅ルーターのエージェントが USB 経由で Android スマートフォンを操作します。映像・音声・タッチ操作は Safari とルーターの間を WebRTC で流れ、UDP の直接接続が遮断される場合は TURN を経由します" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="RemoDroid の仕組み：iPhone の Safari が制御サーバーにログインし、自宅ルーターのエージェントが USB 経由で Android スマートフォンを操作します。映像・音声・タッチ操作は Safari とルーターの間を WebRTC で流れ、UDP の直接接続が遮断される場合は TURN を経由します" width="100%"></p>
 
 **仕組みを一段落で。** 公開マシン上の小さな**サーバー**（または無料の Cloudflare Worker）が、Web ページ、ログイン、接続の確立を担当します。自宅ルーター上の**エージェント**が内蔵 ADB（`adb` は不要）を使って USB 経由でスマートフォンと通信し、小さな補助プログラムをスマートフォンで起動します。補助プログラムは画面をキャプチャし、ハードウェアでエンコードして WebRTC で Safari に直接送ります。タッチ操作は同じ経路を逆向きに戻ります。ルーターはパケットを転送するだけで、途中では一切デコードしません。
 
@@ -38,7 +38,7 @@ iPhone が自宅に直接接続できる場合の想定遅延は 40–80 ms、TU
 
 ## インストール
 
-<p align="center"><a href="https://remodroid.pages.dev/ja/"><img src="../../wizard/button.svg" alt="ウィザードで RemoDroid をインストール：remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/ja/"><img src="button.svg" alt="ウィザードで RemoDroid をインストール：remodroid.pages.dev" width="318" height="64"></a></p>
 
 **ウィザードがすべての手順を案内し、コピーボタンも用意しています。** ここで進めたい場合は、次の 5 ステップに従ってください。図の下部と同じ 5 ステップです。
 
@@ -159,7 +159,7 @@ Koolshare / KoolCenter オフラインインストーラー：[Merlin armv7](htt
 チェックサム： [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-**どの OpenWrt ファイルを選ぶ？** [doc/openwrt.md](../../doc/openwrt.md) でルーターと CPU を確認してください。動作する OpenWrt のバージョンも掲載しています。
+**どの OpenWrt ファイルを選ぶ？** [openwrt.md](openwrt.md) でルーターと CPU を確認してください。動作する OpenWrt のバージョンも掲載しています。
 
 **LuCI を使う OpenWrt ならコマンドライン不要：** LuCI の**システム → ソフトウェア → パッケージをアップロード…**を開き、ルーターに合う `.ipk` を選んでインストールします。**サービス → RemoDroid** ページが追加されます。ここでルーターをパネルとペアリング（ステップ 3）し、エージェントを起動・停止し、パネルとスマートフォンの接続状態を確認できます。
 

@@ -5,9 +5,9 @@
 Steuere ein Android-Handy mit niedriger Latenz aus Safari auf deinem iPhone, schnell genug für Cloud-Gaming.
 Das Handy bleibt zu Hause per USB-Kabel am Router. Du siehst und bedienst es von überall.
 
-<p align="center"><a href="https://remodroid.pages.dev/de/"><img src="../../wizard/button.svg" alt="RemoDroid mit dem Assistenten installieren: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/de/"><img src="button.svg" alt="RemoDroid mit dem Assistenten installieren: remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="../architecture.svg" alt="So funktioniert RemoDroid: Safari auf dem iPhone meldet sich am Steuerserver an; der Agent auf dem Router zu Hause steuert das Android-Handy über USB; Video, Ton und Berührungen laufen per WebRTC zwischen Safari und dem Router, über TURN, wenn direktes UDP blockiert ist" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="So funktioniert RemoDroid: Safari auf dem iPhone meldet sich am Steuerserver an; der Agent auf dem Router zu Hause steuert das Android-Handy über USB; Video, Ton und Berührungen laufen per WebRTC zwischen Safari und dem Router, über TURN, wenn direktes UDP blockiert ist" width="100%"></p>
 
 **So funktioniert es, in einem Absatz.** Ein kleiner **Server** auf einem öffentlichen Rechner (oder ein kostenloser
 Cloudflare Worker) stellt die Webseite, deine Anmeldung und den Verbindungsaufbau bereit. Ein **Agent** auf deinem
@@ -50,7 +50,7 @@ Die Speicherangaben stammen von einem laufenden Server und einem Agent auf einem
 
 ## Installation
 
-<p align="center"><a href="https://remodroid.pages.dev/de/"><img src="../../wizard/button.svg" alt="RemoDroid mit dem Assistenten installieren: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/de/"><img src="button.svg" alt="RemoDroid mit dem Assistenten installieren: remodroid.pages.dev" width="318" height="64"></a></p>
 
 **Der Assistent führt dich mit Kopier-Buttons durch alles.** Lieber hier bleiben? Folge diesen fünf Schritten,
 denselben fünf wie unten im Bild.
@@ -177,7 +177,7 @@ Offline-Installer für Koolshare / KoolCenter: [Merlin armv7](https://github.com
 Prüfsummen: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-**Welche OpenWrt-Datei?** Finde deinen Router und seine CPU in [doc/openwrt.md](../openwrt.md); dort stehen auch
+**Welche OpenWrt-Datei?** Finde deinen Router und seine CPU in [openwrt.md](openwrt.md); dort stehen auch
 die OpenWrt-Versionen, die funktionieren.
 
 **OpenWrt mit LuCI, ganz ohne Kommandozeile:** Öffne in LuCI **System → Software → Upload Package…**, wähle das

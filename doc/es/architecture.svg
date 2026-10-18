@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="es" xml:lang="es" width="1240" height="790" viewBox="0 0 1240 790" role="img" aria-labelledby="title desc">
+  <title id="title">RemoDroid: tu teléfono Android, en tu iPhone</title>
+  <desc id="desc">Safari se conecta al servidor de control para iniciar sesión e intercambiar señalización. El agente del router se conecta al servidor por WebSocket y gestiona el teléfono Android con ADB integrado por USB. WebRTC transporta vídeo, audio y entrada táctil directamente entre Safari y el relay UDP del router, o mediante TURN cuando la red lo requiere. El teléfono captura la pantalla y codifica el vídeo; el router reenvía paquetes sin decodificarlos. La sesión pasa del inicio de sesión y la selección del teléfono al arranque del agente y la negociación de la conexión, hasta la transmisión y el control táctil.</desc>
+  <defs>
+    <marker id="blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#4865c7"/></marker>
+    <marker id="green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#14846b"/></marker>
+    <marker id="amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#b56a1d"/></marker>
+    <marker id="purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#8661b3"/></marker>
+    <style>
+      text { font-family: 'DejaVu Sans', 'DejaVu Sans', sans-serif; fill: #21324b; }
+      .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2px; fill: #62728c; }
+      .heading { font-size: 30px; font-weight: 750; }
+      .sub { font-size: 16px; fill: #566781; }
+      .name { font-size: 21px; font-weight: 700; }
+      .body { font-size: 14px; fill: #566781; }
+      .mono { font-family: 'DejaVu Sans Mono', monospace; font-size: 12px; fill: #4865c7; }
+      .label { font-size: 13px; font-weight: 650; }
+      .step { font-size: 16px; font-weight: 700; }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1238" height="788" rx="24" fill="#f5f7fb" stroke="#dce3ed"/>
+  <text x="32" y="38" class="eyebrow">MIRA. TOCA. JUEGA. A DISTANCIA.</text>
+  <text x="32" y="78" class="heading">Tu teléfono Android, en tu iPhone.</text>
+  <text x="32" y="108" class="sub">Un navegador en tu mano. Un teléfono Android conectado por USB en casa.</text>
+
+  <!-- Control and USB links -->
+  <path d="M276 236H340" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <path d="M584 236H648" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <path d="M892 236H956" fill="none" stroke="#8661b3" stroke-width="3" marker-start="url(#purple)" marker-end="url(#purple)"/>
+  <text x="308" y="210" text-anchor="middle" class="label" fill="#4865c7">HTTPS</text>
+  <text x="308" y="270" text-anchor="middle" class="body">acceso</text>
+  <text x="616" y="210" text-anchor="middle" class="label" fill="#4865c7">WS</text>
+  <text x="616" y="270" text-anchor="middle" class="body">control</text>
+  <text x="924" y="210" text-anchor="middle" class="label" fill="#8661b3">USB</text>
+  <text x="924" y="270" text-anchor="middle" class="body">ADB</text>
+
+  <!-- Viewer -->
+  <rect x="32" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="52" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <rect x="64" y="170" width="13" height="23" rx="3" fill="none" stroke="#4865c7" stroke-width="2"/>
+  <path d="M68 189h5" stroke="#4865c7" stroke-width="1.5"/>
+  <text x="100" y="187" class="eyebrow">VISOR</text>
+  <text x="52" y="232" class="name">iPhone / Safari</text>
+  <text x="52" y="262" class="body">Ve vídeo y escucha audio</text>
+  <text x="52" y="284" class="body">Envía toques, gestos y texto</text>
+  <text x="52" y="320" class="mono">Navegador / App de inicio</text>
+
+  <!-- Server -->
+  <rect x="340" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="360" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <path d="M368 175h20v6h-20z M368 184h20v6h-20z" fill="none" stroke="#4865c7" stroke-width="1.6"/>
+  <text x="408" y="187" class="eyebrow" style="letter-spacing: 0px; font-size: 11.5px;">SERVIDOR DE CONTROL</text>
+  <text x="360" y="232" class="name" style="font-size: 17.25px;">Equipo Linux público</text>
+  <text x="360" y="262" class="body">Panel, acceso y señalización</text>
+  <text x="360" y="284" class="body" style="font-size: 13.75px;">Relay STUN / TURN integrado</text>
+  <text x="360" y="320" class="mono">remodroid-server</text>
+
+  <!-- Agent -->
+  <rect x="648" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="668" y="164" width="36" height="36" rx="10" fill="#edf7f2"/>
+  <path d="M676 181h20v11h-20z M680 181v-8 M692 181v-8" fill="none" stroke="#14846b" stroke-width="1.8"/>
+  <text x="716" y="187" class="eyebrow">AGENTE EN CASA</text>
+  <text x="668" y="232" class="name">Router / Linux</text>
+  <text x="668" y="262" class="body">Inicia y supervisa el teléfono</text>
+  <text x="668" y="284" class="body" style="font-size: 13.5px;">Reenvía paquetes USB ↔ UDP</text>
+  <text x="668" y="320" class="mono">remodroid-agent</text>
+
+  <!-- Android -->
+  <rect x="956" y="144" width="252" height="202" rx="16" fill="#fff" stroke="#dacfea"/>
+  <rect x="976" y="164" width="36" height="36" rx="10" fill="#f3edfa"/>
+  <rect x="988" y="170" width="13" height="23" rx="3" fill="none" stroke="#8661b3" stroke-width="2"/>
+  <text x="1024" y="187" class="eyebrow" style="letter-spacing: 0px;">TELÉFONO EN CASA</text>
+  <text x="976" y="232" class="name">Teléfono Android</text>
+  <text x="976" y="262" class="body">Captura y codifica la pantalla</text>
+  <text x="976" y="284" class="body" style="font-size: 13px;">Ejecuta apps y aplica tu entrada</text>
+  <text x="976" y="308" class="mono">remodroid-server.jar</text>
+  <text x="976" y="328" class="mono">+ libremodroid.so</text>
+
+  <!-- TURN fallback through the server -->
+  <path d="M134 349V408H462V349 M462 408H790V349" fill="none" stroke="#b56a1d" stroke-width="2.5" stroke-dasharray="7 6" marker-start="url(#amber)" marker-end="url(#amber)"/>
+  <rect x="260" y="392" width="407" height="31" rx="15" fill="#fff4e6"/>
+  <text x="463" y="412" text-anchor="middle" class="label" style="fill:#935215">Alternativa TURN · si se bloquea el UDP directo</text>
+
+  <!-- Direct WebRTC via the agent's UDP relay -->
+  <path d="M174 349V496H750V349" fill="none" stroke="#14846b" stroke-width="3" marker-start="url(#green)" marker-end="url(#green)"/>
+  <rect x="241" y="479" width="443" height="34" rx="17" fill="#e4f4ed"/>
+  <text x="463" y="501" text-anchor="middle" class="label" style="fill:#146f5a">WebRTC directo · vídeo + audio ↔ entrada táctil</text>
+  <text x="463" y="539" text-anchor="middle" class="body">Se muestra el túnel USB. El agente reenvía los medios sin decodificarlos.</text>
+
+  <rect x="834" y="379" width="374" height="164" rx="14" fill="#eef1f8"/>
+  <text x="854" y="407" class="label">Despliegue alternativo</text>
+  <text x="854" y="434" class="body" style="font-size: 13.25px;">Cloudflare Worker sustituye al servidor de control.</text>
+  <text x="854" y="456" class="body">Usa TURN de Cloudflare o tu propio relay.</text>
+  <text x="854" y="489" class="label">Ruta multimedia alternativa</text>
+  <text x="854" y="516" class="body" style="font-size: 12.75px;">El teléfono puede enviar medios por su propio Wi-Fi.</text>
+
+  <path d="M32 570H1208" stroke="#dce3ed"/>
+  <text x="32" y="606" class="eyebrow">DEL ACCESO AL CONTROL EN DIRECTO</text>
+  <circle cx="52" cy="649" r="19" fill="#4865c7"/><text x="52" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">1</text>
+  <text x="84" y="646" class="step">Accede y elige un teléfono</text>
+  <text x="84" y="671" class="body">El panel pide conectar al agente registrado.</text>
+  <path d="M397 651h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="461" cy="649" r="19" fill="#4865c7"/><text x="461" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">2</text>
+  <text x="493" y="646" class="step">Negocia la conexión</text>
+  <text x="493" y="671" class="body" style="font-size: 13.25px;">Señalización e ICE eligen UDP directo o TURN.</text>
+  <path d="M806 651h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="870" cy="649" r="19" fill="#14846b"/><text x="870" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">3</text>
+  <text x="902" y="646" class="step">Mira e interactúa</text>
+  <text x="902" y="671" class="body">Ve la pantalla. Toca para controlar.</text>
+  <rect x="32" y="704" width="1176" height="60" rx="12" fill="#21324b"/>
+  <text x="56" y="739" class="eyebrow" style="fill: rgb(174, 187, 208); letter-spacing: 0px; font-size: 11.75px;">CONFIGURACIÓN</text>
+  <circle cx="189" cy="734" r="13" fill="#fff"/><text x="189" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">1</text>
+  <text x="210" y="739" class="label" style="fill:#fff">Servidor</text>
+  <path d="M290 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M312 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="347" cy="734" r="13" fill="#fff"/><text x="347" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">2</text>
+  <text x="368" y="739" class="label" style="fill:#fff">Agente en el router</text>
+  <path d="M526 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M548 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="583" cy="734" r="13" fill="#fff"/><text x="583" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">3</text>
+  <text x="604" y="739" class="label" style="fill:#fff">Registrar</text>
+  <path d="M682 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M704 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="739" cy="734" r="13" fill="#fff"/><text x="739" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">4</text>
+  <text x="760" y="739" class="label" style="fill: rgb(255, 255, 255); font-size: 12px;">Conectar el teléfono</text>
+  <path d="M906 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M928 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="963" cy="734" r="13" fill="#fff"/><text x="963" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">5</text>
+  <text x="984" y="739" class="label" style="fill:#fff">Abrir en iPhone</text>
+</svg>

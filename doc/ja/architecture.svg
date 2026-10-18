@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="ja" xml:lang="ja" width="1240" height="790" viewBox="0 0 1240 790" role="img" aria-labelledby="title desc">
+  <title id="title">RemoDroid：iPhone で自分の Android スマートフォンを使う</title>
+  <desc id="desc">Safari はログインとシグナリングのため制御サーバーに接続します。ルーターのエージェントは WebSocket でサーバーに接続し、内蔵 ADB を使って USB 経由で Android スマートフォンを管理します。WebRTC は Safari とルーターの UDP リレーの間で映像、音声、タッチ入力を直接伝送し、ネットワークの要件に応じて TURN を経由します。スマートフォンは画面をキャプチャして動画をエンコードし、ルーターはデコードせずパケットを転送します。セッションはログインと端末の選択から始まり、エージェントの起動と接続のネゴシエーションを経て、ストリーミングとタッチ操作に進みます。</desc>
+  <defs>
+    <marker id="blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#4865c7"/></marker>
+    <marker id="green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#14846b"/></marker>
+    <marker id="amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#b56a1d"/></marker>
+    <marker id="purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#8661b3"/></marker>
+    <style>
+      text { font-family: 'Noto Sans CJK JP', 'DejaVu Sans', sans-serif; fill: #21324b; }
+      .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2px; fill: #62728c; }
+      .heading { font-size: 30px; font-weight: 750; }
+      .sub { font-size: 16px; fill: #566781; }
+      .name { font-size: 21px; font-weight: 700; }
+      .body { font-size: 14px; fill: #566781; }
+      .mono { font-family: 'DejaVu Sans Mono', monospace; font-size: 12px; fill: #4865c7; }
+      .label { font-size: 13px; font-weight: 650; }
+      .step { font-size: 16px; font-weight: 700; }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1238" height="788" rx="24" fill="#f5f7fb" stroke="#dce3ed"/>
+  <text x="32" y="38" class="eyebrow">離れた場所から、見て、タップして、遊ぶ。</text>
+  <text x="32" y="78" class="heading">自分の Android スマートフォンを、iPhone で。</text>
+  <text x="32" y="108" class="sub">手元にはブラウザー。自宅には USB 接続の Android スマートフォン。</text>
+
+  <!-- Control and USB links -->
+  <path d="M276 236H340" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <path d="M584 236H648" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <path d="M892 236H956" fill="none" stroke="#8661b3" stroke-width="3" marker-start="url(#purple)" marker-end="url(#purple)"/>
+  <text x="308" y="210" text-anchor="middle" class="label" fill="#4865c7">HTTPS</text>
+  <text x="308" y="270" text-anchor="middle" class="body">ログイン</text>
+  <text x="616" y="210" text-anchor="middle" class="label" fill="#4865c7">WS</text>
+  <text x="616" y="270" text-anchor="middle" class="body">制御</text>
+  <text x="924" y="210" text-anchor="middle" class="label" fill="#8661b3">USB</text>
+  <text x="924" y="270" text-anchor="middle" class="body">ADB</text>
+
+  <!-- Viewer -->
+  <rect x="32" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="52" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <rect x="64" y="170" width="13" height="23" rx="3" fill="none" stroke="#4865c7" stroke-width="2"/>
+  <path d="M68 189h5" stroke="#4865c7" stroke-width="1.5"/>
+  <text x="100" y="187" class="eyebrow">ビューアー</text>
+  <text x="52" y="232" class="name">iPhone / Safari</text>
+  <text x="52" y="262" class="body">映像と音声を視聴</text>
+  <text x="52" y="284" class="body">タップ・スワイプ・文字を送信</text>
+  <text x="52" y="320" class="mono">ブラウザー / ホーム画面アプリ</text>
+
+  <!-- Server -->
+  <rect x="340" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="360" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <path d="M368 175h20v6h-20z M368 184h20v6h-20z" fill="none" stroke="#4865c7" stroke-width="1.6"/>
+  <text x="408" y="187" class="eyebrow">制御サーバー</text>
+  <text x="360" y="232" class="name">公開 Linux ホスト</text>
+  <text x="360" y="262" class="body" style="font-size: 13.5px;">パネル・ログイン・シグナリング</text>
+  <text x="360" y="284" class="body">内蔵 STUN / TURN リレー</text>
+  <text x="360" y="320" class="mono">remodroid-server</text>
+
+  <!-- Agent -->
+  <rect x="648" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="668" y="164" width="36" height="36" rx="10" fill="#edf7f2"/>
+  <path d="M676 181h20v11h-20z M680 181v-8 M692 181v-8" fill="none" stroke="#14846b" stroke-width="1.8"/>
+  <text x="716" y="187" class="eyebrow">自宅のエージェント</text>
+  <text x="668" y="232" class="name">ルーター / Linux</text>
+  <text x="668" y="262" class="body">スマートフォンを起動・監視</text>
+  <text x="668" y="284" class="body">USB ↔ UDP パケットを転送</text>
+  <text x="668" y="320" class="mono">remodroid-agent</text>
+
+  <!-- Android -->
+  <rect x="956" y="144" width="252" height="202" rx="16" fill="#fff" stroke="#dacfea"/>
+  <rect x="976" y="164" width="36" height="36" rx="10" fill="#f3edfa"/>
+  <rect x="988" y="170" width="13" height="23" rx="3" fill="none" stroke="#8661b3" stroke-width="2"/>
+  <text x="1024" y="187" class="eyebrow">自宅のスマートフォン</text>
+  <text x="976" y="232" class="name" style="font-size: 19px;">Android スマートフォン</text>
+  <text x="976" y="262" class="body">画面をキャプチャ・エンコード</text>
+  <text x="976" y="284" class="body">アプリを実行し、入力を反映</text>
+  <text x="976" y="308" class="mono">remodroid-server.jar</text>
+  <text x="976" y="328" class="mono">+ libremodroid.so</text>
+
+  <!-- TURN fallback through the server -->
+  <path d="M134 349V408H462V349 M462 408H790V349" fill="none" stroke="#b56a1d" stroke-width="2.5" stroke-dasharray="7 6" marker-start="url(#amber)" marker-end="url(#amber)"/>
+  <rect x="260" y="392" width="407" height="31" rx="15" fill="#fff4e6"/>
+  <text x="463" y="412" text-anchor="middle" class="label" style="fill:#935215">TURN にフォールバック · UDP 直結が遮断された場合</text>
+
+  <!-- Direct WebRTC via the agent's UDP relay -->
+  <path d="M174 349V496H750V349" fill="none" stroke="#14846b" stroke-width="3" marker-start="url(#green)" marker-end="url(#green)"/>
+  <rect x="241" y="479" width="443" height="34" rx="17" fill="#e4f4ed"/>
+  <text x="463" y="501" text-anchor="middle" class="label" style="fill:#146f5a">WebRTC 直接接続 · 映像 + 音声 ↔ タッチ入力</text>
+  <text x="463" y="539" text-anchor="middle" class="body">図は USB トンネルモード。エージェントはデコードせずにメディアを転送します。</text>
+
+  <rect x="834" y="379" width="374" height="164" rx="14" fill="#eef1f8"/>
+  <text x="854" y="407" class="label">別のデプロイ方法</text>
+  <text x="854" y="434" class="body">Cloudflare Worker で制御サーバーを置き換え。</text>
+  <text x="854" y="456" class="body">Cloudflare TURN または自分のリレーを使用。</text>
+  <text x="854" y="489" class="label">別のメディア経路</text>
+  <text x="854" y="516" class="body" style="font-size: 13.5px;">スマートフォン自身の Wi-Fi でもメディアを送信可能。</text>
+
+  <path d="M32 570H1208" stroke="#dce3ed"/>
+  <text x="32" y="606" class="eyebrow">ログインからリアルタイム操作まで</text>
+  <circle cx="52" cy="649" r="19" fill="#4865c7"/><text x="52" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">1</text>
+  <text x="84" y="646" class="step">ログインして端末を選択</text>
+  <text x="84" y="671" class="body">パネルが登録済みエージェントに接続を要求。</text>
+  <path d="M397 651h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="461" cy="649" r="19" fill="#4865c7"/><text x="461" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">2</text>
+  <text x="493" y="646" class="step">接続をネゴシエーション</text>
+  <text x="493" y="671" class="body" style="font-size: 13.5px;">シグナリングと ICE で UDP 直結か TURN を選択。</text>
+  <path d="M806 651h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="870" cy="649" r="19" fill="#14846b"/><text x="870" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">3</text>
+  <text x="902" y="646" class="step">視聴して操作</text>
+  <text x="902" y="671" class="body">画面を見て、タッチで操作。</text>
+  <rect x="32" y="704" width="1176" height="60" rx="12" fill="#21324b"/>
+  <text x="56" y="739" class="eyebrow" style="fill:#aebbd0">セットアップ</text>
+  <circle cx="189" cy="734" r="13" fill="#fff"/><text x="189" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">1</text>
+  <text x="210" y="739" class="label" style="fill:#fff">サーバー</text>
+  <path d="M290 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M312 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="347" cy="734" r="13" fill="#fff"/><text x="347" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">2</text>
+  <text x="368" y="739" class="label" style="fill:#fff">ルーターのエージェント</text>
+  <path d="M526 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M548 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="583" cy="734" r="13" fill="#fff"/><text x="583" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">3</text>
+  <text x="604" y="739" class="label" style="fill:#fff">登録</text>
+  <path d="M682 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M704 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="739" cy="734" r="13" fill="#fff"/><text x="739" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">4</text>
+  <text x="760" y="739" class="label" style="fill:#fff">スマートフォンを接続</text>
+  <path d="M906 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M928 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="963" cy="734" r="13" fill="#fff"/><text x="963" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">5</text>
+  <text x="984" y="739" class="label" style="fill:#fff">iPhone で開く</text>
+</svg>

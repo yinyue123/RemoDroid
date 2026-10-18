@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="zh-CN" xml:lang="zh-CN" width="1240" height="790" viewBox="0 0 1240 790" role="img" aria-labelledby="title desc">
+  <title id="title">RemoDroid：在 iPhone 上使用你的 Android 手机</title>
+  <desc id="desc">Safari 连接控制服务器进行登录和信令交互。路由器代理通过 WebSocket 连接服务器，使用内置 ADB 经 USB 管理 Android 手机。WebRTC 在 Safari 和路由器的 UDP 中继之间直接传输视频、音频和触控输入，网络有需要时则通过 TURN。手机捕获屏幕并编码视频；路由器只转发数据包，不进行解码。会话从登录和选择手机开始，经过代理启动和连接协商，进入流媒体传输和触控操作。</desc>
+  <defs>
+    <marker id="blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#4865c7"/></marker>
+    <marker id="green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#14846b"/></marker>
+    <marker id="amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#b56a1d"/></marker>
+    <marker id="purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#8661b3"/></marker>
+    <style>
+      text { font-family: 'Noto Sans CJK SC', 'DejaVu Sans', sans-serif; fill: #21324b; }
+      .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2px; fill: #62728c; }
+      .heading { font-size: 30px; font-weight: 750; }
+      .sub { font-size: 16px; fill: #566781; }
+      .name { font-size: 21px; font-weight: 700; }
+      .body { font-size: 14px; fill: #566781; }
+      .mono { font-family: 'DejaVu Sans Mono', monospace; font-size: 12px; fill: #4865c7; }
+      .label { font-size: 13px; font-weight: 650; }
+      .step { font-size: 16px; font-weight: 700; }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1238" height="788" rx="24" fill="#f5f7fb" stroke="#dce3ed"/>
+  <text x="32" y="38" class="eyebrow">远程查看、触控、畅玩。</text>
+  <text x="32" y="78" class="heading">在 iPhone 上使用你的 Android 手机。</text>
+  <text x="32" y="108" class="sub">手中是浏览器，家中是通过 USB 连接的 Android 手机。</text>
+
+  <!-- Control and USB links -->
+  <path d="M276 236H340" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <path d="M584 236H648" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <path d="M892 236H956" fill="none" stroke="#8661b3" stroke-width="3" marker-start="url(#purple)" marker-end="url(#purple)"/>
+  <text x="308" y="210" text-anchor="middle" class="label" fill="#4865c7">HTTPS</text>
+  <text x="308" y="270" text-anchor="middle" class="body">登录</text>
+  <text x="616" y="210" text-anchor="middle" class="label" fill="#4865c7">WS</text>
+  <text x="616" y="270" text-anchor="middle" class="body">控制</text>
+  <text x="924" y="210" text-anchor="middle" class="label" fill="#8661b3">USB</text>
+  <text x="924" y="270" text-anchor="middle" class="body">ADB</text>
+
+  <!-- Viewer -->
+  <rect x="32" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="52" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <rect x="64" y="170" width="13" height="23" rx="3" fill="none" stroke="#4865c7" stroke-width="2"/>
+  <path d="M68 189h5" stroke="#4865c7" stroke-width="1.5"/>
+  <text x="100" y="187" class="eyebrow">查看端</text>
+  <text x="52" y="232" class="name">iPhone / Safari</text>
+  <text x="52" y="262" class="body">观看视频、收听音频</text>
+  <text x="52" y="284" class="body">发送点按、滑动和文字</text>
+  <text x="52" y="320" class="mono">浏览器 / 主屏幕应用</text>
+
+  <!-- Server -->
+  <rect x="340" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="360" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <path d="M368 175h20v6h-20z M368 184h20v6h-20z" fill="none" stroke="#4865c7" stroke-width="1.6"/>
+  <text x="408" y="187" class="eyebrow">控制服务器</text>
+  <text x="360" y="232" class="name">公网 Linux 主机</text>
+  <text x="360" y="262" class="body">面板、登录和信令</text>
+  <text x="360" y="284" class="body">内置 STUN / TURN 中继</text>
+  <text x="360" y="320" class="mono">remodroid-server</text>
+
+  <!-- Agent -->
+  <rect x="648" y="144" width="244" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="668" y="164" width="36" height="36" rx="10" fill="#edf7f2"/>
+  <path d="M676 181h20v11h-20z M680 181v-8 M692 181v-8" fill="none" stroke="#14846b" stroke-width="1.8"/>
+  <text x="716" y="187" class="eyebrow">家中的代理</text>
+  <text x="668" y="232" class="name">路由器 / Linux</text>
+  <text x="668" y="262" class="body">启动并监管手机</text>
+  <text x="668" y="284" class="body">转发 USB ↔ UDP 数据包</text>
+  <text x="668" y="320" class="mono">remodroid-agent</text>
+
+  <!-- Android -->
+  <rect x="956" y="144" width="252" height="202" rx="16" fill="#fff" stroke="#dacfea"/>
+  <rect x="976" y="164" width="36" height="36" rx="10" fill="#f3edfa"/>
+  <rect x="988" y="170" width="13" height="23" rx="3" fill="none" stroke="#8661b3" stroke-width="2"/>
+  <text x="1024" y="187" class="eyebrow">家中的手机</text>
+  <text x="976" y="232" class="name">Android 手机</text>
+  <text x="976" y="262" class="body">捕获屏幕并编码</text>
+  <text x="976" y="284" class="body">运行应用，执行你的输入</text>
+  <text x="976" y="308" class="mono">remodroid-server.jar</text>
+  <text x="976" y="328" class="mono">+ libremodroid.so</text>
+
+  <!-- TURN fallback through the server -->
+  <path d="M134 349V408H462V349 M462 408H790V349" fill="none" stroke="#b56a1d" stroke-width="2.5" stroke-dasharray="7 6" marker-start="url(#amber)" marker-end="url(#amber)"/>
+  <rect x="260" y="392" width="407" height="31" rx="15" fill="#fff4e6"/>
+  <text x="463" y="412" text-anchor="middle" class="label" style="fill:#935215">TURN 回退 · UDP 直连受阻时使用</text>
+
+  <!-- Direct WebRTC via the agent's UDP relay -->
+  <path d="M174 349V496H750V349" fill="none" stroke="#14846b" stroke-width="3" marker-start="url(#green)" marker-end="url(#green)"/>
+  <rect x="241" y="479" width="443" height="34" rx="17" fill="#e4f4ed"/>
+  <text x="463" y="501" text-anchor="middle" class="label" style="fill:#146f5a">WebRTC 直连 · 视频 + 音频 ↔ 触控输入</text>
+  <text x="463" y="539" text-anchor="middle" class="body">图示为 USB 隧道模式。代理转发媒体，不进行解码。</text>
+
+  <rect x="834" y="379" width="374" height="164" rx="14" fill="#eef1f8"/>
+  <text x="854" y="407" class="label">另一种部署方式</text>
+  <text x="854" y="434" class="body">用 Cloudflare Worker 替代控制服务器。</text>
+  <text x="854" y="456" class="body">使用 Cloudflare TURN 或自己的中继。</text>
+  <text x="854" y="489" class="label">另一条媒体传输路径</text>
+  <text x="854" y="516" class="body">手机也可以通过自身的 Wi-Fi 发送媒体。</text>
+
+  <path d="M32 570H1208" stroke="#dce3ed"/>
+  <text x="32" y="606" class="eyebrow">从登录到实时控制</text>
+  <circle cx="52" cy="649" r="19" fill="#4865c7"/><text x="52" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">1</text>
+  <text x="84" y="646" class="step">登录并选择手机</text>
+  <text x="84" y="671" class="body">面板请求已注册的代理建立连接。</text>
+  <path d="M397 651h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="461" cy="649" r="19" fill="#4865c7"/><text x="461" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">2</text>
+  <text x="493" y="646" class="step">协商连接</text>
+  <text x="493" y="671" class="body">信令和 ICE 选择 UDP 直连或 TURN。</text>
+  <path d="M806 651h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="870" cy="649" r="19" fill="#14846b"/><text x="870" y="655" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">3</text>
+  <text x="902" y="646" class="step">观看并交互</text>
+  <text x="902" y="671" class="body">查看屏幕，通过触控操作。</text>
+  <rect x="32" y="704" width="1176" height="60" rx="12" fill="#21324b"/>
+  <text x="56" y="739" class="eyebrow" style="fill:#aebbd0">安装步骤</text>
+  <circle cx="189" cy="734" r="13" fill="#fff"/><text x="189" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">1</text>
+  <text x="210" y="739" class="label" style="fill:#fff">服务器</text>
+  <path d="M290 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M312 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="347" cy="734" r="13" fill="#fff"/><text x="347" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">2</text>
+  <text x="368" y="739" class="label" style="fill:#fff">路由器上的代理</text>
+  <path d="M526 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M548 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="583" cy="734" r="13" fill="#fff"/><text x="583" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">3</text>
+  <text x="604" y="739" class="label" style="fill:#fff">注册</text>
+  <path d="M682 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M704 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="739" cy="734" r="13" fill="#fff"/><text x="739" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">4</text>
+  <text x="760" y="739" class="label" style="fill:#fff">连接手机</text>
+  <path d="M906 734h26" stroke="#aebbd0" stroke-width="2"/><path d="M928 729l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="963" cy="734" r="13" fill="#fff"/><text x="963" y="739" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">5</text>
+  <text x="984" y="739" class="label" style="fill:#fff">在 iPhone 上打开</text>
+</svg>

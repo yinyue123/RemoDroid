@@ -5,9 +5,9 @@
 Controle um celular Android pelo Safari do iPhone com latência baixa o suficiente para jogar na nuvem.
 O celular fica em casa, conectado ao roteador por USB. Você pode ver a tela e tocá-la de qualquer lugar.
 
-<p align="center"><a href="https://remodroid.pages.dev/pt-BR/"><img src="../../wizard/button.svg" alt="Instale o RemoDroid com o assistente: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/pt-BR/"><img src="button.svg" alt="Instale o RemoDroid com o assistente: remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="../architecture.svg" alt="Como o RemoDroid funciona: o Safari no iPhone faz login no servidor de controle; o agente no roteador de casa controla o celular Android por USB; vídeo, som e toques trafegam por WebRTC entre o Safari e o roteador, via TURN quando o UDP direto é bloqueado" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="Como o RemoDroid funciona: o Safari no iPhone faz login no servidor de controle; o agente no roteador de casa controla o celular Android por USB; vídeo, som e toques trafegam por WebRTC entre o Safari e o roteador, via TURN quando o UDP direto é bloqueado" width="100%"></p>
 
 **Como funciona, em um parágrafo.** Um pequeno **servidor** em uma máquina pública (ou um Cloudflare Worker gratuito) hospeda a página web, o login e o estabelecimento das conexões. Um **agente** no roteador de casa se comunica com o celular por USB usando seu próprio ADB integrado (sem precisar de `adb`) e inicia um pequeno programa auxiliar no celular. Ele captura a tela, codifica por hardware e envia por WebRTC diretamente ao Safari, com os toques voltando pelo mesmo caminho. O roteador apenas encaminha pacotes; nada é decodificado no meio.
 
@@ -38,7 +38,7 @@ Os números de memória vêm de um servidor em execução e de um agente em um R
 
 ## Instalação
 
-<p align="center"><a href="https://remodroid.pages.dev/pt-BR/"><img src="../../wizard/button.svg" alt="Instale o RemoDroid com o assistente: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/pt-BR/"><img src="button.svg" alt="Instale o RemoDroid com o assistente: remodroid.pages.dev" width="318" height="64"></a></p>
 
 **O assistente guia você em todas as etapas com botões para copiar.** Prefere continuar aqui? Siga estas cinco etapas, as mesmas da parte inferior da imagem.
 
@@ -159,7 +159,7 @@ Instaladores offline do Koolshare / KoolCenter: [Merlin armv7](https://github.co
 Somas de verificação: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-**Qual arquivo OpenWrt?** Encontre seu roteador e sua CPU em [doc/openwrt.md](../../doc/openwrt.md), que também lista as versões compatíveis do OpenWrt.
+**Qual arquivo OpenWrt?** Encontre seu roteador e sua CPU em [openwrt.md](openwrt.md), que também lista as versões compatíveis do OpenWrt.
 
 **OpenWrt com LuCI, sem linha de comando:** no LuCI, abra **Sistema → Software → Enviar pacote…**, escolha o `.ipk` do seu roteador e instale. Surgirá uma página **Serviços → RemoDroid**: ela pareia o roteador com seu painel (etapa 3), inicia e para o agente e mostra se o painel e o celular estão conectados.
 

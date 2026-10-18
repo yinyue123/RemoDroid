@@ -5,9 +5,9 @@
 iPhone의 Safari에서 Android 휴대전화를 낮은 지연 시간으로 제어할 수 있습니다. 클라우드 게임에도 충분한 수준입니다.
 휴대전화는 집에 두고 USB 케이블로 공유기에 연결합니다. 어디서나 화면을 보고 터치할 수 있습니다.
 
-<p align="center"><a href="https://remodroid.pages.dev/ko/"><img src="../../wizard/button.svg" alt="마법사로 RemoDroid 설치: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/ko/"><img src="button.svg" alt="마법사로 RemoDroid 설치: remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="../architecture.svg" alt="RemoDroid 작동 방식: iPhone의 Safari가 제어 서버에 로그인하고, 집 공유기의 에이전트가 USB로 Android 휴대전화를 제어합니다. 영상, 소리, 터치가 Safari와 공유기 사이에서 WebRTC로 전송되며, UDP 직접 연결이 차단되면 TURN을 거칩니다" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="RemoDroid 작동 방식: iPhone의 Safari가 제어 서버에 로그인하고, 집 공유기의 에이전트가 USB로 Android 휴대전화를 제어합니다. 영상, 소리, 터치가 Safari와 공유기 사이에서 WebRTC로 전송되며, UDP 직접 연결이 차단되면 TURN을 거칩니다" width="100%"></p>
 
 **한 문단으로 설명하는 작동 방식.** 공용 네트워크에 있는 컴퓨터의 작은 **서버**(또는 무료 Cloudflare Worker)가 웹 페이지, 로그인, 연결 설정을 담당합니다. 집 공유기의 **에이전트**는 자체 내장 ADB(`adb` 불필요)로 USB를 통해 휴대전화와 통신하고 휴대전화에서 작은 보조 프로그램을 시작합니다. 보조 프로그램은 화면을 캡처하고 하드웨어로 인코딩하여 WebRTC로 Safari에 직접 보냅니다. 터치는 같은 경로로 돌아갑니다. 공유기는 패킷만 전달하며 중간에서는 아무것도 디코딩하지 않습니다.
 
@@ -38,7 +38,7 @@ iPhone이 집에 직접 연결될 때 예상 지연 시간은 40–80 ms이며, 
 
 ## 설치
 
-<p align="center"><a href="https://remodroid.pages.dev/ko/"><img src="../../wizard/button.svg" alt="마법사로 RemoDroid 설치: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/ko/"><img src="button.svg" alt="마법사로 RemoDroid 설치: remodroid.pages.dev" width="318" height="64"></a></p>
 
 **마법사가 복사 버튼과 함께 모든 과정을 안내합니다.** 여기서 계속하고 싶다면 다음 다섯 단계를 따르세요. 그림 하단의 다섯 단계와 같습니다.
 
@@ -159,7 +159,7 @@ Koolshare / KoolCenter 오프라인 설치 파일: [Merlin armv7](https://github
 체크섬: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-**어떤 OpenWrt 파일을 선택하나요?** [doc/openwrt.md](../../doc/openwrt.md)에서 공유기와 CPU를 찾으세요. 동작하는 OpenWrt 버전도 나와 있습니다.
+**어떤 OpenWrt 파일을 선택하나요?** [openwrt.md](openwrt.md)에서 공유기와 CPU를 찾으세요. 동작하는 OpenWrt 버전도 나와 있습니다.
 
 **LuCI가 있는 OpenWrt에서는 명령줄 불필요:** LuCI에서 **시스템 → 소프트웨어 → 패키지 업로드…**를 열고 공유기에 맞는 `.ipk`를 선택해 설치하세요. **서비스 → RemoDroid** 페이지가 생깁니다. 여기에서 공유기를 패널과 페어링하고(3단계), 에이전트를 시작·중지하며, 패널과 휴대전화의 연결 여부를 확인할 수 있습니다.
 

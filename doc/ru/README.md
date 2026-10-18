@@ -5,9 +5,9 @@
 Управляйте телефоном Android из Safari на iPhone с задержкой, достаточно низкой для облачных игр.
 Телефон остаётся дома, подключённый USB-кабелем к роутеру. Вы можете смотреть на его экран и нажимать на него откуда угодно.
 
-<p align="center"><a href="https://remodroid.pages.dev/ru/"><img src="../../wizard/button.svg" alt="Установить RemoDroid с помощью мастера: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/ru/"><img src="button.svg" alt="Установить RemoDroid с помощью мастера: remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="../architecture.svg" alt="Как работает RemoDroid: Safari на iPhone входит на сервер управления; агент на домашнем роутере управляет телефоном Android через USB; видео, звук и касания передаются по WebRTC между Safari и роутером, а при блокировке прямого UDP — через TURN" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="Как работает RemoDroid: Safari на iPhone входит на сервер управления; агент на домашнем роутере управляет телефоном Android через USB; видео, звук и касания передаются по WebRTC между Safari и роутером, а при блокировке прямого UDP — через TURN" width="100%"></p>
 
 **Как это работает, в одном абзаце.** Небольшой **сервер** на общедоступной машине (или бесплатный Cloudflare Worker) обслуживает веб-страницу, вход в учётную запись и установку соединения. **Агент** на домашнем роутере общается с телефоном по USB через собственный встроенный ADB (отдельный `adb` не нужен) и запускает на телефоне небольшую вспомогательную программу. Она захватывает экран, кодирует его аппаратно и отправляет по WebRTC прямо в Safari; ваши касания возвращаются тем же путём. Роутер только пересылает пакеты; по пути ничего не декодируется.
 
@@ -38,7 +38,7 @@ RemoDroid нетребователен к ресурсам: тяжёлую ра�
 
 ## Установка
 
-<p align="center"><a href="https://remodroid.pages.dev/ru/"><img src="../../wizard/button.svg" alt="Установить RemoDroid с помощью мастера: remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/ru/"><img src="button.svg" alt="Установить RemoDroid с помощью мастера: remodroid.pages.dev" width="318" height="64"></a></p>
 
 **Мастер проведёт вас через все шаги и предложит кнопки копирования.** Предпочитаете продолжить здесь? Выполните следующие пять шагов — те же, что внизу на схеме.
 
@@ -159,7 +159,7 @@ curl -fsSL https://remodroid.pages.dev/install_agent.sh | sudo sh
 Контрольные суммы: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-**Какой файл OpenWrt выбрать?** Найдите свой роутер и его CPU в [doc/openwrt.md](../../doc/openwrt.md); там также указаны совместимые версии OpenWrt.
+**Какой файл OpenWrt выбрать?** Найдите свой роутер и его CPU в [openwrt.md](openwrt.md); там также указаны совместимые версии OpenWrt.
 
 **OpenWrt с LuCI, без командной строки:** в LuCI откройте **Система → Программное обеспечение → Загрузить пакет…**, выберите `.ipk` для своего роутера и установите его. Появится страница **Службы → RemoDroid**: она связывает роутер с панелью (шаг 3), запускает и останавливает агент, показывает, подключены ли панель и телефон.
 

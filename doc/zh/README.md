@@ -5,9 +5,9 @@
 通过 iPhone 上的 Safari 低延迟操控 Android 手机，足以用于云游戏。
 手机留在家里，用 USB 线连接路由器。你可以在任何地方查看和触控它。
 
-<p align="center"><a href="https://remodroid.pages.dev/zh/"><img src="../../wizard/button.svg" alt="使用向导安装 RemoDroid：remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/zh/"><img src="button.svg" alt="使用向导安装 RemoDroid：remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="../architecture.svg" alt="RemoDroid 的工作原理：iPhone 上的 Safari 登录控制服务器；家中路由器上的代理通过 USB 操控 Android 手机；视频、声音和触控通过 WebRTC 在 Safari 与路由器之间传输，UDP 直连受阻时通过 TURN 中继" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="RemoDroid 的工作原理：iPhone 上的 Safari 登录控制服务器；家中路由器上的代理通过 USB 操控 Android 手机；视频、声音和触控通过 WebRTC 在 Safari 与路由器之间传输，UDP 直连受阻时通过 TURN 中继" width="100%"></p>
 
 **用一段话说明工作原理。** 公网机器上的一个小型**服务器**（或免费的 Cloudflare Worker）负责提供
 网页、登录和连接建立。家中路由器上的**代理**通过
@@ -49,7 +49,7 @@ iPhone 与家中直连时，预期延迟为 40–80 ms；通过 TURN 时约为 7
 
 ## 安装
 
-<p align="center"><a href="https://remodroid.pages.dev/zh/"><img src="../../wizard/button.svg" alt="使用向导安装 RemoDroid：remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/zh/"><img src="button.svg" alt="使用向导安装 RemoDroid：remodroid.pages.dev" width="318" height="64"></a></p>
 
 **向导会引导你完成所有步骤，并提供复制按钮。** 更愿意在这里操作？按照下面五步进行，
 与图中底部的五步相同。
@@ -176,7 +176,7 @@ Koolshare / KoolCenter 离线安装包：[Merlin armv7](https://github.com/yinyu
 校验和：[SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-**该选哪个 OpenWrt 文件？** 在 [doc/openwrt.md](../openwrt.md) 中查找你的路由器及其 CPU，其中还列出了
+**该选哪个 OpenWrt 文件？** 在 [openwrt.md](openwrt.md) 中查找你的路由器及其 CPU，其中还列出了
 可用的 OpenWrt 版本。
 
 **使用 LuCI 的 OpenWrt，无需命令行：** 在 LuCI 中打开 **系统 → 软件包 → 上传软件包…**，选择

@@ -5,9 +5,9 @@
 Contrôlez un téléphone Android depuis Safari sur votre iPhone avec une latence assez faible pour jouer dans le cloud.
 Le téléphone reste chez vous, relié au routeur par USB. Vous pouvez voir son écran et le toucher depuis n’importe où.
 
-<p align="center"><a href="https://remodroid.pages.dev/fr/"><img src="../../wizard/button.svg" alt="Installer RemoDroid avec l’assistant : remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/fr/"><img src="button.svg" alt="Installer RemoDroid avec l’assistant : remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="../architecture.svg" alt="Fonctionnement de RemoDroid : Safari sur l’iPhone se connecte au serveur de contrôle ; l’agent du routeur domestique pilote le téléphone Android par USB ; vidéo, son et commandes tactiles circulent par WebRTC entre Safari et le routeur, via TURN si l’UDP direct est bloqué" width="100%"></p>
+<p align="center"><img src="architecture.svg" alt="Fonctionnement de RemoDroid : Safari sur l’iPhone se connecte au serveur de contrôle ; l’agent du routeur domestique pilote le téléphone Android par USB ; vidéo, son et commandes tactiles circulent par WebRTC entre Safari et le routeur, via TURN si l’UDP direct est bloqué" width="100%"></p>
 
 **Le fonctionnement en un paragraphe.** Un petit **serveur** sur une machine publique (ou un Cloudflare Worker gratuit) héberge la page web, la connexion à votre compte et l’établissement des connexions. Un **agent** sur votre routeur communique avec le téléphone par USB grâce à son ADB intégré (sans avoir besoin d’`adb`) et lance un petit programme auxiliaire sur le téléphone. Celui-ci capture l’écran, l’encode matériellement et l’envoie par WebRTC directement à Safari ; vos gestes tactiles reviennent par le même chemin. Le routeur ne fait que transférer les paquets ; rien n’est décodé entre les deux.
 
@@ -38,7 +38,7 @@ Les chiffres de mémoire proviennent d’un serveur en fonctionnement et d’un 
 
 ## Installation
 
-<p align="center"><a href="https://remodroid.pages.dev/fr/"><img src="../../wizard/button.svg" alt="Installer RemoDroid avec l’assistant : remodroid.pages.dev" width="318" height="64"></a></p>
+<p align="center"><a href="https://remodroid.pages.dev/fr/"><img src="button.svg" alt="Installer RemoDroid avec l’assistant : remodroid.pages.dev" width="318" height="64"></a></p>
 
 **L’assistant vous guide de bout en bout avec des boutons de copie.** Vous préférez rester ici ? Suivez ces cinq étapes, les mêmes qu’au bas de l’image.
 
@@ -159,7 +159,7 @@ Installateurs hors ligne Koolshare / KoolCenter : [Merlin armv7](https://github.
 Sommes de contrôle : [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-**Quel fichier OpenWrt ?** Trouvez votre routeur et son CPU dans [doc/openwrt.md](../../doc/openwrt.md), qui indique aussi les versions compatibles d’OpenWrt.
+**Quel fichier OpenWrt ?** Trouvez votre routeur et son CPU dans [openwrt.md](openwrt.md), qui indique aussi les versions compatibles d’OpenWrt.
 
 **OpenWrt avec LuCI, sans ligne de commande :** dans LuCI, ouvrez **Système → Logiciels → Téléverser un paquet…**, choisissez le `.ipk` de votre routeur et installez-le. Une page **Services → RemoDroid** apparaît : elle associe le routeur à votre panneau (étape 3), démarre et arrête l’agent, et indique si le panneau et le téléphone sont connectés.
 
