@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>RemoDroid をインストール</title>
+<meta name="description" content="iPhone から Android スマホを操作：RemoDroid サーバー（または Cloudflare）とルーターのエージェントをインストールして接続します。">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../setup.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./"><i>RD</i>RemoDroid</a>
+  <span class="spacer"></span>
+  <select class="link" aria-label="言語" onchange="location.href=this.value" style="appearance:none;-webkit-appearance:none;background:none;cursor:pointer"><option value="../">English</option><option value="../zh/">简体中文</option><option value="../ja/" selected>日本語</option><option value="../ko/">한국어</option><option value="../es/">Español</option><option value="../pt-BR/">Português (Brasil)</option><option value="../de/">Deutsch</option><option value="../fr/">Français</option><option value="../ru/">Русский</option></select>
+  <a class="link" href="https://github.com/yinyue123/RemoDroid/blob/main/doc/ja/README.md" target="_blank" rel="noopener">ドキュメント ↗</a>
+</header>
+<nav class="steps" id="steps" aria-label="インストール手順"></nav>
+<main id="main" aria-live="polite"></main>
+<footer class="foot">
+  <button class="back" id="back" type="button">← 戻る</button>
+  <span class="left" id="left"></span>
+  <button class="btn" id="next" type="button">次へ →</button>
+</footer>
+<script>
+(() => {
+'use strict';
+const SITE = location.origin.startsWith('http') && !/^(localhost|127\.)/.test(location.hostname) ? location.origin : 'https://remodroid.pages.dev';
+const REPO = 'yinyue123/RemoDroid';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const main = $('#main');
+const COPY = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const hl = s => esc(s).replace(/(\s)(--?[a-zA-Z-]+)/g, '$1<span class="f">$2</span>').replace(/(\|)/g, '<span class="f">$1</span>');
+const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="コピー" data-copy="${esc(t)}">${COPY}</button></div>`;
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); } catch (_) {
+    const ta = document.createElement('textarea'); ta.value = b.dataset.copy; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (__) {} ta.remove();
+  }
+  b.classList.add('ok'); b.innerHTML = '✓'; setTimeout(() => { b.classList.remove('ok'); b.innerHTML = COPY; }, 1400);
+});
+
+/* remembered between visits: which server and which router OS */
+let S = { server: 'self', os: 'openwrt' };
+try { Object.assign(S, JSON.parse(localStorage.getItem('rd-install') || '{}')); } catch (_) {}
+const save = () => { try { localStorage.setItem('rd-install', JSON.stringify(S)); } catch (_) {} };
+
+const STEPS = [
+  { label: 'サーバー', sub: 'インストール' }, { label: 'パネル', sub: '設定' }, { label: 'エージェント', sub: 'インストール' },
+  { label: '接続', sub: '登録' }, { label: 'スマホ', sub: 'USB' }, { label: '完了', sub: 'プレイ' },
+];
+/* "remodroid.example.com" / "http://1.2.3.4:5580/" → "https://remodroid.example.com" / "http://1.2.3.4:5580" */
+function panelUrl(v) {
+  v = String(v || '').trim().replace(/\/+$/, '').replace(/\/(wizard|agent)\.html.*$/, '');
+  if (!v) return '';
+  if (!/^https?:\/\//.test(v)) v = (/^[\d.]+(:\d+)?$/.test(v) ? 'http://' : 'https://') + v;
+  return v;
+}
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">パネルのアドレス</label>
+  <input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  または  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+  <div class="hint">ここに保存され、次の手順で使われます。</div></div></div>`;
+function bindPanel(id, after) {
+  const el = document.getElementById(id);
+  el.addEventListener('change', () => { S.panel = panelUrl(el.value); el.value = S.panel; save(); if (after) after(); });
+}
+let step = Math.min(+(location.hash.match(/^#step(\d)$/) || [0, 1])[1] - 1, STEPS.length - 1);
+if (!(step >= 0)) step = 0;
+
+function renderSteps() {
+  $('#steps').innerHTML = STEPS.map((s, i) => `${i ? `<span class="bar${i <= step ? ' done' : ''}"></span>` : ''}<button class="st${i === step ? ' on' : i < step ? ' done' : ''}" type="button" data-i="${i}"><span class="n">${i < step ? '✓' : i + 1}</span><span><b>${s.label}</b><small>${s.sub}</small></span></button>`).join('');
+  $('#steps').querySelectorAll('[data-i]').forEach(b => b.onclick = () => go(+b.dataset.i));
+  $('#back').disabled = step === 0;
+  const left = STEPS.length - 1 - step;
+  $('#left').textContent = left ? `残り ${left} ステップ` : '完了';
+  $('#next').hidden = step === STEPS.length - 1;
+}
+function go(i) { step = i; history.replaceState(null, '', '#step' + (i + 1)); renderSteps(); PAGES[i](); window.scrollTo(0, 0); }
+$('#back').onclick = () => go(Math.max(0, step - 1));
+$('#next').onclick = () => go(Math.min(STEPS.length - 1, step + 1));
+const eyebrow = (n, t) => `<p class="eyebrow">${String(n).padStart(2, '0')} — ${t}</p>`;
+
+/* ---------- release assets (for "download the package") ---------- */
+let assets = null;
+async function loadAssets() {
+  if (assets) return assets;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+    const j = await r.json();
+    assets = { tag: j.tag_name, list: (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size })) };
+  } catch (_) { assets = { tag: '', list: [] }; }
+  return assets;
+}
+const MB = n => (n / 1048576).toFixed(1) + ' MB';
+async function fillDownloads(el, who, os, cpu) {
+  const a = await loadAssets();
+  const re = {
+    openwrt: new RegExp(`^remodroid-${who}_.*_(${cpu === 'x86_64' ? 'x86_64' : cpu === 'aarch64' ? 'aarch64_[a-z0-9-]+' : cpu === 'armv7' ? 'arm_[a-z0-9_-]+' : cpu === 'mipsel' ? 'mipsel_24kc' : cpu === 'mips' ? 'mips_24kc' : 'i386_pentium4'})\\.ipk$`),
+    debian: new RegExp(`^remodroid-${who}_.*_${{ x86_64: 'amd64', aarch64: 'arm64', armv7: 'armhf', x86: 'i386' }[cpu] || 'none'}\\.deb$`),
+    rhel: new RegExp(`^remodroid-${who}-.*\\.${{ x86_64: 'x86_64', aarch64: 'aarch64', armv7: 'armv7hl', x86: 'i686' }[cpu] || 'none'}\\.rpm$`),
+    alpine: new RegExp(`^remodroid-${who}_.*_${{ x86_64: 'x86_64', aarch64: 'aarch64', armv7: 'armv7', x86: 'x86' }[cpu] || 'none'}\\.apk$`),
+  }[os];
+  const hits = a.list.filter(x => re.test(x.name));
+  el.innerHTML = hits.length ? hits.map(x => `<a class="btn" style="margin:0 10px 10px 0" href="${esc(x.url)}"><span>ダウンロード</span><small style="font:12px var(--mono);opacity:.7">${esc(x.name)} · ${MB(x.size)}</small></a>`).join('')
+    : `<p class="note">${esc(a.tag || '最新リリース')} にはこの組み合わせのパッケージがありません。<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">すべてのファイル</a>をご覧ください（<code>.tar.gz</code> はどの Linux でも動きます）。</p>`;
+}
+
+const OS = {
+  openwrt: { name: 'OpenWrt', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'opkg install ./remodroid-agent_*.ipk', cpus: ['mipsel', 'mips', 'armv7', 'aarch64', 'x86_64'] },
+  debian: { name: 'Debian · Ubuntu', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo apt install ./remodroid-*.deb', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+  rhel: { name: 'CentOS · Fedora', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo dnf install ./remodroid-*.rpm', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+  alpine: { name: 'Alpine', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'apk add --allow-untrusted ./remodroid-*.apk', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+};
+/* starting what a package installed */
+const SERVER_START = {
+  debian: 'sudo systemctl enable --now remodroid-server',
+  rhel: 'sudo systemctl enable --now remodroid-server',
+  alpine: 'rc-update add remodroid-server && rc-service remodroid-server start',
+};
+const AGENT_START = {
+  openwrt: '/etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent start',
+  debian: 'sudo systemctl enable --now remodroid-agent',
+  rhel: 'sudo systemctl enable --now remodroid-agent',
+  alpine: 'rc-update add remodroid-agent && rc-service remodroid-agent start',
+};
+const CPU = { mipsel: 'MIPS (LE)', mips: 'MIPS (BE)', armv7: 'ARMv7', aarch64: 'ARM64', x86_64: 'x86_64', x86: 'x86' };
+
+/* ---------- 1. server ---------- */
+function pageServer() {
+  const self = S.server === 'self';
+  main.innerHTML = `${eyebrow(1, 'サーバー')}<h1><em>サーバー</em>を選ぶ</h1>
+    <p class="lede">ルーターと iPhone が出会う場所です。自分の Linux マシンで動かすか、Cloudflare で無料で動かせます。</p>
+    <div class="choices">
+      <button class="choice" type="button" data-s="cf" aria-pressed="${!self}"><small>サーバー不要</small><b>サーバーを持っていない</b><span>パネルを Cloudflare Workers で動かします。無料プランで HTTPS と TURN 付き。</span></button>
+      <button class="choice" type="button" data-s="self" aria-pressed="${self}"><small>セルフホスト</small><b>自分のサーバーがある</b><span>グローバル IP のある Linux マシンなら何でも。すべて自分で管理でき、TURN リレーも内蔵。</span></button>
+    </div>
+    <div id="detail"></div>`;
+  main.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { S.server = b.dataset.s; save(); pageServer(); });
+  const d = $('#detail');
+  if (self) {
+    const one = `curl -fsSL ${SITE}/install_server.sh | sudo sh`;
+    d.innerHTML = `<div class="num"><i>1</i>1 行で完了、どの Linux でも OK</div>
+      <p class="bullet">ダウンロード、インストール、起動まで一度に行います。</p>
+      ${cmd(one)}
+      <div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ downloading remodroid-server_…_amd64.deb</div><div class="d">▸ starting the service</div><div class="k">✓ the server is running. Open the setup wizard:</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
+      <p class="note">表示されたリンクを控えてください。次の手順で開きます。</p>
+      <div class="num"><i class="alt">2</i>またはパッケージをインストール</div>
+      <div class="seg" id="sos">${['debian', 'rhel', 'alpine'].map(k => `<button type="button" data-os="${k}" aria-selected="${(S.sos || 'debian') === k}">${OS[k].name}</button>`).join('')}</div>
+      <div class="seg" id="scpu">${['x86_64', 'aarch64'].map(k => `<button type="button" data-cpu="${k}" aria-selected="${(S.scpu || 'x86_64') === k}">${CPU[k]}</button>`).join('')}</div>
+      <div id="sdl"><p class="note">最新リリースを確認しています…</p></div>
+      ${cmd(OS[S.sos || 'debian'].install.replace('remodroid-', 'remodroid-server').replace('-*', '*'))}
+      <div class="num"><i class="alt">3</i>起動する</div>
+      <p class="bullet">パッケージはサーバーをインストールするだけです。起動して、再起動後も自動で起動するようにします：</p>
+      ${cmd(SERVER_START[S.sos || 'debian'])}
+      <p>次に <code>http://&lt;サーバーIP&gt;:5580/wizard.html</code> を開きます。セットアップコードは <code>/var/lib/remodroid/setup-token</code> にあり、ポートは <code>/etc/remodroid/server.ini</code> の <code>listen</code> です。</p>`;
+    d.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.sos = b.dataset.os; save(); pageServer(); });
+    d.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.scpu = b.dataset.cpu; save(); pageServer(); });
+    fillDownloads($('#sdl'), 'server', S.sos || 'debian', S.scpu || 'x86_64');
+  } else {
+    const deploy = `git clone https://github.com/${REPO} && cd RemoDroid/worker\nnpm install && npx wrangler deploy`;
+    d.innerHTML = `<div class="num"><i>1</i>TURN キーを作る</div>
+      <p>ネットワークが直接接続を遮断するとき、Cloudflare が映像を中継します（毎月 1,000 GB まで無料）。<a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">ダッシュボード</a>で <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>。<b>Turn Token ID</b> と <b>API Token</b> は次の手順で使うので控えておきます。</p>
+      <div class="num"><i>2</i>Worker をデプロイ</div>
+      <p class="bullet">Node.js の入ったパソコンで実行します。最初に一度だけ Cloudflare へのログインを求められます。</p>
+      ${cmd(deploy)}
+      <div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ Uploaded remodroid (web assets, Durable Object "Hub")</div><div class="k">✓ Deployed: https://remodroid.&lt;you&gt;.workers.dev</div></div>
+      <p class="note">ターミナルを使わない方法：<a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a> をフォークし、ダッシュボードで <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → フォークを選ぶ → <b>Root directory: worker</b> → Deploy。ストレージ（Durable Object のデータベース）は自動で作られます。</p>`;
+  }
+}
+
+/* ---------- 2. panel: run it, open it, finish its setup ---------- */
+function pagePanel() {
+  const self = S.server === 'self';
+  if (self) {
+    main.innerHTML = `${eyebrow(2, 'パネル')}<h1><em>パネル</em>を開く</h1>
+      <p class="lede">サーバーがパネルです。サーバー上の Web ページで、ログインしてルーターを追加し、遊びます。</p>
+      <div class="num"><i>1</i>サーバーを動かす</div>
+      <p class="bullet">1 行インストーラーなら起動済みです。パッケージを自分で入れた場合は、今起動します：</p>
+      ${cmd('sudo systemctl enable --now remodroid-server')}
+      <p class="note">Alpine: <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · 状態の確認：<code>systemctl status remodroid-server</code> (Alpine: <code>rc-service remodroid-server status</code>)</p>
+      <div class="num"><i>2</i>Web ページを開く</div>
+      <p>インストーラーが表示したリンクを開きます：<code>http://&lt;サーバーIP&gt;:5580/wizard.html?token=…</code>。<b>token</b> はサーバーの持ち主である証明です。リンクをなくしたら、サーバーで token を確認します：</p>
+      ${cmd('sudo cat /var/lib/remodroid/setup-token')}
+      <div class="chips"><small>先に開放</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443（ドメイン）</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+      <div class="num"><i>3</i>セットアップウィザードを完了</div>
+      <p><b>ドメイン</b>（Let's Encrypt の無料 HTTPS、自動更新）、<b>ログイン情報</b>、<b>STUN/TURN ポート</b>を入力すると、<code>/etc/remodroid/server.ini</code> に書き込み、そのアドレスでサーバーを再起動します。あとから同じページ（パスワードで保護）で設定を変更できます。</p>
+      <div class="num"><i class="alt">4</i>今のアドレスは？</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  } else {
+    main.innerHTML = `${eyebrow(2, 'パネル')}<h1><em>パネル</em>を開く</h1>
+      <p class="lede">Worker がパネルです。ログインしてルーターを追加し、遊ぶための Web ページです。</p>
+      <div class="num"><i>1</i>Worker を開く</div>
+      <p>アドレスは <code>wrangler deploy</code> の出力と、ダッシュボードの <b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b> にあります。通常は <code>https://remodroid.&lt;あなた&gt;.workers.dev</code> です。</p>
+      <div class="num"><i>2</i>セットアップウィザードを完了</div>
+      <p><b>ログイン情報</b>と、前の手順の <b>TURN キー</b>（または別の STUN/TURN サーバー）を入力します。独自のアドレスにしたい場合は Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → カスタムドメインを追加。</p>
+      <div class="callout">デプロイしたらすぐに済ませてください。それまでは最初の訪問者がログインを決められます。念のため Worker に変数 <code>SETUP_TOKEN</code> を追加すると、ウィザードがその入力を求めます。</div>
+      <div class="num"><i class="alt">3</i>アドレスは？</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  }
+  const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))} を開く ↗</a>` : ''; };
+  bindPanel('panel', open);
+  open();
+}
+
+/* ---------- 3. agent ---------- */
+function pageAgent() {
+  const o = OS[S.os];
+  const cpu = o.cpus.includes(S.cpu) ? S.cpu : o.cpus[0];
+  main.innerHTML = `${eyebrow(3, 'エージェント')}<h1><em>エージェント</em>をインストール</h1>
+    <p class="lede">スマホをつないだルーターで動き、自分からパネルに接続します。ポート開放もグローバルアドレスも不要です。</p>
+    <div class="seg">${Object.entries(OS).map(([k, v]) => `<button type="button" data-os="${k}" aria-selected="${k === S.os}">${v.name}</button>`).join('')}</div>
+    <div class="num"><i>1</i>コマンド 1 つ</div>
+    <p class="bullet">ダウンロード、インストール、起動まで一度に行います。ルーター上（SSH）で実行します。</p>
+    ${cmd(o.agent)}
+    <div class="term"><div><span class="p">$</span> ${esc(o.agent)}</div><div class="d">▸ downloading remodroid-agent_…_${S.os === 'openwrt' ? 'mipsel_24kc.ipk' : 'amd64.deb'}</div><div class="d">▸ starting the service</div><div class="k">✓ the agent is running</div></div>
+    <div class="num"><i class="alt">2</i>またはパッケージをダウンロード</div>
+    <div class="seg">${o.cpus.map(k => `<button type="button" data-cpu="${k}" aria-selected="${k === cpu}">${CPU[k]}</button>`).join('')}</div>
+    <div id="adl"><p class="note">最新リリースを確認しています…</p></div>
+    ${cmd(o.install.replace('remodroid-*', 'remodroid-agent*').replace('remodroid-agent_*', 'remodroid-agent_*'))}
+    <div class="num"><i class="alt">3</i>起動する</div>
+    <p class="bullet">パッケージはエージェントをインストールするだけです。起動して、再起動後も自動で起動するようにします：</p>
+    ${cmd(AGENT_START[S.os])}
+    <p class="note">続いてパネルに接続します：次の手順です。</p>
+    <div class="chips"><small>必要なもの</small><span class="chip">USB ポート</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle（一緒にインストール）' : 'ca-certificates'}</span><span class="chip">正しい時刻（HTTPS）</span></div>`;
+  main.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.os = b.dataset.os; save(); pageAgent(); });
+  main.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.cpu = b.dataset.cpu; save(); pageAgent(); });
+  fillDownloads($('#adl'), 'agent', S.os, cpu);
+}
+
+/* ---------- 4. connect: the code comes from your panel ---------- */
+function pageConnect() {
+  main.innerHTML = `${eyebrow(4, '接続')}<h1><em>ルーター</em>を登録</h1>
+    <p class="lede">ルーターは、パネルだけが発行できるワンタイムコードでパネルに参加します。</p>
+    ${S.panel ? '' : panelField('panel')}
+    <div class="num"><i>1</i>パネルの Agents タブを開く</div>
+    <p id="routers"></p>
+    <div class="num"><i>2</i>エージェントを追加</div>
+    <p>リンク先で <b>Add an agent → Connect</b> が開きます（自分でクリックしても構いません）。パネルに <code>X5SX-K3M7</code> のようなコードが表示されます。1 回限り、<b>10 分間</b>有効です。そのページにはコピーボタン付きの完全なコマンドがあります。またはここにコードを入力します。</p>
+    <div class="form"><div class="field"><label for="code">パネルのコード</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+    <div class="num"><i>3</i>ルーターで実行</div>
+    <div id="enroll"></div>
+    <div class="term" id="term"></div>
+    <p class="note"><b>bound</b> と表示されたら、パネルのページも緑になります。以降、ルーターの映像・スマホ・クリップボードの設定はパネルの Agents タブで変更でき、ini を編集する必要はありません。</p>`;
+  const draw = () => {
+    const code = ($('#code').value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const c = code.length === 8 ? code.slice(0, 4) + '-' + code.slice(4) : '';
+    const p = S.panel || 'https://your.panel';
+    const line = `remodroid enroll --panel ${p} --code ${c || 'XXXX-XXXX'}`;
+    $('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html を開く ↗</a>`
+      : '上にパネルのアドレスを入力するか、自分でパネルを開いて <b>Agents → Add</b> へ進んでください。';
+    $('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? '上にパネルのコードを入力してください。' : 'パネルのアドレスとコードを入力してください。'}</p>`;
+    $('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ contacting the panel ${esc(p)}…</div><div class="d">▸ enrolled as "OpenWrt" (openwrt); saved in /etc/remodroid/agent.ini</div><div class="k">✓ bound — this router is online</div>`;
+  };
+  $('#code').addEventListener('input', draw);
+  if (!S.panel) bindPanel('panel', () => pageConnect());
+  draw();
+}
+
+/* ---------- 5. phone ---------- */
+function pagePhone() {
+  main.innerHTML = `${eyebrow(5, 'スマホ')}<h1><em>スマホ</em>をつなぐ</h1>
+    <p class="lede">スマホごとに 1 回だけ。Android 8 以降。ハードウェア H.265 エンコーダーがあると良いですが、必須ではありません。</p>
+    <div class="num"><i>1</i>USB デバッグをオンにする</div>
+    <p>設定 → デバイス情報 → <b>ビルド番号</b>を 7 回タップ。次に 設定 → システム → <b>開発者向けオプション</b> → <b>USB デバッグ</b>。</p>
+    <div class="num"><i>2</i>ルーターの USB ポートにつなぐ</div>
+    <p>充電専用ではなく、データ通信できるケーブルを使います。エージェントが自動でスマホを見つけ、小さなサーバーを入れます（Play ストアからは何も入れません）。</p>
+    <div class="num"><i>3</i>ルーターを許可する</div>
+    <p>スマホに<b>「USB デバッグを許可しますか？」</b>と表示されます。<b>このパソコンからのデバッグを常に許可する</b>にチェックを入れ、<b>許可</b>をタップします。${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">パネルの Agents タブ</a>` : 'パネルの Agents タブ'} にスマホの準備完了が表示されます。</p>`;
+}
+
+/* ---------- 6. done ---------- */
+function pageDone() {
+  main.innerHTML = `${eyebrow(6, '完了')}<h1>さあ、<em>遊ぼう</em></h1>
+    <p class="lede">iPhone の Safari でパネルを開いてログインし、<b>共有</b> → <b>ホーム画面に追加</b>で全画面になります。</p>
+    <dl class="kv"><dt>タッチ</dt><dd>マルチタッチがそのままスマホに届きます。フローティングボールでメニューを開きます。</dd>
+      <dt>画質</dt><dd>メニュー → Settings：解像度、フレームレート、ビットレート、H.265 または H.264。</dd>
+      <dt>写真</dt><dd>メニュー → Photo：iPhone からスマホのギャラリーへ。</dd>
+      <dt>クリップボード</dt><dd>テキストを双方向に。HTTPS ならワンタップ。</dd></dl>
+    <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">パネルを開く ↗</a> ` : ''}<a class="btn ghost" href="https://github.com/${REPO}/blob/main/doc/ja/README.md" target="_blank" rel="noopener">ドキュメントを読む ↗</a></p>`;
+}
+
+const PAGES = [pageServer, pagePanel, pageAgent, pageConnect, pagePhone, pageDone];
+go(step);
+})();
+</script>
+</body>
+</html>

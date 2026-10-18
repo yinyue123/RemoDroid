@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>RemoDroid 설치</title>
+<meta name="description" content="iPhone에서 Android 휴대폰을 플레이하세요: RemoDroid 서버(또는 Cloudflare)와 공유기 에이전트를 설치하고 연결합니다.">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../setup.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./"><i>RD</i>RemoDroid</a>
+  <span class="spacer"></span>
+  <select class="link" aria-label="언어" onchange="location.href=this.value" style="appearance:none;-webkit-appearance:none;background:none;cursor:pointer"><option value="../">English</option><option value="../zh/">简体中文</option><option value="../ja/">日本語</option><option value="../ko/" selected>한국어</option><option value="../es/">Español</option><option value="../pt-BR/">Português (Brasil)</option><option value="../de/">Deutsch</option><option value="../fr/">Français</option><option value="../ru/">Русский</option></select>
+  <a class="link" href="https://github.com/yinyue123/RemoDroid/blob/main/doc/ko/README.md" target="_blank" rel="noopener">문서 ↗</a>
+</header>
+<nav class="steps" id="steps" aria-label="설치 단계"></nav>
+<main id="main" aria-live="polite"></main>
+<footer class="foot">
+  <button class="back" id="back" type="button">← 이전</button>
+  <span class="left" id="left"></span>
+  <button class="btn" id="next" type="button">다음 →</button>
+</footer>
+<script>
+(() => {
+'use strict';
+const SITE = location.origin.startsWith('http') && !/^(localhost|127\.)/.test(location.hostname) ? location.origin : 'https://remodroid.pages.dev';
+const REPO = 'yinyue123/RemoDroid';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const main = $('#main');
+const COPY = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const hl = s => esc(s).replace(/(\s)(--?[a-zA-Z-]+)/g, '$1<span class="f">$2</span>').replace(/(\|)/g, '<span class="f">$1</span>');
+const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="복사" data-copy="${esc(t)}">${COPY}</button></div>`;
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); } catch (_) {
+    const ta = document.createElement('textarea'); ta.value = b.dataset.copy; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (__) {} ta.remove();
+  }
+  b.classList.add('ok'); b.innerHTML = '✓'; setTimeout(() => { b.classList.remove('ok'); b.innerHTML = COPY; }, 1400);
+});
+
+/* remembered between visits: which server and which router OS */
+let S = { server: 'self', os: 'openwrt' };
+try { Object.assign(S, JSON.parse(localStorage.getItem('rd-install') || '{}')); } catch (_) {}
+const save = () => { try { localStorage.setItem('rd-install', JSON.stringify(S)); } catch (_) {} };
+
+const STEPS = [
+  { label: '서버', sub: '설치' }, { label: '패널', sub: '설정' }, { label: '에이전트', sub: '설치' },
+  { label: '연결', sub: '등록' }, { label: '휴대폰', sub: 'USB' }, { label: '완료', sub: '플레이' },
+];
+/* "remodroid.example.com" / "http://1.2.3.4:5580/" → "https://remodroid.example.com" / "http://1.2.3.4:5580" */
+function panelUrl(v) {
+  v = String(v || '').trim().replace(/\/+$/, '').replace(/\/(wizard|agent)\.html.*$/, '');
+  if (!v) return '';
+  if (!/^https?:\/\//.test(v)) v = (/^[\d.]+(:\d+)?$/.test(v) ? 'http://' : 'https://') + v;
+  return v;
+}
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">패널 주소</label>
+  <input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  또는  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+  <div class="hint">여기에 저장되어 다음 단계에서 사용됩니다.</div></div></div>`;
+function bindPanel(id, after) {
+  const el = document.getElementById(id);
+  el.addEventListener('change', () => { S.panel = panelUrl(el.value); el.value = S.panel; save(); if (after) after(); });
+}
+let step = Math.min(+(location.hash.match(/^#step(\d)$/) || [0, 1])[1] - 1, STEPS.length - 1);
+if (!(step >= 0)) step = 0;
+
+function renderSteps() {
+  $('#steps').innerHTML = STEPS.map((s, i) => `${i ? `<span class="bar${i <= step ? ' done' : ''}"></span>` : ''}<button class="st${i === step ? ' on' : i < step ? ' done' : ''}" type="button" data-i="${i}"><span class="n">${i < step ? '✓' : i + 1}</span><span><b>${s.label}</b><small>${s.sub}</small></span></button>`).join('');
+  $('#steps').querySelectorAll('[data-i]').forEach(b => b.onclick = () => go(+b.dataset.i));
+  $('#back').disabled = step === 0;
+  const left = STEPS.length - 1 - step;
+  $('#left').textContent = left ? `${left}단계 남음` : '완료';
+  $('#next').hidden = step === STEPS.length - 1;
+}
+function go(i) { step = i; history.replaceState(null, '', '#step' + (i + 1)); renderSteps(); PAGES[i](); window.scrollTo(0, 0); }
+$('#back').onclick = () => go(Math.max(0, step - 1));
+$('#next').onclick = () => go(Math.min(STEPS.length - 1, step + 1));
+const eyebrow = (n, t) => `<p class="eyebrow">${String(n).padStart(2, '0')} — ${t}</p>`;
+
+/* ---------- release assets (for "download the package") ---------- */
+let assets = null;
+async function loadAssets() {
+  if (assets) return assets;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+    const j = await r.json();
+    assets = { tag: j.tag_name, list: (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size })) };
+  } catch (_) { assets = { tag: '', list: [] }; }
+  return assets;
+}
+const MB = n => (n / 1048576).toFixed(1) + ' MB';
+async function fillDownloads(el, who, os, cpu) {
+  const a = await loadAssets();
+  const re = {
+    openwrt: new RegExp(`^remodroid-${who}_.*_(${cpu === 'x86_64' ? 'x86_64' : cpu === 'aarch64' ? 'aarch64_[a-z0-9-]+' : cpu === 'armv7' ? 'arm_[a-z0-9_-]+' : cpu === 'mipsel' ? 'mipsel_24kc' : cpu === 'mips' ? 'mips_24kc' : 'i386_pentium4'})\\.ipk$`),
+    debian: new RegExp(`^remodroid-${who}_.*_${{ x86_64: 'amd64', aarch64: 'arm64', armv7: 'armhf', x86: 'i386' }[cpu] || 'none'}\\.deb$`),
+    rhel: new RegExp(`^remodroid-${who}-.*\\.${{ x86_64: 'x86_64', aarch64: 'aarch64', armv7: 'armv7hl', x86: 'i686' }[cpu] || 'none'}\\.rpm$`),
+    alpine: new RegExp(`^remodroid-${who}_.*_${{ x86_64: 'x86_64', aarch64: 'aarch64', armv7: 'armv7', x86: 'x86' }[cpu] || 'none'}\\.apk$`),
+  }[os];
+  const hits = a.list.filter(x => re.test(x.name));
+  el.innerHTML = hits.length ? hits.map(x => `<a class="btn" style="margin:0 10px 10px 0" href="${esc(x.url)}"><span>다운로드</span><small style="font:12px var(--mono);opacity:.7">${esc(x.name)} · ${MB(x.size)}</small></a>`).join('')
+    : `<p class="note">${esc(a.tag || '최신 릴리스')}에는 이 조합의 패키지가 없습니다. <a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">전체 파일</a>을 확인하세요(<code>.tar.gz</code>는 모든 Linux에서 실행됩니다).</p>`;
+}
+
+const OS = {
+  openwrt: { name: 'OpenWrt', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'opkg install ./remodroid-agent_*.ipk', cpus: ['mipsel', 'mips', 'armv7', 'aarch64', 'x86_64'] },
+  debian: { name: 'Debian · Ubuntu', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo apt install ./remodroid-*.deb', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+  rhel: { name: 'CentOS · Fedora', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo dnf install ./remodroid-*.rpm', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+  alpine: { name: 'Alpine', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'apk add --allow-untrusted ./remodroid-*.apk', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+};
+/* starting what a package installed */
+const SERVER_START = {
+  debian: 'sudo systemctl enable --now remodroid-server',
+  rhel: 'sudo systemctl enable --now remodroid-server',
+  alpine: 'rc-update add remodroid-server && rc-service remodroid-server start',
+};
+const AGENT_START = {
+  openwrt: '/etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent start',
+  debian: 'sudo systemctl enable --now remodroid-agent',
+  rhel: 'sudo systemctl enable --now remodroid-agent',
+  alpine: 'rc-update add remodroid-agent && rc-service remodroid-agent start',
+};
+const CPU = { mipsel: 'MIPS (LE)', mips: 'MIPS (BE)', armv7: 'ARMv7', aarch64: 'ARM64', x86_64: 'x86_64', x86: 'x86' };
+
+/* ---------- 1. server ---------- */
+function pageServer() {
+  const self = S.server === 'self';
+  main.innerHTML = `${eyebrow(1, '서버')}<h1><em>서버</em> 선택</h1>
+    <p class="lede">공유기와 iPhone이 만나는 곳입니다. 직접 운영하는 Linux 머신이나 Cloudflare에서 무료로 실행할 수 있습니다.</p>
+    <div class="choices">
+      <button class="choice" type="button" data-s="cf" aria-pressed="${!self}"><small>서버 불필요</small><b>서버가 없어요</b><span>패널을 Cloudflare Workers에서 실행합니다. 무료 플랜, HTTPS와 TURN 포함.</span></button>
+      <button class="choice" type="button" data-s="self" aria-pressed="${self}"><small>직접 호스팅</small><b>내 서버가 있어요</b><span>공인 IP가 있는 Linux 머신이면 됩니다. 완전한 제어, 자체 TURN 릴레이.</span></button>
+    </div>
+    <div id="detail"></div>`;
+  main.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { S.server = b.dataset.s; save(); pageServer(); });
+  const d = $('#detail');
+  if (self) {
+    const one = `curl -fsSL ${SITE}/install_server.sh | sudo sh`;
+    d.innerHTML = `<div class="num"><i>1</i>한 줄이면 끝, 모든 Linux 지원</div>
+      <p class="bullet">다운로드, 설치, 서버 시작까지 한 번에.</p>
+      ${cmd(one)}
+      <div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ downloading remodroid-server_…_amd64.deb</div><div class="d">▸ starting the service</div><div class="k">✓ the server is running. Open the setup wizard:</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
+      <p class="note">출력되는 링크를 보관하세요. 다음 단계에서 엽니다.</p>
+      <div class="num"><i class="alt">2</i>또는 패키지 설치</div>
+      <div class="seg" id="sos">${['debian', 'rhel', 'alpine'].map(k => `<button type="button" data-os="${k}" aria-selected="${(S.sos || 'debian') === k}">${OS[k].name}</button>`).join('')}</div>
+      <div class="seg" id="scpu">${['x86_64', 'aarch64'].map(k => `<button type="button" data-cpu="${k}" aria-selected="${(S.scpu || 'x86_64') === k}">${CPU[k]}</button>`).join('')}</div>
+      <div id="sdl"><p class="note">최신 릴리스를 확인하는 중…</p></div>
+      ${cmd(OS[S.sos || 'debian'].install.replace('remodroid-', 'remodroid-server').replace('-*', '*'))}
+      <div class="num"><i class="alt">3</i>시작하기</div>
+      <p class="bullet">패키지는 서버를 설치만 합니다. 시작하고, 재부팅 후에도 자동으로 시작되게 하세요:</p>
+      ${cmd(SERVER_START[S.sos || 'debian'])}
+      <p>그런 다음 <code>http://&lt;서버-IP&gt;:5580/wizard.html</code>을 엽니다. 설정 코드는 <code>/var/lib/remodroid/setup-token</code>에 있고, 포트는 <code>/etc/remodroid/server.ini</code>의 <code>listen</code>입니다.</p>`;
+    d.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.sos = b.dataset.os; save(); pageServer(); });
+    d.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.scpu = b.dataset.cpu; save(); pageServer(); });
+    fillDownloads($('#sdl'), 'server', S.sos || 'debian', S.scpu || 'x86_64');
+  } else {
+    const deploy = `git clone https://github.com/${REPO} && cd RemoDroid/worker\nnpm install && npx wrangler deploy`;
+    d.innerHTML = `<div class="num"><i>1</i>TURN 키 만들기</div>
+      <p>네트워크가 직접 연결을 막으면 Cloudflare가 영상을 중계합니다(매월 1,000 GB 무료). <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">대시보드</a>에서 <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>. <b>Turn Token ID</b>와 <b>API Token</b>은 다음 단계에서 쓰니 보관하세요.</p>
+      <div class="num"><i>2</i>Worker 배포</div>
+      <p class="bullet">Node.js가 설치된 컴퓨터에서 실행합니다. 처음 한 번 Cloudflare 로그인을 요청합니다.</p>
+      ${cmd(deploy)}
+      <div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ Uploaded remodroid (web assets, Durable Object "Hub")</div><div class="k">✓ Deployed: https://remodroid.&lt;you&gt;.workers.dev</div></div>
+      <p class="note">터미널 없이: <a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a>를 포크한 뒤, 대시보드에서 <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → 포크 선택 → <b>Root directory: worker</b> → Deploy. 저장소(Durable Object의 데이터베이스)는 자동으로 만들어집니다.</p>`;
+  }
+}
+
+/* ---------- 2. panel: run it, open it, finish its setup ---------- */
+function pagePanel() {
+  const self = S.server === 'self';
+  if (self) {
+    main.innerHTML = `${eyebrow(2, '패널')}<h1><em>패널</em> 열기</h1>
+      <p class="lede">서버가 곧 패널입니다. 서버의 웹 페이지에서 로그인하고, 공유기를 추가하고, 플레이합니다.</p>
+      <div class="num"><i>1</i>서버 실행</div>
+      <p class="bullet">한 줄 설치 프로그램이 이미 시작했습니다. 패키지를 직접 설치했다면 지금 시작하세요:</p>
+      ${cmd('sudo systemctl enable --now remodroid-server')}
+      <p class="note">Alpine: <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · 상태 확인: <code>systemctl status remodroid-server</code> (Alpine: <code>rc-service remodroid-server status</code>)</p>
+      <div class="num"><i>2</i>웹 페이지 열기</div>
+      <p>설치 프로그램이 출력한 링크를 엽니다: <code>http://&lt;서버-IP&gt;:5580/wizard.html?token=…</code>. <b>token</b>은 서버 소유자임을 증명합니다. 링크를 잃어버렸다면 서버에서 token을 확인하세요:</p>
+      ${cmd('sudo cat /var/lib/remodroid/setup-token')}
+      <div class="chips"><small>먼저 열 포트</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443(도메인)</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+      <div class="num"><i>3</i>설정 마법사 완료</div>
+      <p><b>도메인</b>(Let's Encrypt 무료 HTTPS, 자동 갱신), <b>로그인 정보</b>, <b>STUN/TURN 포트</b>를 묻고, <code>/etc/remodroid/server.ini</code>에 저장한 뒤 그 주소로 서버를 재시작합니다. 나중에 같은 페이지(비밀번호로 보호)에서 설정을 바꿀 수 있습니다.</p>
+      <div class="num"><i class="alt">4</i>지금 주소는?</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  } else {
+    main.innerHTML = `${eyebrow(2, '패널')}<h1><em>패널</em> 열기</h1>
+      <p class="lede">Worker가 곧 패널입니다. 로그인하고, 공유기를 추가하고, 플레이하는 웹 페이지입니다.</p>
+      <div class="num"><i>1</i>Worker 열기</div>
+      <p>주소는 <code>wrangler deploy</code> 출력과 대시보드의 <b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b>에 있습니다. 보통 <code>https://remodroid.&lt;계정&gt;.workers.dev</code>입니다.</p>
+      <div class="num"><i>2</i>설정 마법사 완료</div>
+      <p><b>로그인 정보</b>와 이전 단계의 <b>TURN 키</b>(또는 다른 STUN/TURN 서버)를 묻습니다. 나만의 주소를 원하면 Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → 사용자 지정 도메인 추가.</p>
+      <div class="callout">배포 직후 바로 진행하세요. 그 전까지는 첫 방문자가 로그인 정보를 정할 수 있습니다. 안전하게 Worker에 <code>SETUP_TOKEN</code> 변수를 추가하면 마법사가 그 값을 묻습니다.</div>
+      <div class="num"><i class="alt">3</i>주소는?</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  }
+  const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))} 열기 ↗</a>` : ''; };
+  bindPanel('panel', open);
+  open();
+}
+
+/* ---------- 3. agent ---------- */
+function pageAgent() {
+  const o = OS[S.os];
+  const cpu = o.cpus.includes(S.cpu) ? S.cpu : o.cpus[0];
+  main.innerHTML = `${eyebrow(3, '에이전트')}<h1><em>에이전트</em> 설치</h1>
+    <p class="lede">휴대폰이 연결된 공유기에서 실행되며, 직접 패널에 접속합니다. 포트 개방도 공인 주소도 필요 없습니다.</p>
+    <div class="seg">${Object.entries(OS).map(([k, v]) => `<button type="button" data-os="${k}" aria-selected="${k === S.os}">${v.name}</button>`).join('')}</div>
+    <div class="num"><i>1</i>명령 하나</div>
+    <p class="bullet">다운로드, 설치, 에이전트 시작까지 한 번에. 공유기(SSH)에서 실행하세요.</p>
+    ${cmd(o.agent)}
+    <div class="term"><div><span class="p">$</span> ${esc(o.agent)}</div><div class="d">▸ downloading remodroid-agent_…_${S.os === 'openwrt' ? 'mipsel_24kc.ipk' : 'amd64.deb'}</div><div class="d">▸ starting the service</div><div class="k">✓ the agent is running</div></div>
+    <div class="num"><i class="alt">2</i>또는 패키지 다운로드</div>
+    <div class="seg">${o.cpus.map(k => `<button type="button" data-cpu="${k}" aria-selected="${k === cpu}">${CPU[k]}</button>`).join('')}</div>
+    <div id="adl"><p class="note">최신 릴리스를 확인하는 중…</p></div>
+    ${cmd(o.install.replace('remodroid-*', 'remodroid-agent*').replace('remodroid-agent_*', 'remodroid-agent_*'))}
+    <div class="num"><i class="alt">3</i>시작하기</div>
+    <p class="bullet">패키지는 에이전트를 설치만 합니다. 시작하고, 재부팅 후에도 자동으로 시작되게 하세요:</p>
+    ${cmd(AGENT_START[S.os])}
+    <p class="note">이제 패널에 연결하세요: 다음 단계입니다.</p>
+    <div class="chips"><small>필요한 것</small><span class="chip">USB 포트</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle(함께 설치됨)' : 'ca-certificates'}</span><span class="chip">정확한 시간(HTTPS)</span></div>`;
+  main.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.os = b.dataset.os; save(); pageAgent(); });
+  main.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.cpu = b.dataset.cpu; save(); pageAgent(); });
+  fillDownloads($('#adl'), 'agent', S.os, cpu);
+}
+
+/* ---------- 4. connect: the code comes from your panel ---------- */
+function pageConnect() {
+  main.innerHTML = `${eyebrow(4, '연결')}<h1><em>공유기</em> 등록</h1>
+    <p class="lede">공유기는 패널만 만들 수 있는 일회용 코드로 패널에 참여합니다.</p>
+    ${S.panel ? '' : panelField('panel')}
+    <div class="num"><i>1</i>패널의 Agents 탭 열기</div>
+    <p id="routers"></p>
+    <div class="num"><i>2</i>에이전트 추가</div>
+    <p>링크를 열면 <b>Add an agent → Connect</b>가 열립니다(직접 클릭해도 됩니다). 패널에 <code>X5SX-K3M7</code> 같은 코드가 표시됩니다. 한 번만 쓸 수 있고 <b>10분</b> 동안 유효합니다. 그 페이지에 복사 버튼이 있는 전체 명령이 있으며, 여기에 코드를 입력해도 됩니다.</p>
+    <div class="form"><div class="field"><label for="code">패널의 코드</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+    <div class="num"><i>3</i>공유기에서 실행</div>
+    <div id="enroll"></div>
+    <div class="term" id="term"></div>
+    <p class="note"><b>bound</b>라고 나오면 패널 페이지도 초록색으로 바뀝니다. 이후 공유기의 영상, 휴대폰, 클립보드 설정은 패널의 Agents 탭에서 바꾸며, ini를 편집할 필요가 없습니다.</p>`;
+  const draw = () => {
+    const code = ($('#code').value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const c = code.length === 8 ? code.slice(0, 4) + '-' + code.slice(4) : '';
+    const p = S.panel || 'https://your.panel';
+    const line = `remodroid enroll --panel ${p} --code ${c || 'XXXX-XXXX'}`;
+    $('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html 열기 ↗</a>`
+      : '위에 패널 주소를 입력하거나, 직접 패널을 열고 <b>Agents → Add</b>로 이동하세요.';
+    $('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? '위에 패널의 코드를 입력하세요.' : '패널 주소와 코드를 입력하세요.'}</p>`;
+    $('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ contacting the panel ${esc(p)}…</div><div class="d">▸ enrolled as "OpenWrt" (openwrt); saved in /etc/remodroid/agent.ini</div><div class="k">✓ bound — this router is online</div>`;
+  };
+  $('#code').addEventListener('input', draw);
+  if (!S.panel) bindPanel('panel', () => pageConnect());
+  draw();
+}
+
+/* ---------- 5. phone ---------- */
+function pagePhone() {
+  main.innerHTML = `${eyebrow(5, '휴대폰')}<h1><em>휴대폰</em> 연결</h1>
+    <p class="lede">휴대폰마다 한 번만. Android 8 이상. 하드웨어 H.265 인코더가 있으면 좋지만 필수는 아닙니다.</p>
+    <div class="num"><i>1</i>USB 디버깅 켜기</div>
+    <p>설정 → 휴대전화 정보 → <b>빌드 번호</b>를 일곱 번 탭. 그다음 설정 → 시스템 → <b>개발자 옵션</b> → <b>USB 디버깅</b>.</p>
+    <div class="num"><i>2</i>공유기의 USB 포트에 연결</div>
+    <p>충전 전용이 아닌 데이터 케이블을 쓰세요. 에이전트가 알아서 휴대폰을 찾아 작은 서버를 설치합니다(Play 스토어에서 받는 것은 없습니다).</p>
+    <div class="num"><i>3</i>공유기 허용</div>
+    <p>휴대폰에 <b>“USB 디버깅을 허용하시겠습니까?”</b>가 뜹니다. <b>이 컴퓨터에서 항상 허용</b>을 체크하고 <b>허용</b>을 탭하세요. ${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">패널의 Agents 탭</a>` : '패널의 Agents 탭'} 에 휴대폰이 준비됨으로 표시됩니다.</p>`;
+}
+
+/* ---------- 6. done ---------- */
+function pageDone() {
+  main.innerHTML = `${eyebrow(6, '완료')}<h1>이제 <em>플레이</em>하세요</h1>
+    <p class="lede">iPhone의 Safari에서 패널을 열고 로그인한 뒤, <b>공유</b> → <b>홈 화면에 추가</b>하면 전체 화면으로 쓸 수 있습니다.</p>
+    <dl class="kv"><dt>터치</dt><dd>멀티 터치가 그대로 휴대폰에 전달됩니다. 플로팅 볼로 메뉴를 엽니다.</dd>
+      <dt>화질</dt><dd>메뉴 → Settings: 해상도, 프레임 레이트, 비트레이트, H.265 또는 H.264.</dd>
+      <dt>사진</dt><dd>메뉴 → Photo: iPhone에서 휴대폰 갤러리로.</dd>
+      <dt>클립보드</dt><dd>텍스트를 양방향으로. HTTPS에서는 탭 한 번.</dd></dl>
+    <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">패널 열기 ↗</a> ` : ''}<a class="btn ghost" href="https://github.com/${REPO}/blob/main/doc/ko/README.md" target="_blank" rel="noopener">문서 읽기 ↗</a></p>`;
+}
+
+const PAGES = [pageServer, pagePanel, pageAgent, pageConnect, pagePhone, pageDone];
+go(step);
+})();
+</script>
+</body>
+</html>

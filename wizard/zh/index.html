@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>安装 RemoDroid</title>
+<meta name="description" content="在 iPhone 上玩你的安卓手机：安装 RemoDroid 服务端（或使用 Cloudflare）、路由器代理，再把它们连起来。">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../setup.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./"><i>RD</i>RemoDroid</a>
+  <span class="spacer"></span>
+  <select class="link" aria-label="语言" onchange="location.href=this.value" style="appearance:none;-webkit-appearance:none;background:none;cursor:pointer"><option value="../">English</option><option value="../zh/" selected>简体中文</option><option value="../ja/">日本語</option><option value="../ko/">한국어</option><option value="../es/">Español</option><option value="../pt-BR/">Português (Brasil)</option><option value="../de/">Deutsch</option><option value="../fr/">Français</option><option value="../ru/">Русский</option></select>
+  <a class="link" href="https://github.com/yinyue123/RemoDroid/blob/main/doc/zh/README.md" target="_blank" rel="noopener">文档 ↗</a>
+</header>
+<nav class="steps" id="steps" aria-label="安装步骤"></nav>
+<main id="main" aria-live="polite"></main>
+<footer class="foot">
+  <button class="back" id="back" type="button">← 上一步</button>
+  <span class="left" id="left"></span>
+  <button class="btn" id="next" type="button">下一步 →</button>
+</footer>
+<script>
+(() => {
+'use strict';
+const SITE = location.origin.startsWith('http') && !/^(localhost|127\.)/.test(location.hostname) ? location.origin : 'https://remodroid.pages.dev';
+const REPO = 'yinyue123/RemoDroid';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const main = $('#main');
+const COPY = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const hl = s => esc(s).replace(/(\s)(--?[a-zA-Z-]+)/g, '$1<span class="f">$2</span>').replace(/(\|)/g, '<span class="f">$1</span>');
+const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="复制" data-copy="${esc(t)}">${COPY}</button></div>`;
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); } catch (_) {
+    const ta = document.createElement('textarea'); ta.value = b.dataset.copy; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (__) {} ta.remove();
+  }
+  b.classList.add('ok'); b.innerHTML = '✓'; setTimeout(() => { b.classList.remove('ok'); b.innerHTML = COPY; }, 1400);
+});
+
+/* remembered between visits: which server and which router OS */
+let S = { server: 'self', os: 'openwrt' };
+try { Object.assign(S, JSON.parse(localStorage.getItem('rd-install') || '{}')); } catch (_) {}
+const save = () => { try { localStorage.setItem('rd-install', JSON.stringify(S)); } catch (_) {} };
+
+const STEPS = [
+  { label: '服务端', sub: '安装' }, { label: '面板', sub: '设置' }, { label: '代理', sub: '安装' },
+  { label: '连接', sub: '绑定' }, { label: '手机', sub: 'USB' }, { label: '完成', sub: '开玩' },
+];
+/* "remodroid.example.com" / "http://1.2.3.4:5580/" → "https://remodroid.example.com" / "http://1.2.3.4:5580" */
+function panelUrl(v) {
+  v = String(v || '').trim().replace(/\/+$/, '').replace(/\/(wizard|agent)\.html.*$/, '');
+  if (!v) return '';
+  if (!/^https?:\/\//.test(v)) v = (/^[\d.]+(:\d+)?$/.test(v) ? 'http://' : 'https://') + v;
+  return v;
+}
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">你的面板地址</label>
+  <input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  或  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+  <div class="hint">会记在这里，后面的步骤直接使用。</div></div></div>`;
+function bindPanel(id, after) {
+  const el = document.getElementById(id);
+  el.addEventListener('change', () => { S.panel = panelUrl(el.value); el.value = S.panel; save(); if (after) after(); });
+}
+let step = Math.min(+(location.hash.match(/^#step(\d)$/) || [0, 1])[1] - 1, STEPS.length - 1);
+if (!(step >= 0)) step = 0;
+
+function renderSteps() {
+  $('#steps').innerHTML = STEPS.map((s, i) => `${i ? `<span class="bar${i <= step ? ' done' : ''}"></span>` : ''}<button class="st${i === step ? ' on' : i < step ? ' done' : ''}" type="button" data-i="${i}"><span class="n">${i < step ? '✓' : i + 1}</span><span><b>${s.label}</b><small>${s.sub}</small></span></button>`).join('');
+  $('#steps').querySelectorAll('[data-i]').forEach(b => b.onclick = () => go(+b.dataset.i));
+  $('#back').disabled = step === 0;
+  const left = STEPS.length - 1 - step;
+  $('#left').textContent = left ? `还剩 ${left} 步` : '全部完成';
+  $('#next').hidden = step === STEPS.length - 1;
+}
+function go(i) { step = i; history.replaceState(null, '', '#step' + (i + 1)); renderSteps(); PAGES[i](); window.scrollTo(0, 0); }
+$('#back').onclick = () => go(Math.max(0, step - 1));
+$('#next').onclick = () => go(Math.min(STEPS.length - 1, step + 1));
+const eyebrow = (n, t) => `<p class="eyebrow">${String(n).padStart(2, '0')} — ${t}</p>`;
+
+/* ---------- release assets (for "download the package") ---------- */
+let assets = null;
+async function loadAssets() {
+  if (assets) return assets;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+    const j = await r.json();
+    assets = { tag: j.tag_name, list: (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size })) };
+  } catch (_) { assets = { tag: '', list: [] }; }
+  return assets;
+}
+const MB = n => (n / 1048576).toFixed(1) + ' MB';
+async function fillDownloads(el, who, os, cpu) {
+  const a = await loadAssets();
+  const re = {
+    openwrt: new RegExp(`^remodroid-${who}_.*_(${cpu === 'x86_64' ? 'x86_64' : cpu === 'aarch64' ? 'aarch64_[a-z0-9-]+' : cpu === 'armv7' ? 'arm_[a-z0-9_-]+' : cpu === 'mipsel' ? 'mipsel_24kc' : cpu === 'mips' ? 'mips_24kc' : 'i386_pentium4'})\\.ipk$`),
+    debian: new RegExp(`^remodroid-${who}_.*_${{ x86_64: 'amd64', aarch64: 'arm64', armv7: 'armhf', x86: 'i386' }[cpu] || 'none'}\\.deb$`),
+    rhel: new RegExp(`^remodroid-${who}-.*\\.${{ x86_64: 'x86_64', aarch64: 'aarch64', armv7: 'armv7hl', x86: 'i686' }[cpu] || 'none'}\\.rpm$`),
+    alpine: new RegExp(`^remodroid-${who}_.*_${{ x86_64: 'x86_64', aarch64: 'aarch64', armv7: 'armv7', x86: 'x86' }[cpu] || 'none'}\\.apk$`),
+  }[os];
+  const hits = a.list.filter(x => re.test(x.name));
+  el.innerHTML = hits.length ? hits.map(x => `<a class="btn" style="margin:0 10px 10px 0" href="${esc(x.url)}"><span>下载</span><small style="font:12px var(--mono);opacity:.7">${esc(x.name)} · ${MB(x.size)}</small></a>`).join('')
+    : `<p class="note">${esc(a.tag || '最新版本')} 里没有这个组合的安装包。请看<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">全部文件</a>（<code>.tar.gz</code> 可在任何 Linux 上运行）。</p>`;
+}
+
+const OS = {
+  openwrt: { name: 'OpenWrt', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'opkg install ./remodroid-agent_*.ipk', cpus: ['mipsel', 'mips', 'armv7', 'aarch64', 'x86_64'] },
+  debian: { name: 'Debian · Ubuntu', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo apt install ./remodroid-*.deb', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+  rhel: { name: 'CentOS · Fedora', agent: `curl -fsSL ${SITE}/install_agent.sh | sudo sh`, install: 'sudo dnf install ./remodroid-*.rpm', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+  alpine: { name: 'Alpine', agent: `wget -qO- ${SITE}/install_agent.sh | sh`, install: 'apk add --allow-untrusted ./remodroid-*.apk', cpus: ['x86_64', 'aarch64', 'armv7', 'x86'] },
+};
+/* starting what a package installed */
+const SERVER_START = {
+  debian: 'sudo systemctl enable --now remodroid-server',
+  rhel: 'sudo systemctl enable --now remodroid-server',
+  alpine: 'rc-update add remodroid-server && rc-service remodroid-server start',
+};
+const AGENT_START = {
+  openwrt: '/etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent start',
+  debian: 'sudo systemctl enable --now remodroid-agent',
+  rhel: 'sudo systemctl enable --now remodroid-agent',
+  alpine: 'rc-update add remodroid-agent && rc-service remodroid-agent start',
+};
+const CPU = { mipsel: 'MIPS (LE)', mips: 'MIPS (BE)', armv7: 'ARMv7', aarch64: 'ARM64', x86_64: 'x86_64', x86: 'x86' };
+
+/* ---------- 1. server ---------- */
+function pageServer() {
+  const self = S.server === 'self';
+  main.innerHTML = `${eyebrow(1, '服务端')}<h1>选择<em>服务端</em></h1>
+    <p class="lede">路由器和 iPhone 在这里会合。可以装在你自己的 Linux 机器上，也可以免费跑在 Cloudflare 上。</p>
+    <div class="choices">
+      <button class="choice" type="button" data-s="cf" aria-pressed="${!self}"><small>不需要服务器</small><b>我没有服务器</b><span>把面板跑在 Cloudflare Workers 上。免费套餐，自带 HTTPS 和 TURN。</span></button>
+      <button class="choice" type="button" data-s="self" aria-pressed="${self}"><small>自建</small><b>我有自己的服务器</b><span>任何有公网 IP 的 Linux 机器。完全自主，自带 TURN 中继。</span></button>
+    </div>
+    <div id="detail"></div>`;
+  main.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { S.server = b.dataset.s; save(); pageServer(); });
+  const d = $('#detail');
+  if (self) {
+    const one = `curl -fsSL ${SITE}/install_server.sh | sudo sh`;
+    d.innerHTML = `<div class="num"><i>1</i>一行命令，任何 Linux 都能用</div>
+      <p class="bullet">下载、安装、启动服务端，一步完成。</p>
+      ${cmd(one)}
+      <div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ downloading remodroid-server_…_amd64.deb</div><div class="d">▸ starting the service</div><div class="k">✓ the server is running. Open the setup wizard:</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
+      <p class="note">记下它打印的链接：下一步要打开它。</p>
+      <div class="num"><i class="alt">2</i>或者安装软件包</div>
+      <div class="seg" id="sos">${['debian', 'rhel', 'alpine'].map(k => `<button type="button" data-os="${k}" aria-selected="${(S.sos || 'debian') === k}">${OS[k].name}</button>`).join('')}</div>
+      <div class="seg" id="scpu">${['x86_64', 'aarch64'].map(k => `<button type="button" data-cpu="${k}" aria-selected="${(S.scpu || 'x86_64') === k}">${CPU[k]}</button>`).join('')}</div>
+      <div id="sdl"><p class="note">正在查找最新版本…</p></div>
+      ${cmd(OS[S.sos || 'debian'].install.replace('remodroid-', 'remodroid-server').replace('-*', '*'))}
+      <div class="num"><i class="alt">3</i>启动它</div>
+      <p class="bullet">软件包只负责安装服务端。启动它，并设置开机自启：</p>
+      ${cmd(SERVER_START[S.sos || 'debian'])}
+      <p>然后打开 <code>http://&lt;服务器IP&gt;:5580/wizard.html</code>。设置码在 <code>/var/lib/remodroid/setup-token</code>；端口是 <code>/etc/remodroid/server.ini</code> 里的 <code>listen</code>。</p>`;
+    d.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.sos = b.dataset.os; save(); pageServer(); });
+    d.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.scpu = b.dataset.cpu; save(); pageServer(); });
+    fillDownloads($('#sdl'), 'server', S.sos || 'debian', S.scpu || 'x86_64');
+  } else {
+    const deploy = `git clone https://github.com/${REPO} && cd RemoDroid/worker\nnpm install && npx wrangler deploy`;
+    d.innerHTML = `<div class="num"><i>1</i>创建 TURN 密钥</div>
+      <p>网络阻断直连时，由 Cloudflare 中继视频（每月 1,000 GB 免费）。在 <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">控制台</a>：<b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>。保存好 <b>Turn Token ID</b> 和 <b>API Token</b>，下一步要用。</p>
+      <div class="num"><i>2</i>部署 Worker</div>
+      <p class="bullet">在一台装了 Node.js 的电脑上运行，第一次会让你登录 Cloudflare。</p>
+      ${cmd(deploy)}
+      <div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ Uploaded remodroid (web assets, Durable Object "Hub")</div><div class="k">✓ Deployed: https://remodroid.&lt;you&gt;.workers.dev</div></div>
+      <p class="note">不想用终端：先 fork <a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a>，然后在控制台 <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → 选你的 fork → <b>Root directory: worker</b> → Deploy。存储（Durable Object 的数据库）会自动创建。</p>`;
+  }
+}
+
+/* ---------- 2. panel: run it, open it, finish its setup ---------- */
+function pagePanel() {
+  const self = S.server === 'self';
+  if (self) {
+    main.innerHTML = `${eyebrow(2, '面板')}<h1>打开你的<em>面板</em></h1>
+      <p class="lede">服务端就是面板：一个在你服务器上的网页，用来登录、添加路由器和开玩。</p>
+      <div class="num"><i>1</i>运行服务端</div>
+      <p class="bullet">一行安装命令已经启动了它。自己装的软件包？现在启动：</p>
+      ${cmd('sudo systemctl enable --now remodroid-server')}
+      <p class="note">Alpine: <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · 查看状态：<code>systemctl status remodroid-server</code> (Alpine: <code>rc-service remodroid-server status</code>)</p>
+      <div class="num"><i>2</i>打开它的网页</div>
+      <p>打开安装程序打印的链接：<code>http://&lt;服务器IP&gt;:5580/wizard.html?token=…</code>。<b>token</b> 证明服务器是你的。链接丢了？在服务器上读取 token：</p>
+      ${cmd('sudo cat /var/lib/remodroid/setup-token')}
+      <div class="chips"><small>先放行</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443（域名）</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+      <div class="num"><i>3</i>完成设置向导</div>
+      <p>它会询问<b>域名</b>（Let's Encrypt 免费 HTTPS，自动续期）、<b>你的登录账号</b>和 <b>STUN/TURN 端口</b>，写入 <code>/etc/remodroid/server.ini</code>，然后在你的地址上重启服务端。以后同一个页面（需要密码）可以修改设置。</p>
+      <div class="num"><i class="alt">4</i>它现在在哪里？</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  } else {
+    main.innerHTML = `${eyebrow(2, '面板')}<h1>打开你的<em>面板</em></h1>
+      <p class="lede">你的 Worker 就是面板：一个用来登录、添加路由器和开玩的网页。</p>
+      <div class="num"><i>1</i>打开你的 Worker</div>
+      <p>地址由 <code>wrangler deploy</code> 打印，也可在控制台查看：<b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b>。通常是 <code>https://remodroid.&lt;你&gt;.workers.dev</code>。</p>
+      <div class="num"><i>2</i>完成设置向导</div>
+      <p>它会询问<b>你的登录账号</b>和上一步的 <b>TURN 密钥</b>（或其他 STUN/TURN 服务器）。想用自己的域名？Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → 添加自定义域名。</p>
+      <div class="callout">部署后马上完成这一步：在那之前，第一个访问的人可以设定登录账号。保险起见，给 Worker 加一个变量 <code>SETUP_TOKEN</code>，向导就会要求输入它。</div>
+      <div class="num"><i class="alt">3</i>它在哪里？</div>
+      ${panelField('panel')}
+      <p id="open"></p>`;
+  }
+  const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">打开 ${esc(S.panel.replace(/^https?:\/\//, ''))} ↗</a>` : ''; };
+  bindPanel('panel', open);
+  open();
+}
+
+/* ---------- 3. agent ---------- */
+function pageAgent() {
+  const o = OS[S.os];
+  const cpu = o.cpus.includes(S.cpu) ? S.cpu : o.cpus[0];
+  main.innerHTML = `${eyebrow(3, '代理')}<h1>安装<em>代理</em></h1>
+    <p class="lede">它运行在插着手机的路由器上，主动连接你的面板。不用开端口，也不需要公网地址。</p>
+    <div class="seg">${Object.entries(OS).map(([k, v]) => `<button type="button" data-os="${k}" aria-selected="${k === S.os}">${v.name}</button>`).join('')}</div>
+    <div class="num"><i>1</i>一条命令</div>
+    <p class="bullet">下载、安装、启动代理，一步完成。在路由器上（SSH）运行。</p>
+    ${cmd(o.agent)}
+    <div class="term"><div><span class="p">$</span> ${esc(o.agent)}</div><div class="d">▸ downloading remodroid-agent_…_${S.os === 'openwrt' ? 'mipsel_24kc.ipk' : 'amd64.deb'}</div><div class="d">▸ starting the service</div><div class="k">✓ the agent is running</div></div>
+    <div class="num"><i class="alt">2</i>或者下载软件包</div>
+    <div class="seg">${o.cpus.map(k => `<button type="button" data-cpu="${k}" aria-selected="${k === cpu}">${CPU[k]}</button>`).join('')}</div>
+    <div id="adl"><p class="note">正在查找最新版本…</p></div>
+    ${cmd(o.install.replace('remodroid-*', 'remodroid-agent*').replace('remodroid-agent_*', 'remodroid-agent_*'))}
+    <div class="num"><i class="alt">3</i>启动它</div>
+    <p class="bullet">软件包只负责安装代理。启动它，并设置开机自启：</p>
+    ${cmd(AGENT_START[S.os])}
+    <p class="note">然后把它连到你的面板：下一步。</p>
+    <div class="chips"><small>需要</small><span class="chip">一个 USB 口</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle（随包安装）' : 'ca-certificates'}</span><span class="chip">正确的时间（HTTPS）</span></div>`;
+  main.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { S.os = b.dataset.os; save(); pageAgent(); });
+  main.querySelectorAll('[data-cpu]').forEach(b => b.onclick = () => { S.cpu = b.dataset.cpu; save(); pageAgent(); });
+  fillDownloads($('#adl'), 'agent', S.os, cpu);
+}
+
+/* ---------- 4. connect: the code comes from your panel ---------- */
+function pageConnect() {
+  main.innerHTML = `${eyebrow(4, '连接')}<h1>绑定<em>路由器</em></h1>
+    <p class="lede">路由器用一次性配对码加入你的面板，只有你的面板能生成这个码。</p>
+    ${S.panel ? '' : panelField('panel')}
+    <div class="num"><i>1</i>打开面板的 Agents 页</div>
+    <p id="routers"></p>
+    <div class="num"><i>2</i>添加代理</div>
+    <p>这个链接会打开 <b>Add an agent → Connect</b>（也可以自己点）。面板会显示一个配对码，比如 <code>X5SX-K3M7</code>：只能用一次，<b>10 分钟</b>内有效。那个页面有带复制按钮的完整命令；也可以把码填在这里。</p>
+    <div class="form"><div class="field"><label for="code">面板上的配对码</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+    <div class="num"><i>3</i>在路由器上运行</div>
+    <div id="enroll"></div>
+    <div class="term" id="term"></div>
+    <p class="note">显示 <b>bound</b> 时，面板页面也会变绿。之后路由器的视频、手机和剪贴板设置都在面板的 Agents 页里修改，不用改 ini。</p>`;
+  const draw = () => {
+    const code = ($('#code').value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const c = code.length === 8 ? code.slice(0, 4) + '-' + code.slice(4) : '';
+    const p = S.panel || 'https://your.panel';
+    const line = `remodroid enroll --panel ${p} --code ${c || 'XXXX-XXXX'}`;
+    $('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">打开 ${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html ↗</a>`
+      : '在上面填入面板地址，或者自己打开面板，进入 <b>Agents → Add</b>。';
+    $('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? '在上面填入面板上的配对码。' : '填入面板地址和配对码。'}</p>`;
+    $('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ contacting the panel ${esc(p)}…</div><div class="d">▸ enrolled as "OpenWrt" (openwrt); saved in /etc/remodroid/agent.ini</div><div class="k">✓ bound — this router is online</div>`;
+  };
+  $('#code').addEventListener('input', draw);
+  if (!S.panel) bindPanel('panel', () => pageConnect());
+  draw();
+}
+
+/* ---------- 5. phone ---------- */
+function pagePhone() {
+  main.innerHTML = `${eyebrow(5, '手机')}<h1>插上<em>手机</em></h1>
+    <p class="lede">每台手机只需一次。Android 8 及以上；有硬件 H.265 编码器更好，但不是必须。</p>
+    <div class="num"><i>1</i>打开 USB 调试</div>
+    <p>设置 → 关于手机 → 连续点击 <b>版本号</b> 七次。然后 设置 → 系统 → <b>开发者选项</b> → <b>USB 调试</b>。</p>
+    <div class="num"><i>2</i>接到路由器的 USB 口</div>
+    <p>要用数据线，不能用只能充电的线。代理会自己找到手机，并在上面装好它的小服务端（不需要应用商店）。</p>
+    <div class="num"><i>3</i>允许路由器</div>
+    <p>手机会弹出<b>“允许 USB 调试吗？”</b>。勾选<b>一律允许使用这台计算机进行调试</b>，再点<b>允许</b>。${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">面板的 Agents 页</a>` : '面板的 Agents 页'} 会显示手机已就绪。</p>`;
+}
+
+/* ---------- 6. done ---------- */
+function pageDone() {
+  main.innerHTML = `${eyebrow(6, '完成')}<h1>可以<em>开玩</em>了</h1>
+    <p class="lede">在 iPhone 的 Safari 里打开面板并登录，然后 <b>共享</b> → <b>添加到主屏幕</b>，就能全屏使用。</p>
+    <dl class="kv"><dt>触控</dt><dd>多点触控直接传到手机；悬浮球打开菜单。</dd>
+      <dt>画质</dt><dd>菜单 → Settings：分辨率、帧率、码率、H.265 或 H.264。</dd>
+      <dt>照片</dt><dd>菜单 → Photo：从 iPhone 传到手机相册。</dd>
+      <dt>剪贴板</dt><dd>双向同步文字；HTTPS 下一键完成。</dd></dl>
+    <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">打开你的面板 ↗</a> ` : ''}<a class="btn ghost" href="https://github.com/${REPO}/blob/main/doc/zh/README.md" target="_blank" rel="noopener">阅读文档 ↗</a></p>`;
+}
+
+const PAGES = [pageServer, pagePanel, pageAgent, pageConnect, pagePhone, pageDone];
+go(step);
+})();
+</script>
+</body>
+</html>
