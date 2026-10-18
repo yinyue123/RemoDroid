@@ -11,6 +11,7 @@ typedef struct pend {
     conn_t *c;
     unsigned gen;
     device_t *dev;
+    int raw;           /* AI API: the agent answers with one binary message (hub_on_binary) */
     ev_timer t;
     struct pend *next;
 } pend_t;
@@ -484,7 +485,7 @@ static void pend_timeout(struct ev_loop *loop, ev_timer *w, int revents)
     pend_free(p);
 }
 
-void hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *payload)
+static void forward(conn_t *c, device_t *d, const char *type, cJSON *payload, int raw, double timeout)
 {
     if (!online(d)) {
         cJSON_Delete(payload);
@@ -496,7 +497,8 @@ void hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *payload)
     p->c = c;
     p->gen = c->gen;
     p->dev = d;
-    ev_timer_init(&p->t, pend_timeout, 15., 0.);
+    p->raw = raw;
+    ev_timer_init(&p->t, pend_timeout, timeout, 0.);
     p->t.data = p;
     ev_timer_start(S.loop, &p->t);
     p->next = pends;
@@ -505,4 +507,60 @@ void hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *payload)
     cJSON *m = msg_new(type, p->id, NULL);
     cJSON_ReplaceItemInObjectCaseSensitive(m, "d", payload);
     ws_send_json(d->agent, m);
+}
+
+void hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *payload) { forward(c, d, type, payload, 0, 15.); }
+
+void hub_forward_api(conn_t *c, device_t *d, const char *op, cJSON *args)
+{
+    cJSON *p = cJSON_CreateObject();
+    cJSON_AddStringToObject(p, "op", op);
+    cJSON_AddItemToObject(p, "args", args ? args : cJSON_CreateObject());
+    forward(c, d, "api", p, 1, 45.); /* the phone may wait up to 30 s for the UI */
+}
+
+/* An AI API response from the agent: u32 header length | {"id", "status", "type", "headers"} | body. */
+void hub_on_binary(conn_t *c, const uint8_t *m, size_t n)
+{
+    if (c->role != ROLE_AGENT || !c->dev || n < 4)
+        return;
+    uint32_t hl = rd_get_be32(m);
+    if (hl > n - 4)
+        return;
+    cJSON *h = cJSON_ParseWithLength((const char *)m + 4, hl);
+    long id = (long)msg_num(h, "id", 0);
+    for (pend_t *p = pends; p; p = p->next) {
+        if (p->id != id || !p->raw || p->dev != c->dev)
+            continue;
+        conn_t *v = p->c;
+        if (v && v->gen == p->gen && v->fd >= 0) {
+            char extra[1024] = "";
+            size_t el = 0;
+            cJSON *hs = cJSON_GetObjectItemCaseSensitive(h, "headers");
+            for (cJSON *it = cJSON_IsObject(hs) ? hs->child : NULL; it; it = it->next) {
+                char val[128];
+                if (cJSON_IsNumber(it))
+                    snprintf(val, sizeof val, "%.0f", it->valuedouble);
+                else if (cJSON_IsString(it))
+                    snprintf(val, sizeof val, "%s", it->valuestring);
+                else
+                    continue;
+                if (strncmp(it->string, "X-RD-", 5) || strpbrk(it->string, "\r\n: ") || strpbrk(val, "\r\n"))
+                    continue;
+                int w = snprintf(extra + el, sizeof extra - el, "%s: %s\r\n", it->string, val);
+                if (w < 0 || (size_t)w >= sizeof extra - el)
+                    break;
+                el += (size_t)w;
+            }
+            const char *type = msg_str(h, "type", "application/octet-stream");
+            int status = (int)msg_num(h, "status", 502);
+            v->busy = 0;
+            http_respond(v, status >= 100 && status < 600 ? status : 502, strpbrk(type, "\r\n") ? "application/octet-stream" : type,
+                         m + 4 + hl, n - 4 - hl, extra);
+            ev_feed_fd_event(S.loop, v->fd, EV_READ);
+        }
+        pend_free(p);
+        break;
+    }
+    cJSON_Delete(h);
 }

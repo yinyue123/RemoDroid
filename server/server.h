@@ -136,6 +136,12 @@ void        auth_load_sessions(const char *path); /* at startup; removes the fil
 int         auth_fail(conn_t *c);
 int         auth_locked(conn_t *c);
 const char *user_hash(const char *name);
+/* API tokens: "Authorization: Bearer <name>.<secret>" checked against [api_tokens]
+ * name = <sha256 hex of the whole token> [scopes]. Returns like auth_basic; on success
+ * name_out = "token:<name>" and scopes_out = e.g. "ui,screenshot,control". */
+int         auth_bearer(const http_req_t *r, conn_t *c, char *name_out, size_t name_cap, char *scopes_out,
+                        size_t scopes_cap);
+#define API_SCOPES_ALL "ui,screenshot,control"
 
 /* hub.c */
 void      hub_init_devices(void);
@@ -151,6 +157,10 @@ void      hub_on_message(conn_t *c, cJSON *m);
 void      hub_conn_closed(conn_t *c);
 /* REST: forwards a request to the agent and answers c when the agent replies. */
 void      hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *d_payload);
+/* AI API (skill-plan.md): op "ui" | "screenshot" | "action" | "capabilities"; takes args. The
+ * agent's binary reply (hub_on_binary) becomes the HTTP response as is. */
+void      hub_forward_api(conn_t *c, device_t *d, const char *op, cJSON *args);
+void      hub_on_binary(conn_t *c, const uint8_t *m, size_t n);
 
 /* tls.c: HTTPS on the [tls] listener (mbedTLS) */
 enum { TLS_AGAIN = -2 };
@@ -187,5 +197,6 @@ int turn_start(void);
 
 /* api.c */
 void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expires_ms, const char *sess_id);
+void api_token_handle(conn_t *c, const http_req_t *r, const char *who, const char *scopes);
 
 #endif

@@ -18,6 +18,8 @@ final class Controller {
     private long downTime;
     private volatile int width = 1080, height = 2400;
     long events;
+    /** Uptime of the viewer's last input; the AI API yields to a person (Actions.VIEWER_GRACE_MS). */
+    static volatile long lastInputAt;
 
     Controller(Device device) {
         this.device = device;
@@ -36,6 +38,7 @@ final class Controller {
     }
 
     void handle(byte[] msg) {
+        lastInputAt = SystemClock.uptimeMillis();
         ByteBuffer b = ByteBuffer.wrap(msg);
         if (msg.length >= 14 && msg[0] == 0x01) {
             int action = b.get(1) & 0xff, pid = b.get(2) & 0xff;

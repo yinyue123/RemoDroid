@@ -51,3 +51,8 @@ upload_dir = /sdcard/DCIM/RemoDroid
 media_scan = true
 overwrite = false
 max_mb = 2048                      ; largest file for push/pull
+
+[api]
+; AI control API (skill-plan.md): UI as JSON, screenshots, taps/typing; clients: python/ (rd, remodroid)
+listen =                           ; empty = off; e.g. 127.0.0.1:8790, or 0.0.0.0:8790 for the LAN (needs a token)
+token =                            ; callers send "Authorization: Bearer <token>"; make one with: head -c 24 /dev/urandom | xxd -p

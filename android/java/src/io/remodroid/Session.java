@@ -251,6 +251,7 @@ final class Session implements ScreenEncoder.Listener {
         String t = m.optString("t");
         JSONObject d = m.optJSONObject("d");
         if (d == null) d = new JSONObject();
+        if ("key".equals(t) || "nav".equals(t) || "text".equals(t)) Controller.lastInputAt = android.os.SystemClock.uptimeMillis();
         try {
             switch (t) {
                 case "quality.set": {

@@ -82,6 +82,7 @@ test: all
 	node tests/run.mjs $(OUT)
 	node tests/tls.mjs $(OUT)   # PEBBLE_DIR=<pebble binaries> adds the ACME tests
 	node tests/setup.mjs $(OUT)
+	python3 tests/python_sdk.py
 
 # the Cloudflare Worker under wrangler dev (needs: cd worker && npm install)
 test-worker: all
@@ -111,7 +112,7 @@ include android/native/rtc.mk
 
 # Offline installer for the Koolshare/KoolCenter software center.
 # Requires build/out/$(ARCH) and build/android (or BIN/PHONE environment overrides).
-VERSION ?= 0.3.5
+VERSION ?= 0.4
 ARCH ?= armv7
 package-merlin:
 	./packaging/merlin/build.sh "$(VERSION)" "$(ARCH)"

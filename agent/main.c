@@ -170,6 +170,7 @@ int agent_reload_apply(void)
         strcmp(old_ca, A.ca_file))
         wsc_restart();
     phone_config_changed();
+    http_api_start();
     return 0;
 }
 
@@ -227,6 +228,7 @@ int main(int argc, char **argv)
                                !strncmp(adbt, "tcp:", 4) ? adbt + 4 : NULL);
     if (cli_server_start() < 0)
         LOGW("CLI socket %s unavailable: %s", A.sock_path, strerror(errno));
+    http_api_start();
     if (A.url[0])
         wsc_start();
     else

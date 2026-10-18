@@ -51,6 +51,7 @@ const char      *transport_problem(const transport_mgr_t *m); /* e.g. "held by a
 /* wsc.c: WebSocket client to the server */
 void wsc_start(void);
 void wsc_send(cJSON *m); /* frees m; dropped while disconnected */
+void wsc_send_binary(const void *data, size_t n); /* dropped while disconnected */
 int  wsc_online(void);
 void wsc_restart(void);
 
@@ -65,6 +66,25 @@ cJSON *phone_server_log_tail(int lines);
 int    phone_run_cmd(const char *cmd, cJSON *args, char *err, size_t errcap);
 void   phone_restart_server(void);
 void   phone_config_changed(void);
+
+/* api.c: the AI control API on the phone (skill-plan.md), one ADB stream per request.
+ * Callbacks: on_head once (status, content type, body length, extra headers or NULL),
+ * on_body for each piece, then on_done (ok = 0: cut short). */
+typedef struct api_req api_req_t;
+typedef struct {
+    void (*on_head)(api_req_t *r, int status, const char *type, size_t len, cJSON *headers, void *ud);
+    void (*on_body)(api_req_t *r, const uint8_t *data, size_t n, void *ud);
+    void (*on_done)(api_req_t *r, int ok, void *ud);
+} api_cb_t;
+/* Takes ownership of args. NULL when it cannot start (err_code/err say why; no callbacks). */
+api_req_t *api_request(const char *op, cJSON *args, api_cb_t cb, void *ud, const char **err_code, const char **err);
+void       api_cancel(api_req_t *r); /* no further callbacks */
+char      *api_error_body(const char *code, const char *text, int retryable); /* caller frees */
+int        api_error_status(const char *code);
+void       api_relay(long id, cJSON *d); /* an "api" message from the server */
+
+/* http.c: the local HTTP API ([api] listen, token) */
+int http_api_start(void); /* (re)applies the [api] settings; 0 when off or listening */
 
 /* cli.c: local control socket and the client side of the CLI */
 int cli_server_start(void);

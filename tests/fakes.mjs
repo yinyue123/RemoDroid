@@ -81,6 +81,30 @@ export class FakePhone {
     this.serverRunning = false;
     this.tunnel = null;      // { send(buf) }
     this.waiters = [];
+    this.apiRequests = [];   // AI API requests on localabstract:remodroid-api
+    this.apiHandler = req => this.defaultApi(req);
+  }
+
+  // A deterministic "JPEG" whose size follows max_edge (large ones exceed the server's 1 MB relay limit).
+  shot(maxEdge) {
+    const n = maxEdge >= 3000 ? 2 * 1024 * 1024 : 150 * 1024;
+    const b = Buffer.alloc(n);
+    for (let i = 0; i < n; i++) b[i] = (i * 7 + maxEdge) & 0xff;
+    b[0] = 0xff; b[1] = 0xd8; b[2] = 0xff;
+    return b;
+  }
+
+  defaultApi({ op, args }) {
+    if (op === 'capabilities') return { body: { schema: 1, ui: { backend: 'uiautomation' }, screenshot: { encoder: 'c' } } };
+    if (op === 'ui') return { body: { schema: 1, ui_id: 1, package: 'com.example', display: { w: 1080, h: 2400, rotation: 0, epoch: 0 },
+      nodes: [{ id: 0, rid: 'com.example:id/search', cls: 'EditText', desc: 'Search', b: [40, 120, 1040, 220], f: ['click', 'edit', 'enabled'] }] } };
+    if (op === 'screenshot') {
+      const edge = Number(args.max_edge || 1280);
+      return { type: 'image/jpeg', body: this.shot(edge), headers: { 'X-RD-Width': Math.round(1080 * edge / 2400), 'X-RD-Height': edge, 'X-RD-Epoch': 0, 'X-Evil': 'dropped' } };
+    }
+    if (op === 'action' && args.action === 'tap' && args.viewer) return { status: 409, body: { error: 'viewer_active', msg: 'a person is using the phone', retryable: true } };
+    if (op === 'action') return { body: { ok: true, action: args.action, injected: true } };
+    return { status: 404, body: { error: 'not_found', msg: 'unknown op ' + op } };
   }
 
   emit(kind, data) {
@@ -118,10 +142,12 @@ export class FakePhone {
         st.pump();
       };
       st.pump = () => {
-        if (st.waiting || !st.queue.length || st.closed) return;
+        if (st.waiting || st.closed) return;
+        if (!st.queue.length) { if (st.ending) st.close(); return; }
         st.waiting = true;
         send(CMD.WRTE, local, agentId, st.queue.shift());
       };
+      st.end = () => { st.ending = true; st.pump(); }; // close once everything is sent
       st.close = () => { if (!st.closed) { st.closed = true; send(CMD.CLSE, local, agentId); streams.delete(agentId); st.onClose?.(); } };
       streams.set(agentId, st);
       return st;
@@ -158,6 +184,26 @@ export class FakePhone {
         const st = openStream(agentId, service);
         send(CMD.OKAY, st.local, agentId);
         st.onData = (d) => this.handleSync(st, d);
+        return;
+      }
+      if (service === 'localabstract:remodroid-api') { // one request line in, header line + body out
+        if (!this.serverRunning) { send(CMD.CLSE, 0, agentId); return; }
+        const st = openStream(agentId, service);
+        send(CMD.OKAY, st.local, agentId);
+        let rb = Buffer.alloc(0);
+        st.onData = (d) => {
+          rb = Buffer.concat([rb, d]);
+          const nl = rb.indexOf(10);
+          if (nl < 0 || st.answered) return;
+          st.answered = true;
+          const req = JSON.parse(rb.subarray(0, nl).toString());
+          this.apiRequests.push(req);
+          this.emit('api', req);
+          const { status = 200, type = 'application/json', body, headers = {} } = this.apiHandler(req);
+          const b = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body));
+          st.write(Buffer.concat([Buffer.from(JSON.stringify({ status, type, len: b.length, headers }) + '\n'), b]));
+          st.end();
+        };
         return;
       }
       if (service === 'localabstract:remodroid') {

@@ -33,6 +33,10 @@ public final class Native {
     static native void setMaxKbps(int kbps);
     static native void setDirect(boolean direct);
     static native String stats();
+    /** True when the C screenshot encoder (AndroidBitmap_compress, Android 11+) is available. */
+    static native boolean hasImageEncoder();
+    /** Compresses RGBA_8888 pixels in C; format 0 = JPEG, 1 = PNG, 3 = WebP. Null on failure. */
+    static native byte[] encodeImage(ByteBuffer rgba, int width, int height, int rowStride, int format, int quality);
 
     // ---- called from native ----
     static void onCtrl(String json) { Listener l = listener; if (l != null) l.onCtrl(json); }

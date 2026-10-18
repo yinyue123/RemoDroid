@@ -160,7 +160,8 @@ static void usage(void)
     fprintf(stderr,
             "usage: remodroid-server [-c server.ini] [-v] [-t]     -t: check the configuration and exit\n"
             "       remodroid-server hashpw [password]   bcrypt hash for [users]/[devices]\n"
-            "       remodroid-server gensecret           random device secret\n");
+            "       remodroid-server gensecret           random device secret\n"
+            "       remodroid-server gentoken NAME [scopes]  API token for AI clients (ui,screenshot,control)\n");
 }
 
 int main(int argc, char **argv)
@@ -179,6 +180,24 @@ int main(int argc, char **argv)
             return 1;
         printf("%s\n", h);
         free(h);
+        return 0;
+    }
+    if (argc > 1 && !strcmp(argv[1], "gentoken")) { /* API token for AI clients (skill-plan.md) */
+        const char *name = argc > 2 ? argv[2] : "", *scopes = argc > 3 ? argv[3] : API_SCOPES_ALL;
+        if (!*name || strlen(name) > 40 || strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(name)) {
+            fprintf(stderr, "usage: remodroid-server gentoken NAME [ui,screenshot,control]\n"
+                            "       NAME: letters, digits, - and _ (up to 40)\n");
+            return 2;
+        }
+        uint8_t r[24], h[32];
+        char secret[40], tok[96], hex[65];
+        rd_random(r, sizeof r);
+        rd_hex(r, sizeof r, secret);
+        snprintf(tok, sizeof tok, "%s.%s", name, secret);
+        rd_sha256(tok, strlen(tok), h);
+        rd_hex(h, sizeof h, hex);
+        printf("token (shown once; give it to the AI client):\n  %s\n\nadd to server.ini, then reload (kill -HUP):\n"
+               "  [api_tokens]\n  %s = %s %s\n", tok, name, hex, scopes);
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "gensecret")) {

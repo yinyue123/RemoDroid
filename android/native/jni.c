@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "image.h"
 #include "rd.h"
 #include "rtc.h"
 
@@ -366,7 +367,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved)
     if (!cls)
         return JNI_ERR;
     J.cls = (*env)->NewGlobalRef(env, cls);
-    if ((*env)->RegisterNatives(env, cls, METHODS, sizeof METHODS / sizeof METHODS[0]) < 0)
+    if ((*env)->RegisterNatives(env, cls, METHODS, sizeof METHODS / sizeof METHODS[0]) < 0 ||
+        image_register(env, cls) < 0)
         return JNI_ERR;
     J.on_ctrl = (*env)->GetStaticMethodID(env, cls, "onCtrl", "(Ljava/lang/String;)V");
     J.on_link = (*env)->GetStaticMethodID(env, cls, "onLink", "(Z)V");

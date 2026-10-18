@@ -1,6 +1,7 @@
 #include "msg.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 cJSON *msg_new(const char *type, long id, const char *sid)
 {
@@ -63,3 +64,46 @@ const char *msg_type(const cJSON *m) { return msg_str(m, "t", ""); }
 long        msg_id(const cJSON *m) { return (long)msg_num(m, "id", 0); }
 const char *msg_sid(const cJSON *m) { return msg_str(m, "sid", NULL); }
 char       *msg_print(const cJSON *m) { return cJSON_PrintUnformatted(m); }
+
+static int hexval(int ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+static char *url_decode(const char *s, size_t n)
+{
+    char *o = malloc(n + 1), *p = o;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '%' && i + 2 < n && hexval(s[i + 1]) >= 0 && hexval(s[i + 2]) >= 0) {
+            *p++ = (char)(hexval(s[i + 1]) * 16 + hexval(s[i + 2]));
+            i += 2;
+        } else {
+            *p++ = s[i] == '+' ? ' ' : s[i];
+        }
+    }
+    *p = 0;
+    return o;
+}
+
+cJSON *msg_query_json(const char *q, size_t n)
+{
+    cJSON *o = cJSON_CreateObject();
+    const char *end = q + n;
+    while (q < end) {
+        const char *amp = memchr(q, '&', (size_t)(end - q));
+        const char *e = amp ? amp : end;
+        const char *eq = memchr(q, '=', (size_t)(e - q));
+        if (eq && eq > q) {
+            char *k = url_decode(q, (size_t)(eq - q)), *v = url_decode(eq + 1, (size_t)(e - eq - 1));
+            cJSON_DeleteItemFromObjectCaseSensitive(o, k);
+            cJSON_AddStringToObject(o, k, v);
+            free(k);
+            free(v);
+        }
+        q = e + 1;
+    }
+    return o;
+}

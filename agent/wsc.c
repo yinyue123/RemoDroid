@@ -276,6 +276,8 @@ void wsc_send(cJSON *m)
     cJSON_Delete(m);
 }
 
+void wsc_send_binary(const void *data, size_t n) { send_frame(WS_OP_BIN, data, n); }
+
 static void send_hello(void)
 {
     struct utsname u;
@@ -451,6 +453,8 @@ static void handle_message(cJSON *m)
         cJSON_AddItemToObject(res, "agent_log", agent_log_tail(lines));
         cJSON_AddItemToObject(res, "server_stderr", phone_server_log_tail(lines));
         wsc_send(msg_ack(id, res));
+    } else if (!strcmp(t, "api")) {
+        api_relay(id, msg_d(m));
     } else if (!strncmp(t, "session.", 8) || !strcmp(t, "signal")) {
         phone_on_server_msg(m);
     } else if (!strcmp(t, "error")) {

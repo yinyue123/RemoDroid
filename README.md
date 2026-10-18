@@ -62,6 +62,7 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
 | `third_party/` | Vendored libraries, compiled in statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp | C |
 | `deploy/` | Example `server.ini` / `agent.ini`, systemd units, OpenRC and procd scripts | |
 | `packaging/`, `.github/workflows/` | nFPM package definitions (deb, rpm, apk, ipk) and the CI build/release workflow | |
+| `python/`, `skills/`, `.claude/skills/phone/` | AI control: the `remodroid` SDK and `rd` CLI for the phone's UI JSON / screenshot / action API, learned workflows that replay without the model, and the Claude Code skill that uses them ([skill-plan.md](skill-plan.md)) | Python |
 | `tests/` | End-to-end tests (see below) | Node, Python |
 | `demo/` | The original mock panel (offline, no server) | HTML |
 
@@ -95,6 +96,7 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | Command | Covers |
 |---|---|
 | `make test` | Control plane end to end: real server + agent, a protocol-faithful fake adbd (RSA auth checked with OpenSSL), fake phone; auth, REST, WebSockets, ADB push/shell/sync, tunnel, UDP relay, commands, `agent.ini` edits, CLI, reconnects (48 checks) |
+| `python3 tests/python_sdk.py` | The AI control SDK, `rd` CLI and skill runner against a fake phone API: selectors, in-memory screenshots, hand-over to the AI (exit 3), resume with `--from-step` |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | The same, on the static MIPS router binaries under user-mode emulation |
 | `python android/native/test/rtc_interop.py` | Phone WebRTC stack ↔ aiortc: ICE, DTLS-SRTP, SCTP, H.264 decoded frames, data channels |
 | `python android/native/test/rtp_depack.py` | H.265 and H.264 packetizers: bit-exact round trip through an independent depacketizer + FFmpeg |
@@ -165,6 +167,24 @@ It provides a router management page for configuration, start/stop, logs, and op
 autostart. Installation does not start the agent. Stock Asuswrt-Merlin without the
 Koolshare/KoolCenter software center is not supported by this installer.
 See [Merlin packaging](packaging/merlin/README.md) for building, migration, and limitations.
+
+## AI control
+
+The AI can operate the phone through REST: `GET …/ui` returns the screen as JSON (from an in-process
+UiAutomation on the phone; `uiautomator dump` as a fallback), `GET …/screenshot?format=jpeg&max_edge=1280`
+returns the image bytes directly (GPU-scaled, compressed in C on the phone, never written to disk), and
+`POST …/actions` taps, types, scrolls and waits by selector. It's served by the router agent (`[api] listen` +
+`token` in `agent.ini`) and relayed by the server (`remodroid-server gentoken NAME`), both under
+`/api/v1/devices/{id}/`. A workflow the AI works out once is saved under `skills/` and replayed by Python
+without model calls; when it meets something new it hands the screen back to the AI. Design:
+[skill-plan.md](skill-plan.md); how to write skills: [skills/README.md](skills/README.md).
+
+```sh
+export PYTHONPATH=python RD_URL=http://192.168.1.1:8790 RD_TOKEN=…
+python3 -m remodroid ui                      # the screen as an outline
+python3 -m remodroid tap --rid search --wait-change
+python3 skills/settings-search/run.py --query wifi
+```
 
 ## Status
 

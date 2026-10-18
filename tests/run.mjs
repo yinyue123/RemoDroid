@@ -111,7 +111,9 @@ function wsConnect(port, pathname, headers = {}) {
 }
 
 async function main() {
-  const httpPort = await freePort();
+  const httpPort = await freePort(), apiPort = await freePort();
+  const aiToken = 'ai.' + crypto.randomBytes(24).toString('hex'), uiToken = 'uionly.' + crypto.randomBytes(24).toString('hex');
+  const sha = t => crypto.createHash('sha256').update(t).digest('hex');
   const hash = pw => { const [cmd, ...pre] = exe('remodroid-server'); return execFileSync(cmd, [...pre, 'hashpw', pw]).toString().trim(); };
   fs.mkdirSync(path.join(dir, 'web'));
   fs.writeFileSync(path.join(dir, 'web', 'index.html'), '<!doctype html><title>RemoDroid</title>');
@@ -129,6 +131,9 @@ me = ${hash('pw-user')}
 router1 = ${hash('pw-device')}
 [device_names]
 router1 = Living room phone
+[api_tokens]
+ai = ${sha(aiToken)}
+uionly = ${sha(uiToken)} ui
 [turn]
 urls = turn:127.0.0.1:3478?transport=udp
 shared_secret = turnsecret
@@ -173,6 +178,10 @@ lock_grace_seconds = 10
 
 [video]
 codec = auto
+
+[api]
+listen = 127.0.0.1:${apiPort}
+token = agent-token-123
 `);
 
   const server = start('server', [...exe('remodroid-server'), '-c', path.join(dir, 'server.ini')]);
@@ -248,6 +257,62 @@ codec = auto
   r = await fetch(base + '/api/v1/devices/router1/adb', { headers: { Cookie: cookie } });
   const adbst = await r.json();
   ok(adbst.auth === 'authorized' && adbst.features.includes('shell_v2') && adbst.max_payload === 262144, 'REST /adb shows ADB status');
+
+  console.log('AI control API (agent HTTP and server relay)');
+  const abase = `http://127.0.0.1:${apiPort}/api/v1/devices`, aauth = { Authorization: 'Bearer agent-token-123' };
+  r = await fetch(abase + '/local/ui');
+  ok(r.status === 401, 'agent API: no token is 401');
+  r = await fetch(abase + '/local/ui', { headers: { Authorization: 'Bearer agent-token-124' } });
+  ok(r.status === 401, 'agent API: a wrong token is 401');
+  r = await fetch(abase + '/local/ui?view=full&timeout_ms=100', { headers: aauth });
+  let aj = await r.json();
+  ok(r.status === 200 && aj.nodes[0].rid === 'com.example:id/search', "agent API: /ui returns the phone's UI JSON");
+  let areq = phone.apiRequests.at(-1);
+  ok(areq.op === 'ui' && areq.args.view === 'full' && areq.args.timeout_ms === '100', 'agent API: query parameters reach the phone as args');
+  r = await fetch(abase + '/router1/screenshot?format=jpeg&max_edge=1280', { headers: aauth });
+  let img = Buffer.from(await r.arrayBuffer());
+  ok(r.status === 200 && r.headers.get('content-type') === 'image/jpeg' && img.equals(phone.shot(1280)),
+    'agent API: /screenshot returns the image bytes directly');
+  ok(r.headers.get('x-rd-width') === '576' && r.headers.get('cache-control') === 'no-store' && !r.headers.get('x-evil'),
+    'agent API: X-RD-* geometry headers pass, others are dropped, no caching');
+  ok(phone.apiRequests.at(-1).op === 'screenshot' && !phone.apiRequests.slice(-2).some(q => q.op === 'ui' && q !== areq),
+    'agent API: a screenshot does not collect the UI tree');
+  r = await fetch(abase + '/router1/actions', { method: 'POST', headers: aauth, body: JSON.stringify({ action: 'tap', target: { rid: 'search' } }) });
+  aj = await r.json();
+  ok(r.status === 200 && aj.ok && phone.apiRequests.at(-1).args.target.rid === 'search', 'agent API: POST /actions passes the JSON body');
+  r = await fetch(abase + '/router1/actions', { method: 'POST', headers: aauth, body: JSON.stringify({ action: 'tap', viewer: true }) });
+  ok(r.status === 409 && (await r.json()).error === 'viewer_active', "agent API: the phone's error status and code pass through");
+  r = await fetch(abase + '/router2/ui', { headers: aauth });
+  ok(r.status === 404, 'agent API: another device id is 404');
+  r = await fetch(abase, { headers: aauth });
+  aj = await r.json();
+  ok(aj.devices[0].id === 'router1' && aj.devices[0].online === true, 'agent API: /devices lists this router');
+
+  const sbase = base + '/api/v1/devices/router1', bearer = t => ({ Authorization: 'Bearer ' + t });
+  r = await fetch(sbase + '/ui', { headers: { Cookie: cookie } });
+  aj = await r.json();
+  ok(r.status === 200 && aj.ui_id === 1 && aj.nodes.length === 1, 'server relay: /ui with the login cookie');
+  r = await fetch(sbase + '/screenshot?max_edge=1280&quality=70', { headers: bearer(aiToken) });
+  img = Buffer.from(await r.arrayBuffer());
+  ok(r.status === 200 && r.headers.get('content-type') === 'image/jpeg' && img.equals(phone.shot(1280)) && r.headers.get('x-rd-height') === '1280',
+    'server relay: screenshot bytes and headers with an API token');
+  ok(phone.apiRequests.at(-1).args.quality === '70', 'server relay: query parameters reach the phone');
+  r = await fetch(sbase + '/screenshot?max_edge=4000', { headers: bearer(aiToken) });
+  ok(r.status === 413 && (await r.json()).error === 'too_large', 'server relay: a response over 1 MB is refused (too_large)');
+  r = await fetch(sbase + '/actions', { method: 'POST', headers: bearer(aiToken), body: '{"action":"back"}' });
+  ok(r.status === 200 && (await r.json()).action === 'back', 'server relay: POST /actions');
+  r = await fetch(sbase + '/actions', { method: 'POST', headers: bearer(aiToken), body: '{"action":"tap","viewer":true}' });
+  ok(r.status === 409 && (await r.json()).error === 'viewer_active', 'server relay: phone errors keep their status');
+  r = await fetch(sbase + '/ui', { headers: bearer(uiToken) });
+  ok(r.status === 200, 'API token scopes: a ui token reads the UI');
+  r = await fetch(sbase + '/actions', { method: 'POST', headers: bearer(uiToken), body: '{"action":"back"}' });
+  ok(r.status === 403, 'API token scopes: a ui token cannot act');
+  r = await fetch(sbase + '/cmd', { method: 'POST', headers: bearer(aiToken), body: '{"cmd":"phone.wake"}' });
+  ok(r.status === 404, 'API tokens reach only the device list and the AI routes');
+  r = await fetch(sbase + '/ui', { headers: bearer(aiToken.slice(0, -1) + (aiToken.endsWith('0') ? '1' : '0')) });
+  ok(r.status === 401, 'a wrong API token is 401');
+  r = await fetch(base + '/api/v1/devices', { headers: bearer(aiToken) });
+  ok(r.status === 200 && (await r.json()).devices[0].id === 'router1', 'API tokens list the devices');
 
   console.log('session: signaling, UDP relay');
   viewer.send({ t: 'session.request', id: 1, d: { device: 'router1', quality: { mode: 'auto', codec: 'auto' } } });

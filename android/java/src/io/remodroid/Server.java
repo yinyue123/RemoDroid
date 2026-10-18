@@ -47,6 +47,7 @@ public final class Server implements Native.Listener {
             System.exit(1);
         }
         AudioCapture.init();
+        new ApiServer(s.device, socket + "-api").start();
         s.startCleanup();
         s.device.watchClipboard(s::onClipboard);
         s.sched.scheduleAtFixedRate(s::reportStatus, 5, 30, TimeUnit.SECONDS);

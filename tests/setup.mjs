@@ -96,7 +96,7 @@ web_root = ${ROOT}/web
   const aini = path.join(dir, 'agent.ini');
   fs.writeFileSync(aini, `[agent]\nadbkey = ${dir}/adbkey\nsocket = ${dir}/agent.sock\n[phone]\nadb = tcp:127.0.0.1:1\n`);
   const agent = start('agent', path.join(BIN, 'remodroid-agent'), ['-c', aini]);
-  await sleep(500);
+  await until(async () => fs.existsSync(path.join(dir, 'agent.sock')), 10000, 'agent socket'); /* after its RSA key is made */
   const t0 = Date.now();
   const en = await run(path.join(BIN, 'remodroid-agent'), ['-c', aini, 'enroll', '--panel', B + '/', '--code', code]);
   ok(en.code === 0 && /bound — this router is online/.test(en.out) && Date.now() - t0 < 8000, 'remodroid enroll binds the router within seconds');

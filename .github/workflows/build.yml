@@ -52,6 +52,8 @@ jobs:
         run: node tests/tls.mjs build/host
       - name: Setup wizard and router enrollment tests
         run: node tests/setup.mjs build/host
+      - name: AI control SDK, rd CLI and skill runner tests
+        run: python3 tests/python_sdk.py
       - name: Merlin agent packaging and lifecycle tests
         run: |
           python3 tests/merlin.py

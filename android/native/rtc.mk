@@ -2,7 +2,7 @@
 # Host build for tests:  make rtc-test
 RTC_DIR  := android/native
 RTC_OUT  := $(OUT)/rtc
-RTC_SRC  := $(filter-out $(RTC_DIR)/jni.c,$(wildcard $(RTC_DIR)/*.c))
+RTC_SRC  := $(filter-out $(RTC_DIR)/jni.c $(RTC_DIR)/image.c,$(wildcard $(RTC_DIR)/*.c))
 RTC_INCS := -I$(RTC_DIR) -Icommon -Ithird_party/libev -Ithird_party/cjson -Ithird_party/mbedtls/include \
             -Ithird_party/libsrtp/include -Ithird_party/libsrtp/crypto/include -Ithird_party/usrsctp/usrsctplib
 RTC_DEFS := -D_GNU_SOURCE $(EV_DEFS) -DMBEDTLS_CONFIG_FILE='"mbedtls_rtc_config.h"'

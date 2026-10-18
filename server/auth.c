@@ -303,6 +303,44 @@ int auth_basic(const http_req_t *r, conn_t *c, int device, char *name_out, size_
     return a;
 }
 
+int auth_bearer(const http_req_t *r, conn_t *c, char *name_out, size_t name_cap, char *scopes_out, size_t scopes_cap)
+{
+    size_t vl;
+    const char *v = req_header(r, "Authorization", &vl);
+    if (!v || vl < 7 || strncasecmp(v, "Bearer ", 7) != 0)
+        return -1;
+    if (auth_locked(c))
+        return -2;
+    const char *tok = v + 7;
+    size_t tl = vl - 7;
+    const char *dot = memchr(tok, '.', tl);
+    char name[64] = "";
+    const char *entry = NULL;
+    if (dot && dot > tok && (size_t)(dot - tok) < sizeof name) {
+        memcpy(name, tok, (size_t)(dot - tok));
+        entry = rd_conf_get(S.conf, "api_tokens", name, NULL);
+    }
+    uint8_t h[32];
+    char hex[65];
+    rd_sha256(tok, tl, h);
+    rd_hex(h, sizeof h, hex);
+    int valid = entry && strlen(entry) >= 64 && (!entry[64] || entry[64] == ' ' || entry[64] == '\t');
+    unsigned diff = !valid;
+    for (int i = 0; i < 64; i++) /* constant time over the hash */
+        diff |= (unsigned char)hex[i] ^ (unsigned char)(valid ? entry[i] : '0');
+    if (diff) {
+        if (!auth_fail(c))
+            LOGW("bad API token from %s", c->ip);
+        return 0;
+    }
+    const char *sc = entry + 64;
+    while (*sc == ' ' || *sc == '\t')
+        sc++;
+    snprintf(scopes_out, scopes_cap, "%s", *sc ? sc : API_SCOPES_ALL);
+    snprintf(name_out, name_cap, "token:%s", name);
+    return 1;
+}
+
 /* POST /login {"user", "password"} from the login page (web/login.html) → the session cookie. */
 void auth_login_request(conn_t *c, const http_req_t *r)
 {

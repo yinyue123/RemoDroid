@@ -44,6 +44,7 @@ static const char *status_text(int s)
     case 429: return "Too Many Requests";
     case 500: return "Internal Server Error";
     case 501: return "Not Implemented";
+    case 502: return "Bad Gateway";
     case 503: return "Service Unavailable";
     case 504: return "Gateway Timeout";
     default:  return "Status";
@@ -465,7 +466,14 @@ static void handle_request(conn_t *c, const http_req_t *r)
     }
 
     if (r->path_len >= 8 && !memcmp(r->path, "/api/v1/", 8)) {
-        if (!sess) { http_error(c, 401, "unauthorized", "log in first"); return; }
+        if (!sess) { /* AI clients: Authorization: Bearer <name>.<secret> ([api_tokens]) */
+            char scopes[64];
+            int a = auth_bearer(r, c, name, sizeof name, scopes, sizeof scopes);
+            if (a == -2) { http_error(c, 429, "rate_limited", "too many failed logins"); return; }
+            if (a == 1) { api_token_handle(c, r, name, scopes); return; }
+            http_error(c, 401, "unauthorized", a == 0 ? "bad API token" : "log in first");
+            return;
+        }
         api_handle(c, r, name, exp, sess);
         return;
     }
@@ -580,6 +588,8 @@ static void process_ws(conn_t *c)
                     ws_send_json(c, msg_error(0, "bad_request", "expected a JSON object"));
                 }
                 cJSON_Delete(j);
+            } else if (op == WS_OP_BIN) {
+                hub_on_binary(c, m, ml);
             }
         }
         if (c->fd < 0)

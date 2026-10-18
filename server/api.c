@@ -39,6 +39,78 @@ static int is_method(const http_req_t *r, const char *m)
     return r->method_len == strlen(m) && !memcmp(r->method, m, r->method_len);
 }
 
+static int has_scope(const char *scopes, const char *want)
+{
+    size_t wl = strlen(want);
+    for (const char *p = scopes; p && *p;) {
+        const char *e = strchr(p, ',');
+        size_t l = e ? (size_t)(e - p) : strlen(p);
+        if (l == wl && !memcmp(p, want, l))
+            return 1;
+        p = e ? e + 1 : NULL;
+    }
+    return 0;
+}
+
+/* AI control (skill-plan.md §8): relayed to the agent, which asks the phone. scopes NULL = a
+ * logged-in user (everything). Returns 1 when the suffix is an AI route. */
+static int ai_route(conn_t *c, const http_req_t *r, device_t *d, const char *suffix, const char *scopes)
+{
+    const char *op = NULL, *scope = NULL;
+    if (!strcmp(suffix, "/capabilities") && is_method(r, "GET"))
+        op = "capabilities";
+    else if (!strcmp(suffix, "/ui") && is_method(r, "GET"))
+        op = "ui", scope = "ui";
+    else if (!strcmp(suffix, "/screenshot") && is_method(r, "GET"))
+        op = "screenshot", scope = "screenshot";
+    else if (!strcmp(suffix, "/actions") && is_method(r, "POST"))
+        op = "action", scope = "control";
+    if (!op)
+        return 0;
+    if (scopes && scope && !has_scope(scopes, scope)) {
+        http_error(c, 403, "forbidden", "this API token lacks the scope for this endpoint");
+        return 1;
+    }
+    cJSON *args;
+    if (is_method(r, "POST")) {
+        args = cJSON_ParseWithLength((const char *)r->body, r->body_len);
+        if (!cJSON_IsObject(args)) {
+            cJSON_Delete(args);
+            http_error(c, 400, "bad_request", "the body must be a JSON object");
+            return 1;
+        }
+    } else {
+        args = msg_query_json(r->query, r->query_len);
+    }
+    hub_forward_api(c, d, op, args);
+    return 1;
+}
+
+/* Requests with an API token: the device list and the AI routes, nothing that changes settings. */
+void api_token_handle(conn_t *c, const http_req_t *r, const char *who, const char *scopes)
+{
+    LOGD("%s: %.*s %.*s", who, (int)r->method_len, r->method, (int)r->path_len, r->path);
+    if (req_is(r, "GET", "/api/v1/devices")) {
+        cJSON *b = cJSON_CreateObject();
+        cJSON *arr = cJSON_AddArrayToObject(b, "devices");
+        for (int i = 0; i < S.ndevices; i++)
+            cJSON_AddItemToArray(arr, hub_device_json(S.devices[i]));
+        http_json(c, 200, b, NULL);
+        return;
+    }
+    char id[64];
+    const char *suffix = device_path(r, id, sizeof id);
+    device_t *d = suffix ? hub_device(id) : NULL;
+    if (!d) {
+        http_error(c, 404, "not_found", suffix ? "unknown device" : "no such endpoint for API tokens");
+        return;
+    }
+    if (!*suffix && is_method(r, "GET"))
+        http_json(c, 200, hub_device_json(d), NULL);
+    else if (!ai_route(c, r, d, suffix, scopes))
+        http_error(c, 404, "not_found", "no such endpoint for API tokens");
+}
+
 void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expires_ms, const char *sess_id)
 {
     if (r->path_len == 13 && !memcmp(r->path, "/api/v1/setup", 13)) {
@@ -139,6 +211,8 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
         cJSON_AddItemToObject(p, "args", cJSON_IsObject(args) ? cJSON_Duplicate(args, 1) : cJSON_CreateObject());
         cJSON_Delete(body);
         hub_forward_cmd(c, d, "cmd", p);
+    } else if (ai_route(c, r, d, suffix, NULL)) {
+        /* answered by the agent */
     } else if (!strcmp(suffix, "/diag") && is_method(r, "GET")) {
         cJSON *p = cJSON_CreateObject();
         cJSON_AddNumberToObject(p, "lines", RD_MAX(1, RD_MIN(1000, req_query_int(r, "lines", 200))));

@@ -1,0 +1,13 @@
+[project]
+name = "remodroid"
+version = "0.4"
+description = "Client for the RemoDroid AI control API (UI JSON, screenshots, actions) and skill runner"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+rd = "remodroid.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

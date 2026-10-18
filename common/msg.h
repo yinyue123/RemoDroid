@@ -16,5 +16,7 @@ const char *msg_str(const cJSON *obj, const char *key, const char *def);
 double      msg_num(const cJSON *obj, const char *key, double def);
 int         msg_bool(const cJSON *obj, const char *key, int def);
 char       *msg_print(const cJSON *m); /* unformatted; caller frees with free() */
+/* A URL query string ("a=1&b=x%20y") as an object of strings. */
+cJSON      *msg_query_json(const char *q, size_t n);
 
 #endif
