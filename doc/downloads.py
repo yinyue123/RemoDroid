@@ -60,7 +60,7 @@ def markdown(names, ver):
               for arch in ('armv7', 'aarch64')
               if (name := f'remodroid-{ver}-merlin-{arch}.tar.gz') in names]
     merlin_note = ('Koolshare / KoolCenter offline installers: ' + ' · '.join(merlin)
-                   + '. RT-AC86U: choose armv7. These are agent-only plugins, not OpenWrt packages.') if merlin else ''
+                   + '. RT-AC86U and RT-AX88U: choose aarch64. These are agent-only plugins, not OpenWrt packages.') if merlin else ''
     return '\n'.join([
         f'### Downloads (v{ver})', '',
         'Pick the row for the machine\'s CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, '
