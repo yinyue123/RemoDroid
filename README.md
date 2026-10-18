@@ -29,12 +29,19 @@ The router only forwards packets; nothing is decoded in between.
 
 ## What you need
 
-| | |
-|---|---|
-| **Server** | Any Linux machine with a public IP (a small cloud VM is plenty), **or** a free Cloudflare account |
-| **Router** | OpenWrt, any Linux box (Debian, Ubuntu, CentOS, Alpine), or ASUS Merlin with Koolshare, with a free USB port |
-| **Android phone** | Android 8 or newer with USB debugging; Android 12+ for sound |
-| **iPhone** | Safari |
+RemoDroid is light: the phone does the heavy work (capture and hardware encoding), the router only forwards packets,
+and the server only sets up connections. What matters most is **upload speed at home**.
+
+| | Minimum | Recommended | What it uses |
+|---|---|---|---|
+| **Server** | Any Linux machine with a public IP: 1 CPU, 128 MB RAM, a few MB of disk. Or a free Cloudflare account instead | A small VM in the cloud region **closest to your home** (it carries the stream when TURN is needed), with enough monthly traffic | About 2 MB of RAM and almost no CPU. Bandwidth only when a session falls back to TURN; then the whole stream passes through it (about 4.5 GB per hour at 10 Mbps) |
+| **Router** | OpenWrt, Linux (Debian, Ubuntu, CentOS, Alpine) or ASUS Merlin with Koolshare, a USB port and about 2 MB of free storage. CPU: x86, ARM or MIPS | An ARM (aarch64, ARMv7) or x86 router. A weak MIPS router works but may not keep up with the top bitrates | About 2 MB of RAM. CPU only to move packets between USB and UDP; nothing is decoded |
+| **Android phone** | Android 8 or newer, USB debugging, a hardware H.264 encoder | Android 12 or newer (for sound) with a hardware H.265 encoder | Its own hardware encoder; the screen is turned off while you're connected |
+| **iPhone** | Safari | A recent iOS, for H.265 over WebRTC (older iOS gets H.264 automatically) | Hardware video decoding |
+| **Network** | 3–5 Mbps upload at home (720p) | 10–20 Mbps upload at home and the same download on the iPhone (1080p, 60 fps) | 1–20 Mbps per stream (default cap 20 Mbps, 60 fps); the quality adapts automatically |
+
+Expected delay is 40–80 ms when the iPhone reaches your home directly, and about 70–120 ms through TURN.
+Memory figures are from a running server and an RT-AC86U agent.
 
 ## Install
 
@@ -49,9 +56,60 @@ On your Linux server:
 curl -fsSL https://remodroid.pages.dev/install_server.sh | sudo sh
 ```
 
-It installs the package, starts the server and prints a link like `http://<ip>:5580/wizard.html?token=…`.
-Open it and fill in the web port, your **domain** (for automatic HTTPS from Let's Encrypt), the admin login and the
-STUN/TURN port. The server restarts on your ports and the panel is ready.
+It picks the right package, installs it, starts the server and prints a link like
+`http://<ip>:5580/wizard.html?token=…`.
+
+<!-- downloads:server -->
+#### Download the server (v0.4)
+
+Pick the row for the machine's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, `i686` = x86) and the column for its system. OpenWrt: take the build that `opkg print-architecture` lists. *Any Linux* holds both the server and the agent.
+
+| Server | Debian · Ubuntu | CentOS · Fedora | Alpine | OpenWrt | Any Linux |
+|:--|:-:|:-:|:-:|:-:|:-:|
+| **x86_64**<br><sub>Intel / AMD 64-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_amd64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.x86_64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_x86_64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_x86_64.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-x86_64.tar.gz) |
+| **ARM64**<br><sub>aarch64</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.aarch64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_aarch64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-generic.svg" alt="server .ipk aarch64_generic" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_aarch64_generic.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a53.svg" alt="server .ipk aarch64_cortex-a53" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_aarch64_cortex-a53.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a72.svg" alt="server .ipk aarch64_cortex-a72" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_aarch64_cortex-a72.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-aarch64.tar.gz) |
+| **ARMv7**<br><sub>32-bit ARM</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_armhf.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.armv7hl.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_armv7.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a7.svg" alt="server .ipk arm_cortex-a7_neon-vfpv4" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm_cortex-a7_neon-vfpv4.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a9.svg" alt="server .ipk arm_cortex-a9_vfpv3-d16" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm_cortex-a9_vfpv3-d16.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a15.svg" alt="server .ipk arm_cortex-a15_neon-vfpv4" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm_cortex-a15_neon-vfpv4.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-armv7.tar.gz) |
+| **x86**<br><sub>32-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_i386.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.i686.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_x86.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk i386_pentium4" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_i386_pentium4.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-x86.tar.gz) |
+| **MIPS LE**<br><sub>mipsel</sub> | — | — | — | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk mipsel_24kc" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_mipsel_24kc.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz mipsel" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-mipsel.tar.gz) |
+| **MIPS BE**<br><sub>mips</sub> | — | — | — | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk mips_24kc" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_mips_24kc.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz mips" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-mips.tar.gz) |
+
+Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
+<!-- /downloads:server -->
+
+Install it and start the service:
+
+```sh
+sudo apt install ./remodroid-server_*.deb                  # Debian, Ubuntu
+sudo dnf install ./remodroid-server-*.rpm                  # CentOS, Fedora
+sudo apk add --allow-untrusted ./remodroid-server_*.apk    # Alpine
+opkg install ./remodroid-server_*.ipk                      # OpenWrt
+
+sudo systemctl enable --now remodroid-server               # systemd
+rc-update add remodroid-server && rc-service remodroid-server start            # Alpine
+/etc/init.d/remodroid-server enable && /etc/init.d/remodroid-server start      # OpenWrt
+```
+
+Then open `http://<server>:5580/wizard.html?token=…`. The token is in `/var/lib/remodroid/setup-token`.
+
+<details>
+<summary>Any Linux (.tar.gz) by hand</summary>
+
+The tarball holds `bin/`, `web/`, `phone/` and `etc/` (sample ini files and service units). For the server:
+
+```sh
+sudo install -m 0755 bin/remodroid-server /usr/bin/
+sudo mkdir -p /usr/share/remodroid /etc/remodroid
+sudo cp -r web /usr/share/remodroid/web
+sudo install -m 0640 etc/server.ini.example /etc/remodroid/server.ini
+remodroid-server -c /etc/remodroid/server.ini
+```
+
+`etc/remodroid-server.service` is a systemd unit you can copy to `/etc/systemd/system/`.
+
+</details>
+
+**Set it up.** In the wizard, fill in the web port, your **domain** (for automatic HTTPS from Let's Encrypt), the
+admin login and the STUN/TURN port. The server restarts on your ports and the panel is ready.
 
 Open these ports in the firewall: **TCP 5580** (only for setup), your web port (**80**) and **443** if you use a
 domain, **UDP 3478** and **UDP 49152–49252** (TURN).
@@ -75,6 +133,7 @@ Skip the firewall step; Cloudflare's TURN does the relaying.
 The wizard writes `/etc/remodroid/server.ini`. Afterwards the same page, behind the login, edits the settings, and
 the panel's **Server** tab changes one setting at a time (domain, ports, login, STUN/TURN list).
 `remodroid-server -t` checks the file without starting anything. HTTPS certificates renew automatically.
+Packages keep your `server.ini` on upgrade.
 
 </details>
 
@@ -92,52 +151,10 @@ Debian, Ubuntu, CentOS, Fedora:
 curl -fsSL https://remodroid.pages.dev/install_agent.sh | sudo sh
 ```
 
-<details>
-<summary>ASUS Merlin / Koolshare</summary>
-
-Download the Merlin package from the [latest release](https://github.com/yinyue123/RemoDroid/releases/latest)
-that matches your router's CPU (`uname -m`):
-
-- `remodroid-<version>-merlin-aarch64.tar.gz` for `aarch64`: 64-bit HND models such as RT-AC86U and RT-AX88U
-- `remodroid-<version>-merlin-armv7.tar.gz` for `armv7l`: 32-bit ARM models such as RT-AC68U
-
-Install it in **Software Center → Manual installation**. The installer refuses a package for the wrong CPU.
-It adds a router page for settings, start/stop, logs and optional autostart. Installing does not start the
-agent. Stock Asuswrt-Merlin without the Koolshare/KoolCenter software center isn't supported.
-Building, migration and limits: [Merlin packaging](packaging/merlin/README.md).
-
-</details>
-
-<details>
-<summary>Install from a package by hand (download grid)</summary>
-
-Every [release](https://github.com/yinyue123/RemoDroid/releases) (and every CI run, as artifacts) has static
-packages with no dependencies. Pick yours below, then install it with one of:
-
-```sh
-apt install ./remodroid-*.deb
-dnf install ./remodroid-*.rpm
-apk add --allow-untrusted ./remodroid-*.apk
-opkg install ./remodroid-*.ipk
-```
-
-or unpack the `.tar.gz` and copy its files. Packages install `/usr/bin/remodroid-*`, `/etc/remodroid/*.ini` (kept
-on upgrade), the web client and phone files under `/usr/share/remodroid/`, and a service for the system's init
-(systemd, OpenRC or procd). Edit the ini file, then enable the service.
-
-<!-- downloads -->
-### Downloads (v0.4)
+<!-- downloads:agent -->
+#### Download the agent (v0.4)
 
 Pick the row for the machine's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, `i686` = x86) and the column for its system. OpenWrt: take the build that `opkg print-architecture` lists. *Any Linux* holds both the server and the agent.
-
-| Server | Debian · Ubuntu | CentOS · Fedora | Alpine | OpenWrt | Any Linux |
-|:--|:-:|:-:|:-:|:-:|:-:|
-| **x86_64**<br><sub>Intel / AMD 64-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_amd64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.x86_64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_x86_64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_x86_64.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-x86_64.tar.gz) |
-| **ARM64**<br><sub>aarch64</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.aarch64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_aarch64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-generic.svg" alt="server .ipk aarch64_generic" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_aarch64_generic.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a53.svg" alt="server .ipk aarch64_cortex-a53" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_aarch64_cortex-a53.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a72.svg" alt="server .ipk aarch64_cortex-a72" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_aarch64_cortex-a72.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-aarch64.tar.gz) |
-| **ARMv7**<br><sub>32-bit ARM</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_armhf.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.armv7hl.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_armv7.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a7.svg" alt="server .ipk arm_cortex-a7_neon-vfpv4" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm_cortex-a7_neon-vfpv4.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a9.svg" alt="server .ipk arm_cortex-a9_vfpv3-d16" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm_cortex-a9_vfpv3-d16.ipk)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk-a15.svg" alt="server .ipk arm_cortex-a15_neon-vfpv4" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_arm_cortex-a15_neon-vfpv4.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-armv7.tar.gz) |
-| **x86**<br><sub>32-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_i386.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server-0.4-1.i686.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-r1_x86.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk i386_pentium4" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_i386_pentium4.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-x86.tar.gz) |
-| **MIPS LE**<br><sub>mipsel</sub> | — | — | — | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk mipsel_24kc" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_mipsel_24kc.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz mipsel" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-mipsel.tar.gz) |
-| **MIPS BE**<br><sub>mips</sub> | — | — | — | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="server .ipk mips_24kc" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-server_0.4-1_mips_24kc.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz mips" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-linux-mips.tar.gz) |
 
 | Agent | Debian · Ubuntu | CentOS · Fedora | Alpine | OpenWrt | Any Linux |
 |:--|:-:|:-:|:-:|:-:|:-:|
@@ -151,7 +168,51 @@ Pick the row for the machine's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `ar
 Koolshare / KoolCenter offline installers: [Merlin armv7](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-merlin-armv7.tar.gz) · [Merlin aarch64](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/remodroid-0.4-merlin-aarch64.tar.gz). RT-AC86U and RT-AX88U: choose aarch64. These are agent-only plugins, not OpenWrt packages.
 
 Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
-<!-- /downloads -->
+<!-- /downloads:agent -->
+
+Install it and start the service:
+
+```sh
+opkg install ./remodroid-agent_*.ipk                       # OpenWrt
+sudo apt install ./remodroid-agent_*.deb                   # Debian, Ubuntu
+sudo dnf install ./remodroid-agent-*.rpm                   # CentOS, Fedora
+sudo apk add --allow-untrusted ./remodroid-agent_*.apk     # Alpine
+
+/etc/init.d/remodroid-agent enable && /etc/init.d/remodroid-agent start        # OpenWrt
+sudo systemctl enable --now remodroid-agent                # systemd
+rc-update add remodroid-agent && rc-service remodroid-agent start              # Alpine
+```
+
+<details>
+<summary>Any Linux (.tar.gz) by hand</summary>
+
+For the agent, from the unpacked tarball:
+
+```sh
+sudo install -m 0755 bin/remodroid-agent /usr/bin/
+sudo ln -s remodroid-agent /usr/bin/remodroid
+sudo mkdir -p /usr/share/remodroid /etc/remodroid
+sudo cp -r phone/. /usr/share/remodroid/
+sudo install -m 0600 etc/agent.ini.example /etc/remodroid/agent.ini
+remodroid-agent -c /etc/remodroid/agent.ini
+```
+
+`etc/remodroid-agent.service` (systemd) and `etc/remodroid-agent.init` (OpenWrt procd) start it at boot.
+
+</details>
+
+<details>
+<summary>ASUS Merlin / Koolshare</summary>
+
+Take the Merlin package above that matches your router's CPU (`uname -m`):
+
+- `remodroid-<version>-merlin-aarch64.tar.gz` for `aarch64`: 64-bit HND models such as RT-AC86U and RT-AX88U
+- `remodroid-<version>-merlin-armv7.tar.gz` for `armv7l`: 32-bit ARM models such as RT-AC68U
+
+Install it in **Software Center → Manual installation**. The installer refuses a package for the wrong CPU.
+It adds a router page for settings, start/stop, logs and optional autostart. Installing does not start the
+agent. Stock Asuswrt-Merlin without the Koolshare/KoolCenter software center isn't supported.
+Building, migration and limits: [Merlin packaging](packaging/merlin/README.md).
 
 </details>
 
