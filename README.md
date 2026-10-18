@@ -1,3 +1,5 @@
+<p align="center"><b>English</b> | <a href="doc/zh/README.md">简体中文</a> | <a href="doc/ja/README.md">日本語</a> | <a href="doc/ko/README.md">한국어</a> | <a href="doc/es/README.md">Español</a> | <a href="doc/pt-BR/README.md">Português (Brasil)</a> | <a href="doc/de/README.md">Deutsch</a> | <a href="doc/fr/README.md">Français</a> | <a href="doc/ru/README.md">Русский</a></p>
+
 # RemoDroid
 
 Control an Android phone from your iPhone's Safari with low latency, good enough for cloud gaming.

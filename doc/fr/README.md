@@ -1,4 +1,4 @@
-<p align="center"><a href="../../README.md">English</a> · <a href="../zh/README.md">简体中文</a> · <a href="../ja/README.md">日本語</a> · <a href="../ko/README.md">한국어</a> · <a href="../es/README.md">Español</a> · <a href="../pt-BR/README.md">Português (Brasil)</a> · <a href="../de/README.md">Deutsch</a> · <b>Français</b> · <a href="../ru/README.md">Русский</a></p>
+<p align="center"><a href="../../README.md">English</a> | <a href="../zh/README.md">简体中文</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../es/README.md">Español</a> | <a href="../pt-BR/README.md">Português (Brasil)</a> | <a href="../de/README.md">Deutsch</a> | <b>Français</b> | <a href="../ru/README.md">Русский</a></p>
 
 # RemoDroid
 
