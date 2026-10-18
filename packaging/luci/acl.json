@@ -1,0 +1,26 @@
+{
+	"luci-app-remodroid": {
+		"description": "Grant access to RemoDroid",
+		"read": {
+			"file": {
+				"/etc/remodroid/agent.ini": [ "read" ],
+				"/usr/bin/remodroid-agent status": [ "exec" ],
+				"/etc/init.d/remodroid-agent enabled": [ "exec" ],
+				"/sbin/logread -e remodroid": [ "exec" ]
+			},
+			"ubus": {
+				"service": [ "list" ]
+			}
+		},
+		"write": {
+			"file": {
+				"/usr/bin/remodroid-agent enroll *": [ "exec" ],
+				"/etc/init.d/remodroid-agent start": [ "exec" ],
+				"/etc/init.d/remodroid-agent stop": [ "exec" ],
+				"/etc/init.d/remodroid-agent restart": [ "exec" ],
+				"/etc/init.d/remodroid-agent enable": [ "exec" ],
+				"/etc/init.d/remodroid-agent disable": [ "exec" ]
+			}
+		}
+	}
+}

@@ -3,6 +3,8 @@
 Control an Android phone from your iPhone's Safari with low latency, good enough for cloud gaming.
 The phone stays at home on a USB cable to your router. You watch and tap it from anywhere.
 
+<p align="center"><a href="https://remodroid.pages.dev/"><img src="wizard/button.svg" alt="Install RemoDroid with the wizard: remodroid.pages.dev" width="318" height="64"></a></p>
+
 <p align="center"><img src="doc/architecture.svg" alt="How RemoDroid works: Safari on the iPhone logs in to the control server; the agent on the home router drives the Android phone over USB; video, sound and touch flow over WebRTC between Safari and the router, through TURN when direct UDP is blocked" width="100%"></p>
 
 **How it works, in one paragraph.** A small **server** on a public machine (or a free Cloudflare Worker) hosts the
@@ -45,8 +47,10 @@ Memory figures are from a running server and an RT-AC86U agent.
 
 ## Install
 
-Five steps, the same five as the bottom of the picture. The [install site](https://remodroid.pages.dev/) walks
-through them too, with copy buttons, but everything you need is right here.
+<p align="center"><a href="https://remodroid.pages.dev/"><img src="wizard/button.svg" alt="Install RemoDroid with the wizard: remodroid.pages.dev" width="318" height="64"></a></p>
+
+**The wizard walks you through everything with copy buttons.** Prefer to stay here? Follow these five steps,
+the same five as the bottom of the picture.
 
 ### 1. Server
 
@@ -170,7 +174,11 @@ Koolshare / KoolCenter offline installers: [Merlin armv7](https://github.com/yin
 Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
-Install it and start the service:
+**OpenWrt with LuCI, no command line:** in LuCI open **System → Software → Upload Package…**, choose the
+`.ipk` for your router, and install it. A **Services → RemoDroid** page appears: it pairs the router with your
+panel (step 3), starts and stops the agent, and shows whether the panel and the phone are connected.
+
+On other systems, install it and start the service:
 
 ```sh
 opkg install ./remodroid-agent_*.ipk                       # OpenWrt
@@ -223,6 +231,8 @@ In the panel, open **Agents → Add**. It shows a command with a one-time code; 
 ```sh
 remodroid enroll --panel https://your.panel --code X5SX-K3M7
 ```
+
+On OpenWrt you can paste the same command into **Services → RemoDroid → Pair** in LuCI instead.
 
 The code works once, for 10 minutes. The router then shows as online; tap it to change its settings.
 
