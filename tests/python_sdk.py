@@ -48,7 +48,8 @@ class Phone:
                      n(1, 0, rid="com.android.settings:id/search_src_text", cls="EditText", text=self.query or None,
                        f=["click", "edit", "enabled", "focused"])]
             if self.screen == "results":
-                nodes += [n(2, 0, rid="android:id/title", text="Wi‑Fi"), n(3, 0, rid="android:id/title", text="Wi‑Fi calling")]
+                nodes += [n(2, 0, rid="com.android.settings.intelligence:id/list_results", f=["scroll", "enabled"]),
+                          n(3, 2, rid="android:id/title", text="Wi‑Fi"), n(4, 2, rid="android:id/title", text="Wi‑Fi calling")]
         return {"schema": 1, "ui_id": self.ui_id, "package": pkg, "backend": "uiautomation", "collect_ms": 12,
                 "display": {"w": 1080, "h": 2400, "rotation": 0, "epoch": 0}, "count": len(nodes), "nodes": nodes}
 
