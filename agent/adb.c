@@ -35,6 +35,7 @@ struct adb_stream {
     adb_t *a;
     uint32_t local_id, remote_id;
     int open, dead, waiting_okay, user_closed;
+    int hold, owe_okay; /* adb_hold: the OKAY for the last WRTE waits until released */
     rd_buf_t outq;
     adb_stream_cb_t cb;
     void *ud;
@@ -359,9 +360,12 @@ void adb_on_packet(adb_t *a, const uint8_t h[24], const uint8_t *data, size_t n)
             send_packet(a, A_CLSE, 0, arg0, NULL, 0);
             break;
         }
-        send_packet(a, A_OKAY, s->local_id, arg0, NULL, 0);
         if (s->cb.on_data && !s->user_closed)
             s->cb.on_data(s, data, n, s->ud);
+        if (s->hold && !s->user_closed && !s->dead)
+            s->owe_okay = 1; /* the phone sends nothing more until adb_hold(s, 0) */
+        else
+            send_packet(a, A_OKAY, s->local_id, arg0, NULL, 0);
         break;
     }
     case A_CLSE: {
@@ -416,6 +420,17 @@ int adb_write(adb_stream_t *s, const void *data, size_t n)
 }
 
 size_t adb_backlog(const adb_stream_t *s) { return s ? rd_buf_avail(&s->outq) : 0; }
+
+void adb_hold(adb_stream_t *s, int hold)
+{
+    if (!s || s->hold == hold)
+        return;
+    s->hold = hold;
+    if (!hold && s->owe_okay && !s->dead && !s->user_closed) {
+        s->owe_okay = 0;
+        send_packet(s->a, A_OKAY, s->local_id, s->remote_id, NULL, 0);
+    }
+}
 
 void adb_close(adb_stream_t *s)
 {

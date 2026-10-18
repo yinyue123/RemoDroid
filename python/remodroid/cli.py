@@ -7,6 +7,8 @@
     rd swipe X1 Y1 X2 Y2 [--ms 300]   rd scroll down|up|left|right [--rid list]
     rd key ENTER   rd back   rd home   rd launch com.android.settings
     rd wait --rid results [--gone] [--timeout 5]
+    rd forward 9222 chrome    like `adb forward`: 127.0.0.1:9222 → the phone's chrome_devtools_remote
+                              (also: firefox, localabstract:NAME, tcp:PORT; agent URL only)
     rd caps   rd devices
 
 Connection: --url/$RD_URL (agent http://router:8790 or the panel https://…), --device/$RD_DEVICE
@@ -102,6 +104,10 @@ def main(argv=None):
     sub.add_parser("home")
     s = sub.add_parser("launch")
     s.add_argument("package")
+    s = sub.add_parser("forward", help="adb forward: a local TCP port to a phone socket")
+    s.add_argument("port", type=int, help="local port (0 = any free one)")
+    s.add_argument("service", help="chrome | firefox | localabstract:NAME | tcp:PORT")
+    s.add_argument("--bind", default="127.0.0.1")
     s = sub.add_parser("wait")
     _selector_args(s)
     s.add_argument("--gone", action="store_true")
@@ -163,6 +169,13 @@ def run(c, a):
         _print(c.act(a.cmd))
     elif a.cmd == "launch":
         _print(c.launch(a.package))
+    elif a.cmd == "forward":
+        c.open_socket(a.service).close()  # fail early: no phone, no browser, bad token
+        try:
+            c.forward(a.port, a.service, a.bind, ready=lambda p: print(
+                f"forwarding {a.bind}:{p} → {a.service} on the phone (Ctrl-C to stop)", flush=True))
+        except KeyboardInterrupt:
+            pass
     elif a.cmd == "wait":
         t, _ = _target(a)
         if not t or "x" in t or "node" in t:

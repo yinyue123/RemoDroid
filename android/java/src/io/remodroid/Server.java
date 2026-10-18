@@ -22,6 +22,7 @@ public final class Server implements Native.Listener {
     private volatile Session session;
     private ScheduledFuture<?> pendingLock;
     private OutputStream cleanup;
+    private NotificationWatcher notify;
     private String jar;
     private int lastBattery = -2;
     private String lastScreen = "";
@@ -48,6 +49,7 @@ public final class Server implements Native.Listener {
         }
         AudioCapture.init();
         new ApiServer(s.device, socket + "-api").start();
+        s.notify = new NotificationWatcher(s.cfg, s::onNotification);
         s.startCleanup();
         s.device.watchClipboard(s::onClipboard);
         s.sched.scheduleAtFixedRate(s::reportStatus, 5, 30, TimeUnit.SECONDS);
@@ -129,6 +131,13 @@ public final class Server implements Native.Listener {
         } catch (Exception ignored) { }
     }
 
+    private void onNotification(JSONObject info) {
+        try {
+            Native.sendCtrl(new JSONObject().put("t", "event").put("d",
+                    new JSONObject().put("kind", "notification").put("info", info)).toString());
+        } catch (Exception ignored) { }
+    }
+
     private void onClipboard() {
         Session s = session;
         if (s != null) sched.execute(() -> s.clipChanged(device.getClipboard()));
@@ -163,6 +172,7 @@ public final class Server implements Native.Listener {
                     cleanup("lock_on_exit=" + (cfg.lockOnDisconnect ? 1 : 0));
                     Session cur = session;
                     if (cur != null) cur.configChanged();
+                    if (notify != null) notify.reconfigure();
                     Ln.i("config applied");
                     break;
                 case "cmd": {

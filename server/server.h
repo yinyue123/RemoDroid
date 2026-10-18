@@ -195,6 +195,9 @@ int  enroll_api(conn_t *c, const http_req_t *r, const char *user); /* 1 if handl
 /* turn.c: built-in TURN relay ([turn] listen); 0 when disabled or started */
 int turn_start(void);
 
+/* notify.c: push phone notifications to Bark (WebSocket delivery is in hub.c) */
+void notify_on_event(device_t *d, const char *kind, cJSON *info);
+
 /* api.c */
 void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expires_ms, const char *sess_id);
 void api_token_handle(conn_t *c, const http_req_t *r, const char *who, const char *scopes);

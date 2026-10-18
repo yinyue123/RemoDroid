@@ -8,6 +8,8 @@ Screenshots stay in memory: ``Client.screenshot()`` returns the bytes.
 """
 import json
 import os
+import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -177,6 +179,66 @@ class Client:
                                          ensure_ascii=False) + "\n")
             self._trace.flush()
 
+    # ---------------- raw sockets (through the agent's own API) ----------------
+
+    def open_socket(self, service, timeout=10):
+        """A connected socket to a socket on the phone, like ``adb forward``: "chrome"
+        (localabstract:chrome_devtools_remote), "firefox", "localabstract:NAME" or "tcp:PORT"."""
+        u = urllib.parse.urlsplit(self.url)
+        if u.scheme != "http":
+            raise ApiError(400, "unsupported", "sockets go through the agent's http:// API ([api] listen), not the panel")
+        s = socket.create_connection((u.hostname, u.port or 80), timeout=timeout)
+        path = (f"{u.path}/api/v1/devices/{urllib.parse.quote(self.device)}/socket?"
+                + urllib.parse.urlencode({"service": service}))
+        auth = f"Authorization: Bearer {self.token}\r\n" if self.token else ""
+        s.sendall(f"GET {path} HTTP/1.1\r\nHost: {u.netloc}\r\nConnection: Upgrade\r\n"
+                  f"Upgrade: remodroid-socket\r\n{auth}\r\n".encode())
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = s.recv(4096)
+            if not chunk:
+                s.close()
+                raise ApiError(502, "io_error", "the agent closed the connection")
+            head += chunk
+        head, rest = head.split(b"\r\n\r\n", 1)
+        status = int(head.split(b" ", 2)[1])
+        if status != 101:
+            try:
+                while True:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    rest += chunk
+            finally:
+                s.close()
+            try:
+                j = json.loads(rest)
+            except ValueError:
+                j = {"error": "http_error", "msg": rest[:200].decode("utf-8", "replace")}
+            raise ApiError(status, j.get("error", "http_error"), j.get("msg", ""), j.get("retryable", False), j)
+        s.settimeout(None)
+        return _Prefixed(s, rest) if rest else s
+
+    def forward(self, local_port, service, bind="127.0.0.1", ready=None):
+        """``adb forward tcp:LOCAL_PORT SERVICE`` on this machine: each connection to bind:local_port
+        becomes a raw stream to the phone socket. Blocks; ``ready(port)`` runs once listening."""
+        srv = socket.create_server((bind, local_port))
+        if ready:
+            ready(srv.getsockname()[1])
+        with srv:
+            while True:
+                conn, _ = srv.accept()
+                threading.Thread(target=self._forward_one, args=(conn, service), daemon=True).start()
+
+    def _forward_one(self, conn, service):
+        try:
+            phone = self.open_socket(service)
+        except (ApiError, OSError) as e:
+            print(f"forward {service}: {e}", flush=True)
+            conn.close()
+            return
+        splice(conn, phone)
+
     # ---------------- reading ----------------
 
     def devices(self):
@@ -295,6 +357,46 @@ class Client:
         """``require(package=…, has={…}, lacks={…})`` on a fresh (or given) UI dump."""
         ui = ui or self.ui()
         return ui if self.skipping else require(ui, step=step, **checks)
+
+
+class _Prefixed:
+    """A socket whose first recv() returns bytes that were already read."""
+
+    def __init__(self, sock, data):
+        self._s, self._data = sock, data
+
+    def recv(self, n):
+        if self._data:
+            d, self._data = self._data[:n], self._data[n:]
+            return d
+        return self._s.recv(n)
+
+    def __getattr__(self, name):
+        return getattr(self._s, name)
+
+
+def splice(a, b):
+    """Copies bytes both ways until either side closes, then closes both."""
+    def pump(src, dst):
+        try:
+            while True:
+                d = src.recv(65536)
+                if not d:
+                    break
+                dst.sendall(d)
+        except OSError:
+            pass
+        for x in (a, b):
+            try:
+                x.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+    t = threading.Thread(target=pump, args=(b, a), daemon=True)
+    t.start()
+    pump(a, b)
+    t.join()
+    a.close()
+    b.close()
 
 
 def summarize(ui, limit=60):

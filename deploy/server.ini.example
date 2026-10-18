@@ -50,6 +50,16 @@ lockout_minutes = 15               ; lockout_seconds overrides this when set (e.
 ;   remodroid-server gentoken NAME [ui,screenshot,control]   prints the token and the line for here
 ; name = <sha256 of the token> [scopes]
 
+[notify]
+; Push phone notifications to Bark (https://github.com/Finb/Bark). The phone must also have
+; [notify] enabled in its agent.ini. The key stays here and is never written to the log.
+bark_url =                         ; e.g. https://api.day.app/<your-device-key>  (a self-hosted URL also works)
+; ca_file =                        ; trusted roots for a self-hosted https Bark (default: the system bundle)
+
+[device_notify]
+; Per-router Bark URL, overriding [notify] bark_url. One line per device id:
+; <device id> = https://api.day.app/<key>
+
 [turn]
 ; Built-in STUN + TURN relay (no coturn needed); the setup wizard fills this in.
 listen =                           ; e.g. 0.0.0.0:3478 (UDP); empty = off

@@ -56,6 +56,9 @@ typedef struct {
 adb_stream_t *adb_open(adb_t *a, const char *service, adb_stream_cb_t cb, void *ud);
 int           adb_write(adb_stream_t *s, const void *data, size_t n);
 size_t        adb_backlog(const adb_stream_t *s);
+/* Flow control towards us: while held, the phone gets no OKAY for its last write, so it
+ * sends nothing more on this stream. Release with hold = 0. */
+void          adb_hold(adb_stream_t *s, int hold);
 void          adb_close(adb_stream_t *s); /* no further callbacks */
 
 /* ---- services ---- */

@@ -56,3 +56,13 @@ max_mb = 2048                      ; largest file for push/pull
 ; AI control API (skill-plan.md): UI as JSON, screenshots, taps/typing; clients: python/ (rd, remodroid)
 listen =                           ; empty = off; e.g. 127.0.0.1:8790, or 0.0.0.0:8790 for the LAN (needs a token)
 token =                            ; callers send "Authorization: Bearer <token>"; make one with: head -c 24 /dev/urandom | xxd -p
+
+[notify]
+; Forward the phone's own notifications. They are read on the phone (a poll of dumpsys, the only
+; notification content the shell user can see), filtered here, and sent to any connected client over
+; WebSocket and to Bark if the server has [notify] bark_url. "All but noise" = skip ongoing /
+; foreground-service notifications and anything quieter than min_importance.
+enabled = false
+interval_seconds = 4
+min_importance = default           ; none | min | low | default | high (skip quieter than this)
+ignore =                           ; comma-separated packages to skip, e.g. com.sonymobile.gameenhancer

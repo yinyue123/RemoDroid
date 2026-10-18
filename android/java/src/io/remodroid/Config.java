@@ -2,7 +2,7 @@ package io.remodroid;
 
 import org.json.JSONObject;
 
-/** Settings pushed by the router agent from agent.ini ([phone], [video], [files]). */
+/** Settings pushed by the router agent from agent.ini ([phone], [video], [files], [notify]). */
 final class Config {
     volatile boolean screenOffOnConnect = true;
     volatile boolean lockOnDisconnect = true;
@@ -23,6 +23,19 @@ final class Config {
     volatile boolean mediaScan = true;
     volatile boolean overwrite = false;
     volatile int maxMb = 2048;
+    volatile boolean notifyEnabled = false;
+    volatile int notifyIntervalSeconds = 4;
+    volatile int notifyMinImportance = 3; // NONE 0, MIN 1, LOW 2, DEFAULT 3, HIGH 4
+    volatile String notifyIgnore = "";
+
+    private static int importance(String s, int def) {
+        if (s == null) return def;
+        switch (s.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "none": return 0; case "min": return 1; case "low": return 2;
+            case "default": return 3; case "high": return 4;
+            default: try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return def; }
+        }
+    }
 
     void apply(JSONObject d) {
         JSONObject p = d.optJSONObject("phone"), v = d.optJSONObject("video"), f = d.optJSONObject("files");
@@ -50,6 +63,13 @@ final class Config {
             mediaScan = f.optBoolean("media_scan", mediaScan);
             overwrite = f.optBoolean("overwrite", overwrite);
             maxMb = f.optInt("max_mb", maxMb);
+        }
+        JSONObject nt = d.optJSONObject("notify");
+        if (nt != null) {
+            notifyEnabled = nt.optBoolean("enabled", notifyEnabled);
+            notifyIntervalSeconds = nt.optInt("interval_seconds", notifyIntervalSeconds);
+            notifyMinImportance = importance(nt.optString("min_importance", null), notifyMinImportance);
+            notifyIgnore = nt.optString("ignore", notifyIgnore);
         }
     }
 }

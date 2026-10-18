@@ -186,6 +186,22 @@ export class FakePhone {
         st.onData = (d) => this.handleSync(st, d);
         return;
       }
+      if (service === 'localabstract:chrome_devtools_remote' || service === 'tcp:6000') { // echo; "bye\n" closes
+        const st = openStream(agentId, service);
+        send(CMD.OKAY, st.local, agentId);
+        this.emit('sock.open', service);
+        st.onData = (d) => { if (d.toString() === 'bye\n') st.end(); else st.write(d); };
+        st.onClose = () => this.emit('sock.closed', service);
+        return;
+      }
+      if (service === 'localabstract:firehose') { // 16 MB at once, paced only by the agent's OKAYs
+        const st = openStream(agentId, service);
+        send(CMD.OKAY, st.local, agentId);
+        this.firehose = st;
+        st.write(Buffer.alloc(16 << 20, 0x5a));
+        st.onClose = () => this.emit('sock.closed', service);
+        return;
+      }
       if (service === 'localabstract:remodroid-api') { // one request line in, header line + body out
         if (!this.serverRunning) { send(CMD.CLSE, 0, agentId); return; }
         const st = openStream(agentId, service);

@@ -364,7 +364,7 @@ static void send_config(void)
 {
     cJSON *m = msg_new("config", 0, NULL);
     cJSON *d = msg_d(m);
-    static const char *secs[] = { "phone", "video", "files" };
+    static const char *secs[] = { "phone", "video", "files", "notify" };
     for (size_t i = 0; i < RD_ARRAY_LEN(secs); i++)
         rd_conf_each(A.conf, secs[i], add_kv, cJSON_AddObjectToObject(d, secs[i]));
     send_ctrl(m);

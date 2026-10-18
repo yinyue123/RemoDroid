@@ -5,6 +5,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -111,7 +112,11 @@ function wsConnect(port, pathname, headers = {}) {
 }
 
 async function main() {
-  const httpPort = await freePort(), apiPort = await freePort();
+  const httpPort = await freePort(), apiPort = await freePort(), barkPort = await freePort();
+  const barkReqs = [];
+  const barkSrv = http.createServer((req, res) => { let b = ''; req.on('data', d => b += d);
+    req.on('end', () => { barkReqs.push({ url: req.url, body: b, ctype: req.headers['content-type'] }); res.writeHead(200); res.end('{"code":200}'); }); });
+  await new Promise(r => barkSrv.listen(barkPort, '127.0.0.1', r));
   const aiToken = 'ai.' + crypto.randomBytes(24).toString('hex'), uiToken = 'uionly.' + crypto.randomBytes(24).toString('hex');
   const sha = t => crypto.createHash('sha256').update(t).digest('hex');
   const hash = pw => { const [cmd, ...pre] = exe('remodroid-server'); return execFileSync(cmd, [...pre, 'hashpw', pw]).toString().trim(); };
@@ -131,6 +136,8 @@ me = ${hash('pw-user')}
 router1 = ${hash('pw-device')}
 [device_names]
 router1 = Living room phone
+[notify]
+bark_url = http://127.0.0.1:${barkPort}/key
 [api_tokens]
 ai = ${sha(aiToken)}
 uionly = ${sha(uiToken)} ui
@@ -182,6 +189,10 @@ codec = auto
 [api]
 listen = 127.0.0.1:${apiPort}
 token = agent-token-123
+
+[notify]
+enabled = true
+interval_seconds = 2
 `);
 
   const server = start('server', [...exe('remodroid-server'), '-c', path.join(dir, 'server.ini')]);
@@ -288,6 +299,78 @@ token = agent-token-123
   aj = await r.json();
   ok(aj.devices[0].id === 'router1' && aj.devices[0].online === true, 'agent API: /devices lists this router');
 
+  // /socket: `adb forward` over HTTP Upgrade
+  const sockOpen = (service, { token = 'agent-token-123', upgrade = true } = {}) => new Promise((resolve, reject) => {
+    const sk = net.connect(apiPort, '127.0.0.1');
+    let head = Buffer.alloc(0), done = false;
+    sk.on('error', reject);
+    sk.on('data', d => {
+      if (done) return;
+      head = Buffer.concat([head, d]);
+      const i = head.indexOf('\r\n\r\n');
+      if (i < 0) return;
+      done = true;
+      sk.removeAllListeners('data');
+      const status = Number(head.toString().split(' ')[1]), rest = head.subarray(i + 4);
+      if (status !== 101) { let body = rest; sk.on('data', x => { body = Buffer.concat([body, x]); }); sk.on('close', () => resolve({ status, body: body.toString() })); return; }
+      resolve({ status, sk, rest });
+    });
+    sk.write(`GET /api/v1/devices/local/socket?service=${encodeURIComponent(service)} HTTP/1.1\r\nHost: x\r\n` +
+      (upgrade ? 'Connection: Upgrade\r\nUpgrade: remodroid-socket\r\n' : '') + (token ? `Authorization: Bearer ${token}\r\n` : '') + '\r\n');
+  });
+  const readN = (sk, n, first = Buffer.alloc(0)) => new Promise(res => {
+    let got = first;
+    if (got.length >= n) return res(got);
+    sk.on('data', d => { got = Buffer.concat([got, d]); if (got.length >= n) { sk.removeAllListeners('data'); res(got); } });
+  });
+  let so = await sockOpen('chrome', { token: null });
+  ok(so.status === 401, 'socket: no token is 401');
+  so = await sockOpen('shell:id');
+  ok(so.status === 400 && !phone.events.some(e => e.kind === 'open' && e.data === 'shell:id'), 'socket: only localabstract: and tcp: services (never shell:)');
+  so = await sockOpen('chrome', { upgrade: false });
+  ok(so.status === 426, 'socket: a request without Upgrade is refused (426)');
+  so = await sockOpen('localabstract:nobody_listens');
+  ok(so.status === 502 && /nothing listens/.test(so.body), 'socket: a socket nobody listens on is 502');
+  so = await sockOpen('chrome');
+  ok(so.status === 101 && phone.events.some(e => e.kind === 'sock.open' && e.data === 'localabstract:chrome_devtools_remote'),
+    'socket: "chrome" opens localabstract:chrome_devtools_remote through adbd (101)');
+  const payload = crypto.randomBytes(3 * 1024 * 1024);
+  so.sk.write(payload);
+  const echoed = await readN(so.sk, payload.length, so.rest);
+  ok(echoed.equals(payload), 'socket: 3 MB round trip, bytes intact both ways');
+  const closedByClient = phone.waitFor(e => e.kind === 'sock.closed' && e.data === 'localabstract:chrome_devtools_remote', 3000, 'phone stream closed');
+  so.sk.destroy();
+  await closedByClient;
+  ok(true, 'socket: closing the client closes the phone stream');
+  phone.events = phone.events.filter(e => e.kind !== 'sock.closed');
+  so = await sockOpen('tcp:6000');
+  const clientClosed = new Promise(r => so.sk.on('close', r));
+  so.sk.write('bye\n');
+  await clientClosed;
+  ok(true, 'socket: the phone closing (tcp:6000) closes the client');
+  so = await sockOpen('localabstract:firehose');
+  so.sk.pause();
+  await sleep(1500);
+  const left = phone.firehose.queue.length;
+  ok(left > 0, `socket: a client that stops reading stops the phone too (${left * 4} KiB still on the phone)`);
+  so.sk.resume();
+  const all = await readN(so.sk, 16 << 20, so.rest);
+  ok(all.length === 16 << 20 && all.every(b => b === 0x5a), 'socket: 16 MB arrives intact once the client reads again');
+  so.sk.destroy();
+  r = await fetch(abase + '/local/ui', { headers: aauth });
+  ok(r.status === 200, 'socket: the HTTP API still answers after the streams');
+  Object.assign(process.env, { PYTHONPATH: new URL('../python', import.meta.url).pathname,
+    RD_URL: `http://127.0.0.1:${apiPort}`, RD_TOKEN: 'agent-token-123', RD_DEVICE: 'local' });
+  const fwd = start('rd-forward', ['python3', '-m', 'remodroid', 'forward', '0', 'chrome']);
+  const fport = Number((await until(() => /forwarding 127\.0\.0\.1:(\d+)/.exec(fwd.log), 8000, 'rd forward listening'))[1]);
+  const fc = net.connect(fport, '127.0.0.1');
+  await new Promise(res => fc.on('connect', res));
+  fc.write('{"id":1,"method":"Browser.getVersion"}');
+  const fecho = await readN(fc, 38);
+  ok(fecho.toString() === '{"id":1,"method":"Browser.getVersion"}', 'rd forward: a local port reaches the phone socket (like adb forward)');
+  fc.destroy();
+  fwd.kill();
+
   const sbase = base + '/api/v1/devices/router1', bearer = t => ({ Authorization: 'Bearer ' + t });
   r = await fetch(sbase + '/ui', { headers: { Cookie: cookie } });
   aj = await r.json();
@@ -313,6 +396,18 @@ token = agent-token-123
   ok(r.status === 401, 'a wrong API token is 401');
   r = await fetch(base + '/api/v1/devices', { headers: bearer(aiToken) });
   ok(r.status === 200 && (await r.json()).devices[0].id === 'router1', 'API tokens list the devices');
+
+  console.log('notifications (WebSocket push + Bark)');
+  ok(cfg.data.d.notify && cfg.data.d.notify.enabled === true, 'the [notify] config is pushed to the phone');
+  const notif = { pkg: 'com.example.chat', title: 'Alice', text: 'ping \u4f60\u597d', key: '0|com.example.chat|7|null|10100', when: Date.now(), importance: 4 };
+  phone.tunnel.send(tunBuild(T.CTRL, 0, 0, null, 0, Buffer.from(JSON.stringify({ t: 'event', d: { kind: 'notification', info: notif } }))));
+  const nev = await viewer.wait(m => m.t === 'device.event' && m.d.kind === 'notification', 5000, 'notification event');
+  ok(nev.d.info.pkg === 'com.example.chat' && nev.d.info.title === 'Alice' && nev.d.info.text === 'ping \u4f60\u597d',
+    'the notification reaches a connected viewer over WebSocket');
+  const bark = await until(() => barkReqs[0], 5000, 'bark push');
+  const bj = JSON.parse(bark.body);
+  ok(bark.url === '/key' && /json/.test(bark.ctype) && bj.title === 'Alice' && bj.body === 'ping \u4f60\u597d' && bj.group === 'RemoDroid',
+    'the server pushes it to Bark as JSON (title, body, group)');
 
   console.log('session: signaling, UDP relay');
   viewer.send({ t: 'session.request', id: 1, d: { device: 'router1', quality: { mode: 'auto', codec: 'auto' } } });

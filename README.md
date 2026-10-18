@@ -99,6 +99,7 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 |---|---|
 | `make test` | Control plane end to end: real server + agent, a protocol-faithful fake adbd (RSA auth checked with OpenSSL), fake phone; auth, REST, WebSockets, ADB push/shell/sync, tunnel, UDP relay, commands, `agent.ini` edits, CLI, reconnects (48 checks) |
 | `python3 tests/python_sdk.py` | The AI control SDK, `rd` CLI and skill runner against a fake phone API: selectors, in-memory screenshots, hand-over to the AI (exit 3), resume with `--from-step` |
+| (in `make test`) | Notification forwarding: the `[notify]` config reaches the phone, a captured notification reaches a viewer over WebSocket, and the server pushes it to a stub Bark endpoint as JSON |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | The same, on the static MIPS router binaries under user-mode emulation |
 | `python android/native/test/rtc_interop.py` | Phone WebRTC stack ↔ aiortc: ICE, DTLS-SRTP, SCTP, H.264 decoded frames, data channels |
 | `python android/native/test/rtp_depack.py` | H.265 and H.264 packetizers: bit-exact round trip through an independent depacketizer + FFmpeg |
@@ -187,6 +188,19 @@ python3 -m remodroid ui                      # the screen as an outline
 python3 -m remodroid tap --rid search --wait-change
 python3 skills/settings-search/run.py --query wifi
 ```
+
+## Phone notifications
+
+The phone can forward its own notifications. The helper reads them on the phone (a poll of
+`dumpsys notification`, the only notification content the shell user can see), filters out ongoing
+and low-importance ones, and sends each new one to any connected client over the viewer WebSocket and
+to [Bark](https://github.com/Finb/Bark) when the server has a `bark_url`. From there your usual flow
+takes over: you get the push, then call the AI control API (or a skill) to act on it.
+
+Turn it on with `[notify] enabled = true` in the router's `agent.ini` (plus `min_importance` and an
+`ignore` list), and set `[notify] bark_url = https://api.day.app/<key>` in the server's `server.ini`
+for Bark (or per router under `[device_notify]`). The Bark key stays on the server and is never
+logged. WebSocket delivery needs no server config. See the sample configs in `deploy/`.
 
 ## Status
 

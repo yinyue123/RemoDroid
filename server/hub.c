@@ -348,7 +348,10 @@ static void agent_message(conn_t *c, cJSON *m)
         hub_device_changed(d);
     } else if (!strcmp(t, "event")) {
         cJSON *dd = msg_d(m);
-        broadcast_event(d, msg_str(dd, "kind", "unknown"), cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(dd, "info"), 1));
+        const char *kind = msg_str(dd, "kind", "unknown");
+        cJSON *info = cJSON_GetObjectItemCaseSensitive(dd, "info");
+        notify_on_event(d, kind, info);
+        broadcast_event(d, kind, cJSON_Duplicate(info, 1));
     } else if (!strcmp(t, "signal")) {
         const char *sid = msg_sid(m);
         if (d->vs && d->vs->viewer && sid && !strcmp(sid, d->vs->sid)) {
