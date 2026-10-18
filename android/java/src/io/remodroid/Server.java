@@ -40,6 +40,7 @@ public final class Server implements Native.Listener {
         s.jar = System.getProperty("java.class.path");
         System.load(lib);
         Native.listener = s;
+        s.notify = new NotificationWatcher(s.cfg, s::onNotification); /* before the link, so the first config finds it */
         boolean h265 = ScreenEncoder.hasHardwareHevc(), audio = AudioCapture.supported();
         Ln.i("remodroid server starting (Android " + android.os.Build.VERSION.RELEASE + ", SDK " + Hidden.sdk()
                 + ", hardware H.265: " + h265 + ", audio: " + audio + ")");
@@ -49,7 +50,6 @@ public final class Server implements Native.Listener {
         }
         AudioCapture.init();
         new ApiServer(s.device, socket + "-api").start();
-        s.notify = new NotificationWatcher(s.cfg, s::onNotification);
         s.startCleanup();
         s.device.watchClipboard(s::onClipboard);
         s.sched.scheduleAtFixedRate(s::reportStatus, 5, 30, TimeUnit.SECONDS);
