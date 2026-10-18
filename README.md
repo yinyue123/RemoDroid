@@ -174,6 +174,9 @@ Koolshare / KoolCenter offline installers: [Merlin armv7](https://github.com/yin
 Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4/SHA256SUMS)
 <!-- /downloads:agent -->
 
+**Which OpenWrt file?** Find your router and its CPU in [doc/openwrt.md](doc/openwrt.md), which also lists
+the OpenWrt versions that work.
+
 **OpenWrt with LuCI, no command line:** in LuCI open **System → Software → Upload Package…**, choose the
 `.ipk` for your router, and install it. A **Services → RemoDroid** page appears: it pairs the router with your
 panel (step 3), starts and stops the agent, and shows whether the panel and the phone are connected.
