@@ -1,6 +1,6 @@
 /* RemoDroid panel (panel.html): three tabs at the bottom.
- *   #devices            every phone, tap one to control it (/?device=ID)
- *   #agents             the routers running the agent; #agents/ID edits one,
+ *   #devices            every phone and computer, tap one to control it (/?device=ID)
+ *   #agents             the agents (routers with a phone, computers); #agents/ID edits one,
  *                       #agents/add[/connect|/phone] enrolls a new one
  *   #server             this server's settings, one item at a time (/api/v1/settings)
  * Plain JS, no build step; works the same on remodroid-server and the Worker. */
@@ -15,6 +15,7 @@ const RELEASES = 'https://github.com/yinyue123/RemoDroid/releases/latest';
 const ICON = {
   phone: '<svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
   router: '<svg viewBox="0 0 24 24"><rect x="3" y="12.5" width="18" height="7.5" rx="2"/><path d="M7 16.2h.01M10.5 16.2h.01"/><path d="M8.5 9a5 5 0 0 1 7 0M6 6.5a8.5 8.5 0 0 1 12 0"/></svg>',
+  computer: '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9.5 20h5M12 16.5V20"/></svg>',
   copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
 };
 
@@ -93,8 +94,18 @@ async function loadDevices() {
   $('#devBadge').dataset.n = '';
   return waiting;
 }
+/* a computer (multi-platform.md) or a phone behind a router agent */
+const isDesk = d => !!(d && d.platform && d.platform !== 'android');
+const OS_NAME = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+const devIcon = d => isDesk(d) ? ICON.computer : ICON.phone;
+const agentIcon = d => isDesk(d) ? ICON.computer : ICON.router;
 const PHONE_STATE = d => {
   const p = d.phone || {};
+  if (isDesk(d)) {
+    if (!d.online) return ['off', 'offline'];
+    if (p.server !== 'running') return ['off', p.problem || 'not ready'];
+    return ['on', 'ready'];
+  }
   if (!d.online) return ['off', 'agent offline'];
   if (!p.attached) return p.problem ? ['off', p.problem] : ['wait', 'no phone on USB'];
   if (p.adb_state === 'unauthorized') return ['wait', 'tap “Allow USB debugging” on the phone'];
@@ -107,21 +118,21 @@ function renderDevices() {
   setTop('Devices', { action: devices.length ? ['Add', '#agents/add'] : null });
   if (!loadedDevices) { main.innerHTML = '<p class="note">Loading…</p>'; return; }
   if (!devices.length) {
-    main.innerHTML = `<div class="empty-state">${ICON.phone}<h2>No devices yet</h2><p>A device is an Android phone plugged into a router that runs the RemoDroid agent.</p>
+    main.innerHTML = `<div class="empty-state">${ICON.phone}<h2>No devices yet</h2><p>A device is an Android phone plugged into a router that runs the RemoDroid agent, or a Windows, macOS or Linux computer running RemoDroid.</p>
       <a class="btn" href="#agents/add">Add an agent</a></div>`;
     return;
   }
   main.innerHTML = group('', devices.map(d => {
-    const p = d.phone || {}, [cls, state] = PHONE_STATE(d);
-    const name = p.model || d.name;
-    const bits = p.model ? [d.name] : [];
+    const p = d.phone || {}, [cls, state] = PHONE_STATE(d), desk = isDesk(d);
+    const name = desk ? d.name : p.model || d.name;
+    const bits = desk ? [p.os || OS_NAME[d.platform]].filter(Boolean) : p.model ? [d.name] : [];
     if (p.android) bits.push('Android ' + p.android);
     if (cls !== 'on') bits.push(state);
     const inUse = d.session && d.session.active;
     const batt = p.battery && p.battery.level >= 0 ? `${p.battery.level}%${p.battery.charging ? ' ⚡' : ''}` : null;
-    return item({ href: '/?device=' + encodeURIComponent(d.id), icon: ICON.phone, iconCls: cls, title: name, sub: bits.join(' · '),
+    return item({ href: '/?device=' + encodeURIComponent(d.id), icon: devIcon(d), iconCls: cls, title: name, sub: bits.join(' · '),
       pill: inUse ? 'in use' : batt, pillCls: inUse ? 'accent' : '' });
-  }), 'Tap a phone to control it. “In use” means another browser is connected; you can take it over.');
+  }), 'Tap a device to control it. “In use” means another browser is connected; you can take it over.');
 }
 
 /* ---------------- Agents ---------------- */
@@ -129,16 +140,16 @@ function renderAgents() {
   setTop('Agents', { action: ['Add', '#agents/add'] });
   if (!loadedDevices) { main.innerHTML = '<p class="note">Loading…</p>'; return; }
   if (!devices.length) {
-    main.innerHTML = `<div class="empty-state">${ICON.router}<h2>No agents yet</h2><p>The agent runs on the router your phone is plugged into and connects out to this panel. No open ports at home.</p>
+    main.innerHTML = `<div class="empty-state">${ICON.router}<h2>No agents yet</h2><p>An agent runs on the router your phone is plugged into, or on a computer you want to control, and connects out to this panel. No open ports at home.</p>
       <a class="btn" href="#agents/add">Add an agent</a></div>`;
     return;
   }
   main.innerHTML = group('', devices.map(d => {
     const a = d.agent || {};
-    const sub = d.online ? [d.id, a.version && 'agent ' + a.version, a.arch].filter(Boolean).join(' · ')
+    const sub = d.online ? [d.id, isDesk(d) ? OS_NAME[d.platform] : null, a.version && 'agent ' + a.version, a.arch].filter(Boolean).join(' · ')
       : `offline${d.last_seen ? ' · seen ' + ago(d.last_seen) : ''}`;
-    return item({ href: '#agents/' + encodeURIComponent(d.id), icon: ICON.router, iconCls: d.online ? 'on' : 'off', title: d.name, sub });
-  })) + `<h2 class="gtitle"></h2><div class="group">${item({ href: '#agents/add', title: '', html: '<span class="txt"><b style="color:var(--accent)">Add an agent</b><small>Install it on a router and enroll it with a one-time code</small></span>' })}</div>`;
+    return item({ href: '#agents/' + encodeURIComponent(d.id), icon: agentIcon(d), iconCls: d.online ? 'on' : 'off', title: d.name, sub });
+  })) + `<h2 class="gtitle"></h2><div class="group">${item({ href: '#agents/add', title: '', html: '<span class="txt"><b style="color:var(--accent)">Add an agent</b><small>A router with a phone, or a computer; paired with a one-time code</small></span>' })}</div>`;
 }
 
 /* Router settings: agent.ini through the panel (agent.config.get / agent.config). */
@@ -172,6 +183,28 @@ const SETTINGS = [
     ['relay', 'Always relay through TURN', 'bool'],
   ]],
 ];
+/* A computer's desktop.ini (desktop/core/agent.c: agent.config.get / agent.config) */
+const DESK_SETTINGS = [
+  ['Control', [
+    ['desktop.view_only', 'View only (ignore mouse and keyboard)', 'bool'],
+    ['desktop.confirm', 'Ask at the computer before each session', 'bool'],
+    ['desktop.notify', 'Notify at the computer when a viewer connects', 'bool'],
+    ['desktop.lock_on_disconnect', 'Lock the computer after disconnecting', 'bool'],
+    ['desktop.clipboard_sync', 'Sync the clipboard', 'bool'],
+    ['desktop.allow_shell', 'Allow shell commands from the viewer', 'bool', null, null, 'Shell commands run as the user who is logged in. Off unless you need it.'],
+  ]],
+  ['Video', [
+    ['video.encoder', 'Encoder', 'select', [['auto', 'Auto'], ['hardware', 'Graphics card'], ['software', 'Software']]],
+    ['video.preset', 'Resolution', 'select', [['native', 'Native'], ['1080p', '1080p'], ['720p', '720p']]],
+    ['video.max_fps', 'Max frame rate', 'number', null, 'fps'],
+    ['video.max_bitrate_kbps', 'Max bitrate', 'number', null, 'kbit/s'],
+  ]],
+  ['Files', [
+    ['files.upload_dir', 'Upload folder', 'text'],
+    ['files.max_mb', 'Largest file', 'number', null, 'MB'],
+  ]],
+];
+const settingsFor = d => isDesk(d) ? DESK_SETTINGS : SETTINGS;
 let agentCfg = {}, agentCfgFor = null;
 const cmd = (id, c, args) => api('POST', `/api/v1/devices/${encodeURIComponent(id)}/cmd`, { cmd: c, args: args || {} });
 
@@ -180,21 +213,23 @@ async function renderAgent(id) {
   setTop(d ? d.name : id, { back: '#agents', backLabel: 'Agents' });
   if (!d) { main.innerHTML = loadedDevices ? '<div class="callout bad">This agent was removed.</div>' : '<p class="note">Loading…</p>'; return; }
   const a = d.agent || {}, p = d.phone || {}, [cls, state] = PHONE_STATE(d);
+  const desk = isDesk(d), N = desk ? 'computer' : 'phone';
   const status = group('', [
     item({ title: 'Status', html: '<span class="txt"><b>Status</b></span>', val: d.online ? `online${a.uptime_s ? ' · ' + dur(a.uptime_s) : ''}` : `offline${d.last_seen ? ' · ' + ago(d.last_seen) : ''}` }),
-    item({ html: '<span class="txt"><b>Phone</b></span>', val: p.model ? `${p.model}${cls === 'on' ? '' : ' · ' + state}` : state }),
+    desk ? item({ html: '<span class="txt"><b>Computer</b></span>', val: `${p.os || a.os || OS_NAME[d.platform]}${cls === 'on' ? '' : ' · ' + state}` })
+      : item({ html: '<span class="txt"><b>Phone</b></span>', val: p.model ? `${p.model}${cls === 'on' ? '' : ' · ' + state}` : state }),
     a.version ? item({ html: '<span class="txt"><b>Agent</b></span>', val: `${a.version} · ${a.arch || ''}` }) : '',
     a.public_ip ? item({ html: '<span class="txt"><b>Address</b></span>', val: a.public_ip }) : '',
     item({ html: '<span class="txt"><b>ID</b></span>', val: d.id }),
   ].filter(Boolean));
   const name = group('', [item({ act: 'rename', html: '<span class="txt"><b>Name</b></span>', val: d.name })]);
-  main.innerHTML = status + name + notifyGroup(d) + '<div id="cfg"></div>' +
+  main.innerHTML = status + name + (desk ? '' : notifyGroup(d)) + '<div id="cfg"></div>' +
     group('Actions', [
-      item({ act: 'open', html: '<span class="txt"><b style="color:var(--accent)">Open the phone</b></span>' }),
-      d.online ? item({ act: 'restart', html: '<span class="txt"><b>Restart the phone server</b><small>When the picture or input is stuck</small></span>', noChev: true }) : '',
-      d.online ? item({ act: 'usb', html: '<span class="txt"><b>Reconnect USB</b></span>', noChev: true }) : '',
-      d.online ? item({ act: 'wake', html: '<span class="txt"><b>Wake the phone</b></span>', noChev: true }) : '',
-      d.online ? item({ act: 'lock', html: '<span class="txt"><b>Lock the phone</b></span>', noChev: true }) : '',
+      item({ act: 'open', html: `<span class="txt"><b style="color:var(--accent)">Open the ${N}</b></span>` }),
+      d.online && !desk ? item({ act: 'restart', html: '<span class="txt"><b>Restart the phone server</b><small>When the picture or input is stuck</small></span>', noChev: true }) : '',
+      d.online && !desk ? item({ act: 'usb', html: '<span class="txt"><b>Reconnect USB</b></span>', noChev: true }) : '',
+      d.online ? item({ act: 'wake', html: `<span class="txt"><b>${desk ? 'Wake the display' : 'Wake the phone'}</b></span>`, noChev: true }) : '',
+      d.online ? item({ act: 'lock', html: `<span class="txt"><b>Lock the ${N}</b></span>`, noChev: true }) : '',
     ].filter(Boolean)) +
     `<h2 class="gtitle"></h2><div class="group"><button class="item danger" type="button" data-act="remove">Remove this agent</button></div>
     <p class="gfoot">Removing disconnects the agent; it must enroll again with a new code to come back.</p>`;
@@ -227,7 +262,7 @@ function notifyGroup(d) {
 }
 function renderAgentSettings(d, box) {
   const cur = agentCfg;
-  box.innerHTML = SETTINGS.map(([g, items]) => {
+  box.innerHTML = settingsFor(d).map(([g, items]) => {
     const help = items.find(i => i[5]);
     return group(g, items.map(([k, label, type, opts, unit]) => {
       const v = cur[k];
@@ -244,7 +279,7 @@ function renderAgentSettings(d, box) {
   box.querySelectorAll('select[data-k]').forEach(el => el.onchange = () => saveOne(el.dataset.k, el.value, el));
   box.querySelectorAll('[data-act^="edit:"]').forEach(b => b.onclick = () => {
     const k = b.dataset.act.slice(5);
-    const [, label, type, , unit] = SETTINGS.flatMap(g => g[1]).find(x => x[0] === k);
+    const [, label, type, , unit] = settingsFor(d).flatMap(g => g[1]).find(x => x[0] === k);
     sheet({ title: label, fields: [{ k, label: unit ? `${label} (${unit})` : label, type: type === 'number' ? 'number' : 'text', value: cur[k], min: 0, max: 1000000 }],
       save: async v => { await cmd(d.id, 'agent.config', { [k]: v[k] }); cur[k] = v[k]; toast('Saved to ' + d.name); renderAgentSettings(d, box); } });
   });
@@ -267,8 +302,8 @@ async function agentAction(d, what) {
     }
     if (what === 'restart') { await cmd(id, 'server.restart'); toast('Phone server restarting'); }
     if (what === 'usb') { await cmd(id, 'adb.reconnect'); toast('Reconnecting USB'); }
-    if (what === 'wake') { await cmd(id, 'phone.wake'); toast('Phone woken'); }
-    if (what === 'lock') { await cmd(id, 'phone.sleep'); toast('Phone locked'); }
+    if (what === 'wake') { await cmd(id, 'phone.wake'); toast(isDesk(d) ? 'Display woken' : 'Phone woken'); }
+    if (what === 'lock') { await cmd(id, 'phone.sleep'); toast(isDesk(d) ? 'Computer locked' : 'Phone locked'); }
     if (what === 'remove') {
       if (!confirm(`Remove “${d.name}”? Its agent is disconnected and must enroll again to come back.`)) return;
       await fetch(`/api/v1/devices/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' });
@@ -277,8 +312,21 @@ async function agentAction(d, what) {
   } catch (e) { toast(e.message); }
 }
 
-/* ---------------- Agents → add: install → connect → phone ---------------- */
-const ADD = [{ id: 'install', label: 'Agent', sub: 'Install' }, { id: 'connect', label: 'Connect', sub: 'Enroll' }, { id: 'phone', label: 'Phone', sub: 'USB' }];
+/* ---------------- Agents → add: install → connect → phone (or, for a computer: app → pair → ready) ---------------- */
+let kind = 'router';
+const ADD_ROUTER = [{ id: 'install', label: 'Agent', sub: 'Install' }, { id: 'connect', label: 'Connect', sub: 'Enroll' }, { id: 'phone', label: 'Phone', sub: 'USB' }];
+const ADD_DESK = [{ id: 'install', label: 'App', sub: 'Install' }, { id: 'connect', label: 'Pair', sub: 'Code' }, { id: 'phone', label: 'Ready', sub: 'Permissions' }];
+let ADD = ADD_ROUTER;
+/* release files (packaging/desktop/package.sh) */
+const DESK_OS = {
+  windows: { name: 'Windows', files: 'RemoDroid-…-windows-x86_64.zip (ARM: …-arm64.zip)',
+    steps: 'Unzip it anywhere (keep the three files together) and run <b>RemoDroid.exe</b>. Its icon appears next to the clock. Windows 10 1809 or newer.' },
+  macos: { name: 'macOS', files: 'RemoDroid-…-macos.zip',
+    steps: 'Unzip it, move <b>RemoDroid.app</b> to Applications and open it (the first time: right-click → Open). It lives in the menu bar. macOS 12.3 or newer.' },
+  linux: { name: 'Linux', files: 'remodroid-desktop_…_amd64.deb / .rpm (or the …linux-x86_64.tar.gz)',
+    steps: 'Install the package, then start <b>RemoDroid</b> from the app menu. It needs an X11 session (on GNOME: “GNOME on Xorg” at login); its icon sits in the tray.' },
+};
+let deskOs = /Mac/.test(navigator.platform) ? 'macos' : /Linux/.test(navigator.platform) && !/Android/.test(navigator.userAgent) ? 'linux' : 'windows';
 const OS = {
   openwrt: { name: 'OpenWrt', cmd: `wget -qO- ${INSTALL}/install_agent.sh | sh`, pkg: 'ipk', install: 'opkg install ./remodroid-agent_*.ipk', note: 'Run it in an SSH session on the router. Pulls in ca-bundle for HTTPS.' },
   debian: { name: 'Debian · Ubuntu', cmd: `curl -fsSL ${INSTALL}/install_agent.sh | sudo sh`, pkg: 'deb', install: 'sudo apt install ./remodroid-agent_*.deb', note: 'Raspberry Pi OS and Armbian too.' },
@@ -299,13 +347,26 @@ document.addEventListener('click', async e => {
 });
 
 function renderAdd(stepId) {
+  ADD = kind === 'computer' ? ADD_DESK : ADD_ROUTER;
   const step = Math.max(0, ADD.findIndex(s => s.id === stepId));
   setTop('Add an agent', { back: '#agents', backLabel: 'Agents' });
   const steps = `<nav class="steps" aria-label="Add an agent">${ADD.map((s, i) => `${i ? `<span class="bar${i <= step ? ' done' : ''}"></span>` : ''}<a class="st${i === step ? ' on' : i < step ? ' done' : ''}" href="#agents/add/${s.id}" style="text-decoration:none"><span class="n">${i < step ? '✓' : i + 1}</span><span><b>${s.label}</b><small>${s.sub}</small></span></a>`).join('')}</nav>`;
   const foot = (next, label) => `<div class="flow-foot">${step ? `<a class="btn ghost" href="#agents/add/${ADD[step - 1].id}">← Back</a>` : ''}<span class="spacer"></span>${next ? `<a class="btn" href="${next}">${label || 'Next →'}</a>` : ''}</div>`;
-  if (step === 0) {
+  const kinds = `<div class="seg" role="tablist" style="margin-bottom:18px">${[['router', 'Router with a phone'], ['computer', 'Computer']].map(([k, t]) =>
+    `<button type="button" role="tab" data-kind="${k}" aria-selected="${k === kind}">${t}</button>`).join('')}</div>`;
+  if (step === 0 && kind === 'computer') {
+    const o = DESK_OS[deskOs];
+    main.innerHTML = `${steps}<div class="flow">${kinds}<p class="eyebrow">01 — app</p><h1>Install <em>RemoDroid</em> on the computer</h1>
+      <p class="lede">A small app that sits in the tray or menu bar and dials out to this panel. No open port, no public address.</p>
+      <div class="seg" role="tablist">${Object.entries(DESK_OS).map(([k, v]) => `<button type="button" role="tab" data-dos="${k}" aria-selected="${k === deskOs}">${v.name}</button>`).join('')}</div>
+      <div class="num"><i>1</i>Download</div>
+      <p>From the <a href="${RELEASES}" target="_blank" rel="noopener">latest release</a>: <code>${esc(o.files)}</code>.</p>
+      <div class="num"><i class="alt">2</i>Start it</div><p class="note">${o.steps}</p>
+      ${foot('#agents/add/connect', 'It\'s running →')}</div>`;
+    main.querySelectorAll('[data-dos]').forEach(b => b.onclick = () => { deskOs = b.dataset.dos; renderAdd('install'); });
+  } else if (step === 0) {
     const o = OS[os];
-    main.innerHTML = `${steps}<div class="flow"><p class="eyebrow">01 — agent</p><h1>Install the <em>agent</em></h1>
+    main.innerHTML = `${steps}<div class="flow">${kinds}<p class="eyebrow">01 — agent</p><h1>Install the <em>agent</em></h1>
       <p class="lede">It runs on the router the phone is plugged into and dials out to this panel. No open port, no public address.</p>
       <div class="seg" role="tablist">${Object.entries(OS).map(([k, v]) => `<button type="button" role="tab" data-os="${k}" aria-selected="${k === os}">${v.name}</button>`).join('')}</div>
       <div class="num"><i>1</i>One command</div>${cmdBox(o.cmd, hl(o.cmd))}<p class="note">${esc(o.note)}</p>
@@ -315,9 +376,12 @@ function renderAdd(stepId) {
     main.querySelectorAll('[data-os]').forEach(b => b.onclick = () => { os = b.dataset.os; renderAdd('install'); });
   } else if (step === 1) {
     renderConnect(steps, foot);
+  } else if (kind === 'computer') {
+    renderReady(steps, foot);
   } else {
     renderPhone(steps, foot);
   }
+  main.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { kind = b.dataset.kind; renderAdd('install'); });
 }
 async function newCode() {
   clearInterval(codeTimer);
@@ -340,6 +404,7 @@ async function renderConnect(steps, foot) {
     if (route().sub !== 'connect') return;
   }
   const panel = location.origin;
+  if (kind === 'computer') { renderPair(steps, foot, panel); return; }
   const enroll = `remodroid enroll --panel ${panel} --code ${code.code}`;
   const both = `${OS[os].cmd.replace(/\| (sudo )?sh$/, '| $1sh -s --')} --panel ${panel} --code ${code.code}`;
   const expired = code.state === 'expired';
@@ -359,17 +424,48 @@ async function pollCode() {
   let s;
   try { s = await api('GET', `/api/v1/enroll/codes/${code.code}`); } catch (_) { return; }
   const term = $('#term'), state = $('#state');
+  if (term) term.hidden = false;
   if (s.state === 'used' && code.state === 'pending') {
     code.state = 'used'; newId = s.device;
-    if (term) term.innerHTML += `<div class="d">▸ enrolled as ${esc(s.device)}</div>`;
+    if (term) term.innerHTML += `<div class="d">▸ ${kind === 'computer' ? 'paired' : 'enrolled'} as ${esc(s.device)}</div>`;
     if (state) state.textContent = 'connecting…';
   }
   if (s.state === 'used' && s.online) {
     code.state = 'online'; clearInterval(codeTimer);
-    if (term) term.innerHTML += '<div class="k">✓ bound — this agent is online</div>';
+    if (term) term.innerHTML += `<div class="k">✓ bound — this ${kind === 'computer' ? 'computer' : 'agent'} is online</div>`;
     await loadDevices();
     setTimeout(() => { if (route().sub === 'connect') location.hash = '#agents/add/phone'; }, 1200);
   }
+}
+/* a computer: the code goes into the app's pairing window */
+function renderPair(steps, foot, panel) {
+  const expired = code.state === 'expired';
+  const cli = `remodroid-desktopd pair --panel ${panel} --code ${code.code}`;
+  main.innerHTML = `${steps}<div class="flow"><p class="eyebrow">02 — pair</p><h1>Enter this code in <em>RemoDroid</em></h1>
+    ${expired ? '<div class="callout warn">That code expired. <button class="link-btn" type="button" id="again">Make a new one</button></div>' : ''}
+    <p class="lede">Open RemoDroid on the computer (its tray or menu bar icon → Pair with a panel) and type:</p>
+    <div class="num"><i>1</i>Panel address</div>${cmdBox(panel)}
+    <div class="num"><i>2</i>Pairing code</div>
+    <p style="margin:6px 0 14px"><span class="pill accent" style="font-size:24px;letter-spacing:3px;padding:8px 18px">${esc(code.code)}</span></p>
+    <div class="term" id="term" ${code.state === 'pending' || expired ? 'hidden' : ''}>${code.state !== 'pending' && !expired ? `<div class="d">▸ paired as ${esc(newId)}</div>` : ''}</div>
+    <p class="status" id="state">${code.state === 'online' ? `<b>${esc(newId)}</b> is online` : 'waiting for the computer'}</p>
+    <p class="small-print">code <b>${esc(code.code)}</b> · expires in <b id="expires">…</b> · single use</p>
+    <details style="margin-top:22px"><summary class="note">No screen, or Linux without the tray app?</summary>${cmdBox(cli, hl(cli))}</details>
+    ${foot(code.state === 'online' ? '#agents/add/phone' : null)}</div>`;
+  tickCode();
+  if (expired) $('#again').onclick = () => { code = null; renderAdd('connect'); };
+}
+function renderReady(steps, foot) {
+  const d = devices.find(x => x.id === newId) || devices.find(x => x.online && isDesk(x)) || null;
+  const [cls, txt] = d ? PHONE_STATE(d) : ['wait', 'waiting for the computer'];
+  const ready = cls === 'on', mac = d ? d.platform === 'macos' : deskOs === 'macos';
+  main.innerHTML = `${steps}<div class="flow"><p class="eyebrow">03 — ready</p><h1>${mac ? 'Allow <em>screen recording</em>' : 'All <em>set</em>'}</h1>
+    ${mac ? `<p class="lede">macOS asks once. RemoDroid's window shows both permissions and opens the right page of System Settings.</p>
+    <div class="num"><i>1</i>Screen Recording</div><p class="note">System Settings → Privacy &amp; Security → <b>Screen Recording</b> → turn on RemoDroid.</p>
+    <div class="num"><i>2</i>Accessibility</div><p class="note">Privacy &amp; Security → <b>Accessibility</b> → turn on RemoDroid, so the mouse and keyboard work.</p>`
+    : '<p class="lede">The computer shows a notification whenever someone connects, and its tray icon turns red while it is being viewed.</p>'}
+    <div class="callout ${ready ? 'ok' : ''}" style="margin-top:22px"><span class="dot ${cls}"></span>${d ? `<b>${esc(d.name)}</b>: ` : ''}${esc(ready ? 'ready to control' : txt)}</div>
+    ${foot(ready ? '/?device=' + encodeURIComponent(d.id) : null, 'Open the computer →')}</div>`;
 }
 function renderPhone(steps, foot) {
   const d = devices.find(x => x.id === newId) || devices.find(x => x.online) || null;

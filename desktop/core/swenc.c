@@ -17,6 +17,11 @@
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #endif
+#if defined(__aarch64__) && defined(__clang__)
+/* minih264's NEON code uses GCC's name for the two-register table lookup (Apple clang, Windows on ARM) */
+#include <arm_neon.h>
+#define vtbl2q_u8 vqtbl2_u8
+#endif
 #include "minih264e.h"
 #ifdef __clang__
 #pragma clang diagnostic pop

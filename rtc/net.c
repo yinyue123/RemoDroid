@@ -82,7 +82,7 @@ static int send_frame(net_t *n, uint8_t type, uint8_t id, const struct sockaddr_
 {
     if (n->cfd < 0)
         return -1;
-    uint8_t af = 0, addr[16];
+    uint8_t af = 0, addr[16] = { 0 };
     uint16_t port = 0;
     if (a && a->ss_family == AF_INET) {
         af = 4;

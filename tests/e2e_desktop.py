@@ -127,11 +127,16 @@ notify = false
     req = urllib.request.Request(base + "/api/v1/enroll/codes", data=b'{"name":"Test computer"}',
                                  headers={"Cookie": cookie}, method="POST")
     code = json.loads(urllib.request.urlopen(req).read())["code"]
-    pair = subprocess.run([f"{b}/desktop/remodroid-desktopd", "-c", f"{d}/desktop.ini", "pair", "--panel", base,
-                           "--code", code.lower().replace("-", "")], env=env, capture_output=True, text=True, timeout=30)
-    res["pair"] = pair.returncode == 0 and "paired as" in pair.stderr
+    try:
+        pair = subprocess.run([f"{b}/desktop/remodroid-desktopd", "-c", f"{d}/desktop.ini", "-v", "pair", "--panel", base,
+                               "--code", code.lower().replace("-", "")], env=env, capture_output=True, text=True, timeout=30)
+        res["pair"] = pair.returncode == 0 and "paired as" in pair.stderr
+        out = pair.stderr
+    except subprocess.TimeoutExpired as e:
+        res["pair"] = False
+        out = (e.stderr or b"").decode(errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
     if not res["pair"]:
-        print(pair.stderr)
+        print("---- pair ----\n" + out)
     agent_log = open(f"{d}/agent.log", "w")
     procs.append(subprocess.Popen([f"{b}/desktop/remodroid-desktopd", "-c", f"{d}/desktop.ini", "-v"], env=env,
                                   stderr=agent_log, stdout=agent_log))
