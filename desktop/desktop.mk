@@ -89,7 +89,7 @@ $(DESK_OUT)/obj/third_party/libsrtp/%.c.o: third_party/libsrtp/%.c
 
 $(DESK_OUT)/obj/third_party/usrsctp/%.c.o: third_party/usrsctp/%.c
 	@mkdir -p $(@D)
-	$(CC) $(DESK_CFLAGS) $(DESK_SCTP) -w -c $< -o $@
+	$(CC) $(DESK_CFLAGS) $(DESK_SCTP) -UNOMINMAX -w -c $< -o $@  # usrsctp uses windows.h's min/max
 
 $(DESK_OUT)/obj/third_party/%.c.o: third_party/%.c
 	@mkdir -p $(@D)
