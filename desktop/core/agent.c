@@ -32,7 +32,9 @@ static struct {
     ev_timer confirm_timer;
     char wsc_problem[200];
     /* log ring */
-    char *log[300];
+    char *log[1000];
+    unsigned log_seq; /* lines logged so far */
+    char log_path[600];
     int log_head, log_n;
     FILE *log_file;
     long log_size;
@@ -64,6 +66,7 @@ static void load_conf(void)
     D.allow_shell = desk_conf_bool("desktop", "allow_shell", 0);
     D.notify = desk_conf_bool("desktop", "notify", 1);
     D.lock_on_disc = desk_conf_bool("desktop", "lock_on_disconnect", 0);
+    D.audio = desk_conf_bool("desktop", "audio", 1);
 }
 
 void desk_refresh_screens(void)
@@ -89,6 +92,7 @@ void desk_refresh_screens(void)
 static void log_hook(const char *line)
 {
     rd_mutex_lock(&G.mu);
+    G.log_seq++;
     if (G.log_n == (int)RD_ARRAY_LEN(G.log)) {
         free(G.log[G.log_head]);
         G.log[G.log_head] = rd_strdup(line);
@@ -250,7 +254,7 @@ static void rtc_on_session(void *ud, const char *sid, int state, const char *cod
     G.rtc_state = state;
     if (state == RTC_SESSION_CONNECTED) {
         G.since = (long long)rd_now_ms();
-        session_connected(sid, codec, profile, quality);
+        session_connected(sid, codec, profile, quality, audio);
         LOGI("session %s: %s is viewing", sid, G.viewer[0] ? G.viewer : "a viewer");
         if (D.notify) {
             char t[160];
@@ -401,6 +405,7 @@ static void on_server_message(void *ud, cJSON *m)
                 { "desktop", "view_only", "false" },      { "desktop", "confirm", "false" },
                 { "desktop", "clipboard_sync", "true" },  { "desktop", "notify", "true" },
                 { "desktop", "lock_on_disconnect", "false" }, { "desktop", "allow_shell", "false" },
+                { "desktop", "audio", "true" },
                 { "video", "preset", "1080p" },           { "video", "max_fps", "60" },
                 { "video", "max_bitrate_kbps", "20000" }, { "video", "encoder", "auto" },
                 { "files", "upload_dir", "" },            { "files", "max_mb", "2048" },
@@ -547,6 +552,8 @@ static int apply_setting(const char *key, const char *val, char *err, size_t err
     load_conf();
     if (!strcmp(sec, "desktop") && !strcmp(k, "view_only") && D.view_only)
         input_release_all();
+    if (!strcmp(sec, "desktop") && !strcmp(k, "audio"))
+        session_audio_update();
     send_status();
     return 0;
 }
@@ -610,16 +617,15 @@ int rd_agent_start(const char *conf_path, rd_agent_cb_t cb, void *ud)
     snprintf(D.conf_path, sizeof D.conf_path, "%s", conf_path && *conf_path ? conf_path : rd_agent_default_conf());
     snprintf(D.platform, sizeof D.platform, "%s", dsk_platform());
     rd_hostname(D.host, sizeof D.host);
-    char logp[600];
-    snprintf(logp, sizeof logp, "%s%cdesktop.log", dsk_config_dir(), RD_PATH_SEP);
-    G.log_file = fopen(logp, "a");
+    snprintf(G.log_path, sizeof G.log_path, "%s%cdesktop.log", dsk_config_dir(), RD_PATH_SEP);
+    G.log_file = fopen(G.log_path, "a");
     rd_log_set_hook(log_hook);
     load_conf();
     rd_rtc_opts_t o = {
         .listen = "embed",
         .offer_h265 = dsk_hwvideo_has_h265() && strcmp(desk_conf("video", "codec", "auto"), "h264") &&
                       strcmp(desk_conf("video", "encoder", "auto"), "software"),
-        .offer_audio = 0,
+        .offer_audio = audio_available(),
         .max_kbps = (int)desk_conf_int("video", "max_bitrate_kbps", 20000),
         .log_level = rd_log_level,
         .log_name = "desktop",
@@ -724,6 +730,28 @@ void rd_agent_pair(const char *panel, const char *code, const char *name,
 #endif
 }
 
+int rd_agent_parse_pair(const char *line, char *panel, size_t panelcap, char *code, size_t codecap)
+{
+    return rd_enroll_parse(line, panel, panelcap, code, codecap);
+}
+
+const char *rd_agent_pair_line(const char *line, const char *name,
+                               void (*on_done)(void *ud, int ok, const char *msg), void *ud)
+{
+    char panel[300] = "", code[40] = "";
+    rd_enroll_parse(line, panel, sizeof panel, code, sizeof code);
+    const char *bad = !panel[0] && !code[0] ? "Paste the line the panel shows under Agents → Add → Computer."
+                      : !panel[0]           ? "The line has no panel address (--panel https://…). Paste the whole line."
+                      : !code[0]            ? "The line has no pairing code (--code XXXX-XXXX). Paste the whole line."
+                                            : NULL;
+    if (bad) {
+        LOGW("pairing: %s", bad);
+        return bad;
+    }
+    rd_agent_pair(panel, code, name, on_done, ud);
+    return NULL;
+}
+
 static void do_unpair(void *arg)
 {
     if (G.sid[0])
@@ -803,6 +831,18 @@ char *rd_agent_log(int lines)
     rd_buf_append(&b, "", 1);
     return (char *)b.p;
 }
+
+unsigned rd_agent_log_seq(void)
+{
+    if (!G.started)
+        return 0;
+    rd_mutex_lock(&G.mu);
+    unsigned s = G.log_seq;
+    rd_mutex_unlock(&G.mu);
+    return s;
+}
+
+const char *rd_agent_log_path(void) { return G.log_path; }
 
 void rd_agent_free(void *p) { free(p); }
 

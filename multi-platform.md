@@ -98,9 +98,11 @@ also a **JNI binding**. The design splits these jobs.
                  ├──────────────────── Android only ─────────┬──────── desktop only ─────────────────────┤
                  │  android/native/jni.c   rd_rtc_* ⇄ JNI    │  common/wsc.c httpc.c enroll.c            │
                  │  android/native/image.c screenshots       │  desktop/core/   agent session input files │
-                 │                                           │                  video keymap yuv          │
+                 │                                           │                  video keymap yuv audio    │
                  │                                           │  desktop/<os>/   capture encode input clip │
+                 │                                           │                  audio (loopback)          │
                  │                                           │  third_party/minih264 (software H.264)     │
+                 │                                           │  third_party/opus (the computer's sound)   │
                  └───────────────────────────────────────────┴────────────────────────────────────────────┘
                           ▲ System.load (Java)                        ▲ linked by the app  (rd_agent_*  API)
 ```
@@ -126,6 +128,7 @@ What is shared, and with whom:
 | `common/enroll.c` code redemption (moved from `agent/`) | | ✓ | | ✓ |
 | `desktop/core/` session, ctrl protocol, input decoding, keymap, files, video pipeline | | | | ✓ all three |
 | `third_party/minih264` software encoder + `yuv.c` | | | | ✓ (fallback on all three, primary on Linux v1) |
+| `third_party/opus` + `desktop/core/audio.c` the computer's sound | | | | ✓ all three (phones use Android's encoder) |
 
 Each desktop OS needs only its own capture, encoder, input injection, clipboard, system integration and UI
 code, roughly 1,500 to 2,500 lines per OS. Everything else is shared.
@@ -154,6 +157,7 @@ desktop/
     headless.c                                           → remodroid-desktopd (any OS, no UI)
   desktop.mk
 third_party/minih264/        minih264e.h (CC0), vendored like the other libraries
+third_party/opus/            libopus 1.5.2 (BSD): celt/ silk/ src/ include/, float build, no SIMD or DNN extras
 ```
 
 Moving `android/native` → `rtc/` is a pure `git mv`, plus path updates in `rtc.mk`, `android/build.sh`,
@@ -275,8 +279,8 @@ mostly on request (PLI), repeat the last frame after 100 ms on a static screen, 
 
 ## 6. Platform backends
 
-All system APIs, and nothing third-party. Minimum versions: **Windows 10 1809+**, **macOS 12.3+**
-(ScreenCaptureKit), **Linux with an X11 session** (glibc 2.31+).
+All system APIs, and nothing third-party. Minimum versions: **Windows 10 1809+**, **macOS 13+**
+(ScreenCaptureKit, including its sound), **Linux with an X11 session** (glibc 2.31+).
 
 | | Windows (C, COM through `lpVtbl`) | macOS (C / Objective-C) | Linux (C) |
 |---|---|---|---|
@@ -330,6 +334,7 @@ is viewing**). It always shows when the computer is being watched.
    View only (block mouse and keyboard)       ✓ toggle
    Open panel                                 → default browser
    Pair with a panel…  /  Pairing & status…   → window
+   Show log                                   → log window
  ─────────────────────────────────
    Start at login                             ✓ toggle
    Quit RemoDroid
@@ -337,17 +342,22 @@ is viewing**). It always shows when the computer is being watched.
 
 A system notification is shown when a session starts and when it ends ("alice is viewing this computer").
 
+**Show log** (also a button in the pairing window) opens a resizable log window: the agent's last 1000
+lines in a monospaced view that follows new lines (unless scrolled up), the path of `desktop.log` (which
+keeps everything), **Copy**, and **Open folder** / **Show in Finder**. It reads `rd_agent_log()` whenever
+`rd_agent_log_seq()` moves.
+
 ### 7.2 Pairing window
 
 ```
  ┌──────────────── RemoDroid ────────────────┐
  │  Pair this computer with your panel        │
  │                                            │
- │  Panel address  [https://remo.example.com] │
- │  Pairing code   [X5SX-K3M7]                │
+ │  Pairing command                           │
+ │  [remodroid-desktopd pair --panel https:/…]│
+ │  Paste the whole line from the panel:      │
+ │  Agents → Add → Computer                   │
  │  Name           [office-pc            ]    │
- │                                            │
- │  On the panel: Agents → Add → Computer     │
  │                         [ Cancel ] [ Pair ] │
  ├────────────────────────────────────────────┤
  │  Permissions (macOS only)                  │
@@ -357,7 +367,10 @@ A system notification is shown when a session starts and when it ends ("alice is
 ```
 
 When the computer is paired, the same window shows the panel, the device name, the state and the last
-problem, plus **Unpair**. Pairing calls `rd_agent_pair()` → `common/enroll.c` → `POST /api/v1/enroll`,
+problem, plus **Unpair**. The one field takes the whole line the panel shows, like the router's LuCI and
+Merlin pages: `rd_agent_pair_line()` → `rd_enroll_parse()` picks out `--panel` and `--code` (or a bare
+address and code) from `remodroid-desktopd pair …`, `remodroid enroll …` or the install one-liner, then
+calls `rd_agent_pair()` → `common/enroll.c` → `POST /api/v1/enroll`,
 the same API the router's `remodroid-agent enroll` uses. It writes `[server]` into `desktop.ini` and
 connects.
 
@@ -369,7 +382,7 @@ connects.
 | Tray | `Shell_NotifyIconW` + `TrackPopupMenu` | `NSStatusItem` + `NSMenu`, `LSUIElement` (no Dock icon) | StatusNotifierItem + `com.canonical.dbusmenu` over GDBus; `GtkStatusIcon` (XEmbed) if no SNI watcher is present |
 | Window | `CreateDialogIndirect` from `app.rc`, Common Controls v6 (manifest), per-monitor DPI aware | `NSWindow` built in code (no nib) | GTK 3 dialog |
 | Notifications | `NIF_INFO` balloon (a toast on Windows 10+) | `UNUserNotificationCenter` | `org.freedesktop.Notifications` (GDBus) |
-| Start at login | `HKCU\…\Run` | `SMAppService.mainApp` (macOS 13+), or a LaunchAgent plist on 12 | `~/.config/autostart/remodroid.desktop` |
+| Start at login | `HKCU\…\Run` | `SMAppService.mainApp` | `~/.config/autostart/remodroid.desktop` |
 | Links against | user32, shell32, comctl32, gdi32, d3d11, dxgi, mfplat, mf, ole32, bcrypt, ws2_32, iphlpapi, crypt32 | AppKit, ScreenCaptureKit, VideoToolbox, CoreMedia, CoreVideo, ApplicationServices, Security, UserNotifications | libgtk-3, libgio-2.0, libX11, libXext, libXtst, libXrandr, libXdamage, libXfixes |
 
 On Linux, "system UI APIs" means GTK 3 and GLib/GIO. They are the desktop's own libraries and ship
@@ -473,8 +486,9 @@ Small changes, made in both implementations:
 - `server/hub.c` `hub_device_json` and `worker/src/hub.js`: add `platform` (top level) and `agent.os` from
   `hello`. Everything else passes through unchanged.
 - `web/agent.html` (Agents → Add) gets a **Router / Computer** choice. Router shows the
-  `remodroid-agent enroll` command, as today. Computer shows the code large, with "Enter this code in the
-  RemoDroid app on the computer" and download links. The enroll API is unchanged.
+  `remodroid-agent enroll` command, as today. Computer shows one line,
+  `remodroid-desktopd pair --panel … --code …`, to paste into the RemoDroid app's pairing window (or to run in a
+  terminal), and download links. The enroll API is unchanged.
 - `web/panel.js` device list: a platform icon, and "computer" wording instead of "phone" where it appears.
 - The router agent sends `"platform": "android"` in `hello`.
 
@@ -558,7 +572,7 @@ conservative:
 make desktop                       host OS: libremodroid + app + headless
 make desktop desktop-app TARGET=win-x86_64 CC=gcc    (MSYS2 UCRT64 on Windows)
 make desktop desktop-app TARGET=win-arm64 CC=clang WINDRES=llvm-windres   (MSYS2 CLANGARM64)
-make desktop desktop-app TARGET=mac CC=clang ARCHFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=12.3"
+make desktop desktop-app TARGET=mac CC=clang ARCHFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=13.0"
 ```
 
 Windows builds natively on the Windows runners with MSYS2 (UCRT64 gcc for x86_64, CLANGARM64 clang for arm64),
@@ -630,7 +644,8 @@ Each milestone builds in CI and leaves Android working.
 | **M3** Windows | DXGI + MF fused source, SendInput, clipboard, system CAs, tray app + pairing dialog, zip | |
 | **M4** macOS | SCK + VideoToolbox (H.264/HEVC), CGEvent, NSPasteboard, menu bar app + pairing window + permissions, .app | |
 | **M5** Linux app and polish | GTK pairing window + SNI tray, notifications, autostart, .deb/.rpm; multi-monitor picker; files on desktops; touch-viewer zoom/pan; panel "Computer" enrollment; README/download grids; `arch.md` section | |
-| **M6** Later | Wayland (xdg-desktop-portal ScreenCast + PipeWire via `dlopen`, uinput), VA-API, sound (WASAPI loopback, SCK audio, PulseAudio monitor → Opus, reusing `rtc_audio`), remote cursor shape, unattended mode (Windows service using `WTSGetActiveConsoleSessionId`, macOS LaunchDaemon), signed installers | |
+| **M6** Sound | The computer's sound: WASAPI loopback, ScreenCaptureKit audio (so macOS 13+), the PulseAudio/PipeWire monitor via `dlopen`; `desktop/core/audio.c` downmixes, resamples to 48 kHz and encodes Opus (vendored libopus) onto the same track as the phone's (`rtc_audio`); `desktop.audio` setting, the viewer's Sound switch; Xvfb e2e plays a tone into a null sink | Done |
+| **M7** Later | Wayland (xdg-desktop-portal ScreenCast + PipeWire via `dlopen`, uinput), VA-API, remote cursor shape, unattended mode (Windows service using `WTSGetActiveConsoleSessionId`, macOS LaunchDaemon), signed installers | |
 
 ---
 

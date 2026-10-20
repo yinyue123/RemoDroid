@@ -23,7 +23,7 @@ DESK_SRC := desktop/$(if $(filter windows,$(DESK_OS)),win,$(if $(filter macos,$(
 DESK_INCS := -Idesktop -Idesktop/core -I$(DESK_SRC) -Irtc -Icommon -Ithird_party/libev -Ithird_party/cjson \
              -Ithird_party/inih -Ithird_party/picohttpparser -Ithird_party/mbedtls/include \
              -Ithird_party/libsrtp/include -Ithird_party/libsrtp/crypto/include -Ithird_party/usrsctp/usrsctplib \
-             -Ithird_party/minih264
+             -Ithird_party/minih264 -Ithird_party/opus/include
 DESK_DEFS := -DRD_DESKTOP -DMBEDTLS_CONFIG_FILE='"mbedtls_desktop_config.h"' \
              -DINI_ALLOW_INLINE_COMMENTS=1 -DINI_STOP_ON_FIRST_ERROR=1 -DINI_MAX_LINE=1024 -DEV_STANDALONE=1 \
              -DINI_API=
@@ -62,7 +62,7 @@ DESK_LIB   := $(DESK_OUT)/libremodroid.so
 DESK_EXE   :=
 DESK_DEFS  += -D_GNU_SOURCE $(EV_DEFS)
 DESK_SCTP  += -DHAVE_SYS_QUEUE_H -DHAVE_STDATOMIC_H
-DESK_LIBS  := -lX11 -lXext -lXtst -lXrandr -lXdamage -lXfixes -lm -lpthread
+DESK_LIBS  := -lX11 -lXext -lXtst -lXrandr -lXdamage -lXfixes -ldl -lm -lpthread
 DESK_SHARED := -shared -Wl,-soname,libremodroid.so -Wl,--gc-sections -Wl,--exclude-libs,ALL
 DESK_TEST_LIBS := -lm -lpthread
 DESK_PIC   := -fPIC
@@ -81,6 +81,12 @@ DESK_TP  := third_party/libev/ev.c third_party/cjson/cJSON.c third_party/inih/in
             third_party/libsrtp/srtp/srtp.c $(wildcard third_party/libsrtp/crypto/*/*.c) \
             $(wildcard third_party/usrsctp/usrsctplib/*.c) $(wildcard third_party/usrsctp/usrsctplib/netinet/*.c) \
             $(wildcard third_party/usrsctp/usrsctplib/netinet6/*.c)
+# libopus (BSD), the computer's sound: the float build, plain C (no SIMD, no neural-network extras)
+include third_party/opus/celt_sources.mk third_party/opus/silk_sources.mk third_party/opus/opus_sources.mk
+DESK_TP  += $(addprefix third_party/opus/,$(CELT_SOURCES) $(SILK_SOURCES) $(SILK_SOURCES_FLOAT) $(OPUS_SOURCES) \
+                                           $(OPUS_SOURCES_FLOAT))
+DESK_OPUS := -DOPUS_BUILD -DOPUS_EXPORT= -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION='"1.5.2"' -Ithird_party/opus/celt \
+             -Ithird_party/opus/silk -Ithird_party/opus/silk/float -Ithird_party/opus/src
 DESK_OBJ := $(patsubst %,$(DESK_OUT)/obj/%.o,$(DESK_OWN) $(DESK_TP))
 
 $(DESK_OUT)/obj/third_party/libsrtp/%.c.o: third_party/libsrtp/%.c
@@ -90,6 +96,10 @@ $(DESK_OUT)/obj/third_party/libsrtp/%.c.o: third_party/libsrtp/%.c
 $(DESK_OUT)/obj/third_party/usrsctp/%.c.o: third_party/usrsctp/%.c
 	@mkdir -p $(@D)
 	$(CC) $(DESK_CFLAGS) $(DESK_SCTP) -UNOMINMAX -w -c $< -o $@  # usrsctp uses windows.h's min/max
+
+$(DESK_OUT)/obj/third_party/opus/%.c.o: third_party/opus/%.c
+	@mkdir -p $(@D)
+	$(CC) $(DESK_CFLAGS) $(DESK_OPUS) -w -c $< -o $@
 
 $(DESK_OUT)/obj/third_party/%.c.o: third_party/%.c
 	@mkdir -p $(@D)

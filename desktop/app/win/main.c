@@ -27,13 +27,14 @@
 #define WM_SHOWWIN (WM_APP + 6)
 
 enum {
-    ID_STATUS = 100, ID_VIEWER, ID_DISCONNECT, ID_VIEWONLY, ID_OPEN, ID_WINDOW, ID_LOGIN, ID_QUIT,
-    IDC_TITLE = 200, IDC_STATE, IDC_L_PANEL, IDC_PANEL, IDC_L_CODE, IDC_CODE, IDC_L_NAME, IDC_NAME, IDC_HINT,
-    IDC_INFO, IDC_UNPAIR, IDC_COPYLOG, IDC_VIEWONLY, IDC_LOGIN, IDC_DISC, IDC_OPENPANEL,
+    ID_STATUS = 100, ID_VIEWER, ID_DISCONNECT, ID_VIEWONLY, ID_OPEN, ID_WINDOW, ID_LOG, ID_LOGIN, ID_QUIT,
+    IDC_TITLE = 200, IDC_STATE, IDC_L_LINE, IDC_LINE, IDC_HINT, IDC_L_NAME, IDC_NAME,
+    IDC_INFO, IDC_UNPAIR, IDC_SHOWLOG, IDC_VIEWONLY, IDC_LOGIN, IDC_DISC, IDC_OPENPANEL,
+    IDC_LOGTEXT = 300, IDC_LOGPATH, IDC_LOGCOPY, IDC_LOGFOLDER,
 };
 #define IDC_PAIR IDOK /* Enter in the window presses it */
 
-static const wchar_t TRAY_CLASS[] = L"RemoDroidTray", WIN_CLASS[] = L"RemoDroidWindow";
+static const wchar_t TRAY_CLASS[] = L"RemoDroidTray", WIN_CLASS[] = L"RemoDroidWindow", LOG_CLASS[] = L"RemoDroidLog";
 static HINSTANCE g_inst;
 static HWND g_tray, g_win;
 static rd_status_t g_st;
@@ -43,6 +44,11 @@ static NOTIFYICONDATAW g_nid;
 static HFONT g_font, g_bold;
 static int g_pairing;
 static wchar_t g_pair_msg[300];
+static HWND g_log;
+static HFONT g_log_font, g_log_mono;
+static unsigned g_log_seq;
+
+static void show_log(void);
 
 /* ---------------- helpers ---------------- */
 
@@ -215,6 +221,7 @@ static void tray_menu(int x, int y)
     if (g_st.panel[0])
         AppendMenuW(m, MF_STRING, ID_OPEN, L"Open panel");
     AppendMenuW(m, MF_STRING, ID_WINDOW, g_st.state == RD_UNPAIRED ? L"Pair with a panel…" : L"Pairing && status…");
+    AppendMenuW(m, MF_STRING, ID_LOG, L"Show log");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (login_enabled() ? MF_CHECKED : 0), ID_LOGIN, L"Start at login");
     AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit RemoDroid");
@@ -226,6 +233,7 @@ static void tray_menu(int x, int y)
     case ID_VIEWONLY: rd_agent_set("desktop.view_only", g_st.view_only ? "false" : "true"); break;
     case ID_OPEN: open_panel(); break;
     case ID_WINDOW: show_window(); break;
+    case ID_LOG: show_log(); break;
     case ID_LOGIN: set_login(!login_enabled()); break;
     case ID_QUIT: PostMessageW(g_tray, WM_CLOSE, 0, 0); break;
     }
@@ -242,13 +250,11 @@ typedef struct {
 static const ctl_t CTLS[] = {
     { IDC_TITLE, L"STATIC", L"", SS_LEFT },
     { IDC_STATE, L"STATIC", L"", SS_LEFT },
-    { IDC_L_PANEL, L"STATIC", L"Panel address", SS_LEFT },
-    { IDC_PANEL, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL },
-    { IDC_L_CODE, L"STATIC", L"Pairing code", SS_LEFT },
-    { IDC_CODE, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_UPPERCASE },
+    { IDC_L_LINE, L"STATIC", L"Pairing command", SS_LEFT },
+    { IDC_LINE, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL },
+    { IDC_HINT, L"STATIC", L"Paste the whole line from the panel: Agents → Add → Computer.", SS_LEFT },
     { IDC_L_NAME, L"STATIC", L"Name", SS_LEFT },
     { IDC_NAME, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL },
-    { IDC_HINT, L"STATIC", L"Get a code on the panel: Agents → Add → Computer.", SS_LEFT },
     { IDC_PAIR, L"BUTTON", L"Pair", WS_TABSTOP | BS_DEFPUSHBUTTON },
     { IDC_INFO, L"STATIC", L"", SS_LEFT },
     { IDC_OPENPANEL, L"BUTTON", L"Open panel", WS_TABSTOP | BS_PUSHBUTTON },
@@ -256,7 +262,7 @@ static const ctl_t CTLS[] = {
     { IDC_UNPAIR, L"BUTTON", L"Unpair", WS_TABSTOP | BS_PUSHBUTTON },
     { IDC_VIEWONLY, L"BUTTON", L"View only: ignore the viewer's mouse and keyboard", WS_TABSTOP | BS_AUTOCHECKBOX },
     { IDC_LOGIN, L"BUTTON", L"Start RemoDroid when I log in", WS_TABSTOP | BS_AUTOCHECKBOX },
-    { IDC_COPYLOG, L"BUTTON", L"Copy log", WS_TABSTOP | BS_PUSHBUTTON },
+    { IDC_SHOWLOG, L"BUTTON", L"Show log", WS_TABSTOP | BS_PUSHBUTTON },
 };
 
 static void place(int id, int x, int y, int w, int h, int show)
@@ -310,7 +316,7 @@ static void layout(void)
     y += 32;
     place(IDC_STATE, X, y, FW, 40, 1);
     y += 46;
-    for (int id = IDC_L_PANEL; id <= IDC_HINT; id++)
+    for (int id = IDC_L_LINE; id <= IDC_NAME; id++)
         place(id, 0, 0, 0, 0, 0);
     place(IDC_PAIR, 0, 0, 0, 0, 0);
     place(IDC_INFO, 0, 0, 0, 0, 0);
@@ -318,14 +324,15 @@ static void layout(void)
     place(IDC_DISC, 0, 0, 0, 0, 0);
     place(IDC_UNPAIR, 0, 0, 0, 0, 0);
     if (!paired) {
-        static const int ids[][2] = { { IDC_L_PANEL, IDC_PANEL }, { IDC_L_CODE, IDC_CODE }, { IDC_L_NAME, IDC_NAME } };
-        for (int i = 0; i < 3; i++) {
-            place(ids[i][0], X, y + 4, 110, 22, 1);
-            place(ids[i][1], X + 116, y, FW - 116, 26, 1);
-            y += 36;
-        }
-        place(IDC_HINT, X, y, FW, 22, 1);
+        place(IDC_L_LINE, X, y, FW, 22, 1);
+        y += 24;
+        place(IDC_LINE, X, y, FW, 26, 1);
         y += 30;
+        place(IDC_HINT, X, y, FW, 22, 1);
+        y += 34;
+        place(IDC_L_NAME, X, y + 4, 60, 22, 1);
+        place(IDC_NAME, X + 66, y, FW - 66, 26, 1);
+        y += 38;
         place(IDC_PAIR, W - 20 - 100, y, 100, 30, 1);
         EnableWindow(GetDlgItem(g_win, IDC_PAIR), !g_pairing);
         y += 44;
@@ -353,7 +360,7 @@ static void layout(void)
     y += 28;
     place(IDC_LOGIN, X, y, FW, 24, 1);
     y += 36;
-    place(IDC_COPYLOG, X, y, 90, 28, 1);
+    place(IDC_SHOWLOG, X, y, 90, 28, 1);
     y += 44;
     UINT d = dpi_of(g_win);
     RECT r = { 0, 0, MulDiv(W, (int)d, 96), MulDiv(y, (int)d, 96) };
@@ -361,9 +368,11 @@ static void layout(void)
     SetWindowPos(g_win, NULL, 0, 0, r.right - r.left, r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+/* ---------------- the log window ---------------- */
+
 static void copy_log(void)
 {
-    char *log = rd_agent_log(300);
+    char *log = rd_agent_log(1000);
     wchar_t *w = wide(log);
     rd_agent_free(log);
     size_t n = (wcslen(w) + 1) * sizeof(wchar_t);
@@ -371,7 +380,7 @@ static void copy_log(void)
     memcpy(GlobalLock(g), w, n);
     GlobalUnlock(g);
     free(w);
-    if (OpenClipboard(g_win)) {
+    if (OpenClipboard(g_log)) {
         EmptyClipboard();
         SetClipboardData(CF_UNICODETEXT, g);
         CloseClipboard();
@@ -381,20 +390,168 @@ static void copy_log(void)
     }
 }
 
+static void log_fonts(HWND h)
+{
+    UINT d = dpi_of(h);
+    NONCLIENTMETRICSW nm = { .cbSize = sizeof nm };
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof nm, &nm, 0);
+    LOGFONTW lf = nm.lfMessageFont;
+    lf.lfHeight = -MulDiv(10, (int)d, 72);
+    if (g_log_font)
+        DeleteObject(g_log_font);
+    if (g_log_mono)
+        DeleteObject(g_log_mono);
+    g_log_font = CreateFontIndirectW(&lf);
+    LOGFONTW mf = { .lfHeight = -MulDiv(9, (int)d, 72), .lfWeight = FW_NORMAL, .lfCharSet = DEFAULT_CHARSET,
+                    .lfPitchAndFamily = FIXED_PITCH | FF_MODERN };
+    wcscpy(mf.lfFaceName, L"Consolas");
+    g_log_mono = CreateFontIndirectW(&mf);
+    SendDlgItemMessageW(h, IDC_LOGTEXT, WM_SETFONT, (WPARAM)g_log_mono, TRUE);
+    for (int id = IDC_LOGPATH; id <= IDC_LOGFOLDER; id++)
+        SendDlgItemMessageW(h, id, WM_SETFONT, (WPARAM)g_log_font, TRUE);
+}
+
+static void log_layout(HWND h)
+{
+    RECT r;
+    GetClientRect(h, &r);
+    int d = (int)dpi_of(h), m = MulDiv(10, d, 96), bh = MulDiv(28, d, 96), bw = MulDiv(104, d, 96);
+    int W = r.right, H = r.bottom, y = H - m - bh;
+    MoveWindow(GetDlgItem(h, IDC_LOGTEXT), m, m, W - 2 * m, y - 2 * m, TRUE);
+    MoveWindow(GetDlgItem(h, IDC_LOGPATH), m, y + MulDiv(6, d, 96), W - 4 * m - 2 * bw, bh, TRUE);
+    MoveWindow(GetDlgItem(h, IDC_LOGCOPY), W - 2 * m - 2 * bw, y, bw, bh, TRUE);
+    MoveWindow(GetDlgItem(h, IDC_LOGFOLDER), W - m - bw, y, bw, bh, TRUE);
+}
+
+/* New lines appear as they are logged; the view follows the end unless scrolled up. */
+static void log_refresh(int force)
+{
+    unsigned seq = rd_agent_log_seq();
+    if (!g_log || (!force && seq == g_log_seq))
+        return;
+    g_log_seq = seq;
+    HWND e = GetDlgItem(g_log, IDC_LOGTEXT);
+    SCROLLINFO si = { .cbSize = sizeof si, .fMask = SIF_ALL };
+    int at_end = force || !GetScrollInfo(e, SB_VERT, &si) || si.nPos + (int)si.nPage > si.nMax;
+    int first = (int)SendMessageW(e, EM_GETFIRSTVISIBLELINE, 0, 0);
+    char *log = rd_agent_log(1000);
+    size_t n = strlen(log), lf = 0;
+    for (size_t i = 0; i < n; i++)
+        lf += log[i] == '\n';
+    char *crlf = malloc(n + lf + 1); /* an edit control breaks lines at \r\n */
+    size_t o = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (log[i] == '\n')
+            crlf[o++] = '\r';
+        crlf[o++] = log[i];
+    }
+    crlf[o] = 0;
+    rd_agent_free(log);
+    wchar_t *w = wide(crlf);
+    free(crlf);
+    SendMessageW(e, WM_SETREDRAW, FALSE, 0);
+    SetWindowTextW(e, w);
+    free(w);
+    if (at_end) {
+        int len = GetWindowTextLengthW(e);
+        SendMessageW(e, EM_SETSEL, len, len);
+        SendMessageW(e, EM_SCROLLCARET, 0, 0);
+    } else {
+        SendMessageW(e, EM_LINESCROLL, 0, first);
+    }
+    SendMessageW(e, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(e, NULL, TRUE);
+}
+
+static void open_log_folder(void)
+{
+    wchar_t *p = wide(rd_agent_log_path()), args[700];
+    swprintf(args, 700, L"/select,\"%ls\"", p); /* Explorer, with desktop.log selected */
+    free(p);
+    ShellExecuteW(NULL, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
+}
+
+static LRESULT CALLBACK log_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_CREATE: {
+        CreateWindowExW(0, L"EDIT", L"",
+                        WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_READONLY |
+                            ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+                        0, 0, 10, 10, h, (HMENU)(INT_PTR)IDC_LOGTEXT, g_inst, NULL);
+        SendDlgItemMessageW(h, IDC_LOGTEXT, EM_SETLIMITTEXT, 0, 0); /* no 32K cap */
+        wchar_t *p = wide(rd_agent_log_path());
+        CreateWindowExW(0, L"STATIC", p, WS_CHILD | WS_VISIBLE | SS_PATHELLIPSIS | SS_NOPREFIX, 0, 0, 10, 10, h,
+                        (HMENU)(INT_PTR)IDC_LOGPATH, g_inst, NULL);
+        free(p);
+        CreateWindowExW(0, L"BUTTON", L"Copy", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10, h,
+                        (HMENU)(INT_PTR)IDC_LOGCOPY, g_inst, NULL);
+        CreateWindowExW(0, L"BUTTON", L"Open folder", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10,
+                        h, (HMENU)(INT_PTR)IDC_LOGFOLDER, g_inst, NULL);
+        g_log = h;
+        log_fonts(h);
+        return 0;
+    }
+    case WM_SIZE: log_layout(h); return 0;
+    case WM_DPICHANGED: {
+        RECT *r = (RECT *)lp;
+        SetWindowPos(h, NULL, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER);
+        log_fonts(h);
+        log_layout(h);
+        return 0;
+    }
+    case WM_TIMER: log_refresh(0); return 0;
+    case WM_CTLCOLORSTATIC: /* the read-only edit and the path: on the window colour, not grey */
+        SetBkColor((HDC)wp, GetSysColor(COLOR_WINDOW));
+        if ((HWND)lp == GetDlgItem(h, IDC_LOGPATH))
+            SetTextColor((HDC)wp, GetSysColor(COLOR_GRAYTEXT));
+        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+    case WM_COMMAND:
+        if (LOWORD(wp) == IDC_LOGCOPY)
+            copy_log();
+        else if (LOWORD(wp) == IDC_LOGFOLDER)
+            open_log_folder();
+        return 0;
+    case WM_CLOSE:
+        KillTimer(h, 1);
+        ShowWindow(h, SW_HIDE);
+        return 0;
+    case WM_DESTROY:
+        g_log = NULL;
+        return 0;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+static void show_log(void)
+{
+    if (!g_log) {
+        UINT d = dpi_of(NULL);
+        CreateWindowExW(0, LOG_CLASS, L"RemoDroid log", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                        MulDiv(840, (int)d, 96), MulDiv(500, (int)d, 96), NULL, NULL, g_inst, NULL);
+        if (!g_log)
+            return;
+    }
+    log_refresh(1);
+    SetTimer(g_log, 1, 500, NULL);
+    ShowWindow(g_log, SW_SHOWNORMAL);
+    SetForegroundWindow(g_log);
+}
+
 static void on_paired(void *ud, int ok, const char *msg);
 
 static void start_pair(void)
 {
-    char *panel = text_of(IDC_PANEL), *code = text_of(IDC_CODE), *name = text_of(IDC_NAME);
-    if (!*panel || !*code) {
-        wcscpy(g_pair_msg, L"Enter the panel address and the code shown on it.");
-    } else {
-        g_pairing = 1;
-        g_pair_msg[0] = 0;
-        rd_agent_pair(panel, code, name, on_paired, NULL);
+    char *line = text_of(IDC_LINE), *name = text_of(IDC_NAME);
+    const char *bad = rd_agent_pair_line(line, name, on_paired, NULL);
+    g_pairing = !bad;
+    g_pair_msg[0] = 0;
+    if (bad) {
+        wchar_t *w = wide(bad);
+        swprintf(g_pair_msg, 300, L"Pairing failed: %ls", w);
+        free(w);
     }
-    free(panel);
-    free(code);
+    free(line);
     free(name);
     layout();
 }
@@ -411,8 +568,7 @@ static LRESULT CALLBACK win_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         DWORD n = 64;
         if (GetComputerNameW(host, &n))
             SetDlgItemTextW(h, IDC_NAME, host);
-        SendDlgItemMessageW(h, IDC_PANEL, EM_SETCUEBANNER, TRUE, (LPARAM)L"https://remodroid.example.com");
-        SendDlgItemMessageW(h, IDC_CODE, EM_SETCUEBANNER, TRUE, (LPARAM)L"XXXX-XXXX");
+        SendDlgItemMessageW(h, IDC_LINE, EM_SETCUEBANNER, TRUE, (LPARAM)L"remodroid enroll --panel https://… --code XXXX-XXXX");
         set_fonts();
         layout();
         return 0;
@@ -446,7 +602,7 @@ static LRESULT CALLBACK win_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             rd_agent_set("desktop.view_only", IsDlgButtonChecked(h, IDC_VIEWONLY) ? "true" : "false");
             return 0;
         case IDC_LOGIN: set_login(IsDlgButtonChecked(h, IDC_LOGIN) == BST_CHECKED); return 0;
-        case IDC_COPYLOG: copy_log(); return 0;
+        case IDC_SHOWLOG: show_log(); return 0;
         }
         break;
     case WM_CLOSE:
@@ -471,7 +627,7 @@ static void show_window(void)
     ShowWindow(g_win, SW_SHOWNORMAL);
     SetForegroundWindow(g_win);
     if (g_st.state == RD_UNPAIRED)
-        SetFocus(GetDlgItem(g_win, IDC_PANEL));
+        SetFocus(GetDlgItem(g_win, IDC_LINE));
 }
 
 /* ---------------- agent callbacks (agent thread → posted here) ---------------- */
@@ -586,6 +742,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                      .hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW), .hbrBackground = GetSysColorBrush(COLOR_WINDOW),
                      .hIcon = LoadIconW(inst, L"APP") };
     RegisterClassW(&wc);
+    WNDCLASSW lc = wc;
+    lc.lpfnWndProc = log_proc;
+    lc.lpszClassName = LOG_CLASS;
+    RegisterClassW(&lc);
     WM_TASKBARCREATED = RegisterWindowMessageW(L"TaskbarCreated");
     g_tray = CreateWindowExW(0, TRAY_CLASS, L"RemoDroid", 0, 0, 0, 0, 0, NULL, NULL, inst, NULL);
     int sz = GetSystemMetrics(SM_CXSMICON) * (int)dpi_of(NULL) / 96;

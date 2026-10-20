@@ -14,17 +14,22 @@
 #include "rd_agent.h"
 #include "sni.h"
 
-enum { M_STATUS = 1, M_VIEWER, M_DISCONNECT, M_VIEWONLY, M_OPEN, M_WINDOW, M_LOGIN, M_QUIT };
+enum { M_STATUS = 1, M_VIEWER, M_DISCONNECT, M_VIEWONLY, M_OPEN, M_WINDOW, M_LOG, M_LOGIN, M_QUIT };
 
 static struct {
     GtkApplication *app;
-    GtkWidget *win, *title, *state, *pair_grid, *panel, *code, *name, *pair, *paired_box, *info, *disc, *view_only, *login;
+    GtkWidget *win, *title, *state, *pair_grid, *line, *name, *pair, *paired_box, *info, *disc, *view_only, *login;
     rd_status_t st;
     int pairing, updating;
     char pair_msg[300];
     const char *conf;
     int background;
+    GtkWidget *log_win, *log_view;
+    unsigned log_seq;
+    guint log_timer;
 } U;
+
+static void show_log(void);
 
 static const char *state_text(void)
 {
@@ -125,6 +130,7 @@ static void tray_refresh(void)
     if (U.st.panel[0])
         items[n++] = (sni_item_t){ M_OPEN, "Open panel", 1, 0, 0 };
     items[n++] = (sni_item_t){ M_WINDOW, U.st.state == RD_UNPAIRED ? "Pair with a panel…" : "Pairing & status…", 1, 0, 0 };
+    items[n++] = (sni_item_t){ M_LOG, "Show log", 1, 0, 0 };
     items[n++] = (sni_item_t){ 0, NULL, 0, 0, 0 };
     items[n++] = (sni_item_t){ M_LOGIN, "Start at login", 1, 1, login_enabled() };
     items[n++] = (sni_item_t){ M_QUIT, "Quit RemoDroid", 1, 0, 0 };
@@ -138,6 +144,7 @@ static void on_menu(int id)
     case M_VIEWONLY: rd_agent_set("desktop.view_only", U.st.view_only ? "false" : "true"); break;
     case M_OPEN: open_panel(); break;
     case M_WINDOW: show_window(); break;
+    case M_LOG: show_log(); break;
     case M_LOGIN: set_login(!login_enabled()); tray_refresh(); break;
     case M_QUIT: g_application_quit(G_APPLICATION(U.app)); break;
     }
@@ -207,14 +214,12 @@ static void on_paired(void *ud, int ok, const char *msg)
 
 static void do_pair(GtkWidget *w, gpointer ud)
 {
-    const char *panel = gtk_entry_get_text(GTK_ENTRY(U.panel)), *code = gtk_entry_get_text(GTK_ENTRY(U.code));
-    if (!*panel || !*code) {
-        snprintf(U.pair_msg, sizeof U.pair_msg, "Pairing failed: enter the panel address and the code shown on it.");
-    } else {
-        U.pairing = 1;
-        U.pair_msg[0] = 0;
-        rd_agent_pair(panel, code, gtk_entry_get_text(GTK_ENTRY(U.name)), on_paired, NULL);
-    }
+    const char *bad = rd_agent_pair_line(gtk_entry_get_text(GTK_ENTRY(U.line)), gtk_entry_get_text(GTK_ENTRY(U.name)),
+                                         on_paired, NULL);
+    U.pairing = !bad;
+    U.pair_msg[0] = 0;
+    if (bad)
+        snprintf(U.pair_msg, sizeof U.pair_msg, "Pairing failed: %s", bad);
     refresh();
 }
 
@@ -245,13 +250,98 @@ static void login_toggled(GtkToggleButton *b, gpointer ud)
     }
 }
 
+/* ---------------- log window ---------------- */
+
 static void copy_log(GtkWidget *w, gpointer ud)
 {
-    char *log = rd_agent_log(300);
+    char *log = rd_agent_log(1000);
     gtk_clipboard_set_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD), log, -1);
     rd_agent_free(log);
     notify("The log is on the clipboard.");
 }
+
+static void open_log_folder(GtkWidget *w, gpointer ud)
+{
+    char *dir = g_path_get_dirname(rd_agent_log_path());
+    char *uri = g_filename_to_uri(dir, NULL, NULL);
+    if (uri)
+        g_app_info_launch_default_for_uri(uri, NULL, NULL);
+    g_free(uri);
+    g_free(dir);
+}
+
+/* New lines appear as they are logged; the view follows the end unless scrolled up. */
+static gboolean log_tick(gpointer ud)
+{
+    unsigned seq = rd_agent_log_seq();
+    if (seq == U.log_seq)
+        return G_SOURCE_CONTINUE;
+    U.log_seq = seq;
+    GtkAdjustment *a = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(U.log_view));
+    int at_end = gtk_adjustment_get_value(a) + gtk_adjustment_get_page_size(a) >= gtk_adjustment_get_upper(a) - 4;
+    char *log = rd_agent_log(1000);
+    GtkTextBuffer *b = gtk_text_view_get_buffer(GTK_TEXT_VIEW(U.log_view));
+    gtk_text_buffer_set_text(b, log, -1);
+    rd_agent_free(log);
+    if (at_end) {
+        GtkTextIter end;
+        gtk_text_buffer_get_end_iter(b, &end);
+        gtk_text_buffer_place_cursor(b, &end);
+        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(U.log_view), gtk_text_buffer_get_insert(b), 0, FALSE, 0, 1);
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean log_hidden(GtkWidget *w, GdkEvent *e, gpointer ud)
+{
+    if (U.log_timer)
+        g_source_remove(U.log_timer);
+    U.log_timer = 0;
+    return gtk_widget_hide_on_delete(w);
+}
+
+static void show_log(void)
+{
+    if (!U.log_win) {
+        U.log_win = gtk_application_window_new(U.app);
+        gtk_window_set_title(GTK_WINDOW(U.log_win), "RemoDroid log");
+        gtk_window_set_default_size(GTK_WINDOW(U.log_win), 820, 460);
+        gtk_window_set_icon_name(GTK_WINDOW(U.log_win), "remodroid");
+        g_signal_connect(U.log_win, "delete-event", G_CALLBACK(log_hidden), NULL);
+        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+        gtk_container_set_border_width(GTK_CONTAINER(box), 10);
+        gtk_container_add(GTK_CONTAINER(U.log_win), box);
+        GtkWidget *sw = gtk_scrolled_window_new(NULL, NULL);
+        gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(sw), GTK_SHADOW_IN);
+        U.log_view = gtk_text_view_new();
+        gtk_text_view_set_editable(GTK_TEXT_VIEW(U.log_view), FALSE);
+        gtk_text_view_set_monospace(GTK_TEXT_VIEW(U.log_view), TRUE);
+        gtk_text_view_set_left_margin(GTK_TEXT_VIEW(U.log_view), 6);
+        gtk_container_add(GTK_CONTAINER(sw), U.log_view);
+        gtk_box_pack_start(GTK_BOX(box), sw, TRUE, TRUE, 0);
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *path = gtk_label_new(rd_agent_log_path());
+        gtk_label_set_selectable(GTK_LABEL(path), TRUE);
+        gtk_label_set_ellipsize(GTK_LABEL(path), PANGO_ELLIPSIZE_MIDDLE);
+        gtk_style_context_add_class(gtk_widget_get_style_context(path), "dim-label");
+        gtk_box_pack_start(GTK_BOX(row), path, TRUE, TRUE, 0);
+        GtkWidget *folder = gtk_button_new_with_label("Open folder");
+        g_signal_connect(folder, "clicked", G_CALLBACK(open_log_folder), NULL);
+        gtk_box_pack_end(GTK_BOX(row), folder, FALSE, FALSE, 0);
+        GtkWidget *copy = gtk_button_new_with_label("Copy");
+        g_signal_connect(copy, "clicked", G_CALLBACK(copy_log), NULL);
+        gtk_box_pack_end(GTK_BOX(row), copy, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(box), row, FALSE, FALSE, 0);
+        gtk_widget_show_all(box);
+    }
+    U.log_seq = rd_agent_log_seq() - 1; /* fill it now */
+    log_tick(NULL);
+    if (!U.log_timer)
+        U.log_timer = g_timeout_add(500, log_tick, NULL);
+    gtk_window_present(GTK_WINDOW(U.log_win));
+}
+
+static void do_show_log(GtkWidget *w, gpointer ud) { show_log(); }
 
 static GtkWidget *add_label(GtkWidget *grid, const char *text, int row)
 {
@@ -300,19 +390,20 @@ static void build_window(void)
     U.pair_grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(U.pair_grid), 8);
     gtk_grid_set_column_spacing(GTK_GRID(U.pair_grid), 12);
-    add_label(U.pair_grid, "Panel address", 0);
-    U.panel = add_entry(U.pair_grid, 0, "https://remodroid.example.com");
-    add_label(U.pair_grid, "Pairing code", 1);
-    U.code = add_entry(U.pair_grid, 1, "XXXX-XXXX");
-    add_label(U.pair_grid, "Name", 2);
-    U.name = add_entry(U.pair_grid, 2, "");
+    GtkWidget *ll = add_label(U.pair_grid, "Pairing command", 0);
+    gtk_container_child_set(GTK_CONTAINER(U.pair_grid), ll, "width", 2, NULL);
+    U.line = add_entry(U.pair_grid, 1, "remodroid enroll --panel https://… --code XXXX-XXXX");
+    gtk_container_child_set(GTK_CONTAINER(U.pair_grid), U.line, "left-attach", 0, "width", 2, NULL);
+    gtk_entry_set_width_chars(GTK_ENTRY(U.line), 52);
+    GtkWidget *hint = gtk_label_new("Paste the whole line from the panel: Agents → Add → Computer.");
+    gtk_widget_set_halign(hint, GTK_ALIGN_START);
+    gtk_style_context_add_class(gtk_widget_get_style_context(hint), "dim-label");
+    gtk_grid_attach(GTK_GRID(U.pair_grid), hint, 0, 2, 2, 1);
+    add_label(U.pair_grid, "Name", 3);
+    U.name = add_entry(U.pair_grid, 3, "");
     char host[64] = "";
     gethostname(host, sizeof host - 1);
     gtk_entry_set_text(GTK_ENTRY(U.name), host);
-    GtkWidget *hint = gtk_label_new("Get a code on the panel: Agents → Add → Computer.");
-    gtk_widget_set_halign(hint, GTK_ALIGN_START);
-    gtk_style_context_add_class(gtk_widget_get_style_context(hint), "dim-label");
-    gtk_grid_attach(GTK_GRID(U.pair_grid), hint, 0, 3, 2, 1);
     U.pair = gtk_button_new_with_label("Pair");
     gtk_widget_set_can_default(U.pair, TRUE);
     gtk_style_context_add_class(gtk_widget_get_style_context(U.pair), "suggested-action");
@@ -347,9 +438,9 @@ static void build_window(void)
     U.login = gtk_check_button_new_with_label("Start RemoDroid when I log in");
     g_signal_connect(U.login, "toggled", G_CALLBACK(login_toggled), NULL);
     gtk_box_pack_start(GTK_BOX(box), U.login, FALSE, FALSE, 0);
-    GtkWidget *log = gtk_button_new_with_label("Copy log");
+    GtkWidget *log = gtk_button_new_with_label("Show log");
     gtk_widget_set_halign(log, GTK_ALIGN_START);
-    g_signal_connect(log, "clicked", G_CALLBACK(copy_log), NULL);
+    g_signal_connect(log, "clicked", G_CALLBACK(do_show_log), NULL);
     gtk_box_pack_start(GTK_BOX(box), log, FALSE, FALSE, 0);
     gtk_widget_show_all(box);
 }

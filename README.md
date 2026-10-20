@@ -256,19 +256,20 @@ screen (Safari can't hide its bars for a normal page). Tap your phone to connect
 ### Computers: Windows, macOS, Linux
 
 A computer needs no router: install **RemoDroid** on it, start it, and pair it from its tray (or menu bar) icon
-with a code from the panel's **Agents → Add → Computer**. It runs as the logged-in user, shows a notification
+by pasting the line the panel shows under **Agents → Add → Computer**. It runs as the logged-in user, shows a notification
 whenever someone connects, and its icon turns red while it is being viewed (**Disconnect viewer** is one click
-away). Windows 10 1809+ and macOS 12.3+; Linux needs an X11 session (on GNOME: "GNOME on Xorg").
+away). The viewer hears what the computer plays (the **Sound** switch, or `desktop.audio = false` to never
+send it), and **Show log** in the icon's menu opens a live log window. Windows 10 1809+ and macOS 13+; Linux needs an X11 session (on GNOME: "GNOME on Xorg").
 
 <!-- downloads:desktop -->
 #### Download RemoDroid for your computer (v0.4.1)
 
-Remote desktop for the computer itself: install it there, then pair it with a code from the panel (Agents → Add → Computer). The macOS build runs on Apple silicon and Intel Macs.
+Remote desktop for the computer itself: install it there, then pair it by pasting the line from the panel (Agents → Add → Computer). The macOS build runs on Apple silicon and Intel Macs.
 
 | Computer | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Apple silicon, Snapdragon…</sub> |
 |:--|:-:|:-:|
 | **Windows** 10 1809+, 11 | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="Windows .zip x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/RemoDroid-0.4.1-windows-x86_64.zip) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="Windows .zip ARM64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/RemoDroid-0.4.1-windows-arm64.zip) |
-| **macOS** 12.3+ | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="macOS .zip (Apple silicon and Intel)" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/RemoDroid-0.4.1-macos.zip) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="macOS .zip (Apple silicon and Intel)" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/RemoDroid-0.4.1-macos.zip) |
+| **macOS** 13+ | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="macOS .zip (Apple silicon and Intel)" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/RemoDroid-0.4.1-macos.zip) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="macOS .zip (Apple silicon and Intel)" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/RemoDroid-0.4.1-macos.zip) |
 | **Linux** (X11 session) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="desktop .deb x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/remodroid-desktop_0.4.1-1_amd64.deb)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="desktop .rpm x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/remodroid-desktop-0.4.1-1.x86_64.rpm)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="desktop .tar.gz x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/remodroid-desktop-0.4.1-linux-x86_64.tar.gz) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="desktop .deb aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/remodroid-desktop_0.4.1-1_arm64.deb)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="desktop .rpm aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/remodroid-desktop-0.4.1-1.aarch64.rpm)<br>[<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="desktop .tar.gz aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/remodroid-desktop-0.4.1-linux-aarch64.tar.gz) |
 
 Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.1/SHA256SUMS)
@@ -277,7 +278,7 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
 - **Windows**: unzip and run `RemoDroid.exe`. **macOS**: move `RemoDroid.app` to Applications, open it
   (the first time: right-click → Open), and allow **Screen Recording** and **Accessibility** when asked.
   **Linux**: install the `.deb` / `.rpm` and start *RemoDroid* from the app menu.
-- No screen or no tray? `remodroid-desktopd pair --panel https://your.panel --code XXXX-XXXX`, then run
+- No screen or no tray? Run the same line in a terminal (`remodroid-desktopd pair --panel … --code …`), then run
   `remodroid-desktopd` (a systemd user unit comes with the Linux packages).
 - Settings are in `desktop.ini` (`%APPDATA%\RemoDroid`, `~/Library/Application Support/RemoDroid`,
   `~/.config/remodroid`) and in the panel. Design: [`multi-platform.md`](multi-platform.md).
@@ -375,7 +376,7 @@ support, hardware decoding), and congestion control on real networks.
 | `worker/` | The same panel on Cloudflare Workers + a Durable Object, with Cloudflare TURN | JS |
 | `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev), `install_server.sh`, `install_agent.sh`, `update.sh` | HTML, sh |
 | `common/` | Shared C: WebSocket framing, tunnel frames, STUN, JSON envelope, ini, utilities | C |
-| `third_party/` | Vendored libraries, linked statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp, minih264 | C |
+| `third_party/` | Vendored libraries, linked statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp, minih264, libopus (computers' sound) | C |
 | `deploy/` | Example `server.ini` / `agent.ini`, systemd units, OpenRC and procd scripts | |
 | `packaging/`, `.github/workflows/` | nFPM package definitions (deb, rpm, apk, ipk) and the CI build/release workflow | |
 | `python/`, `skills/`, `.claude/skills/phone/` | AI control: the `remodroid` SDK and `rd` CLI, replayable skills, and the Claude Code skill that uses them | Python |

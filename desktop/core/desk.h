@@ -72,6 +72,13 @@ void           dsk_hwvideo_close(dsk_hwvideo_t *v);
 int            dsk_hwvideo_has_h265(void);    /* a hardware HEVC encoder exists */
 const char    *dsk_hwvideo_name(dsk_hwvideo_t *v); /* "NVIDIA H.264 Encoder MFT", "VideoToolbox", … */
 
+/* ---- sound: what the computer plays (loopback); optional ---- */
+/* Interleaved float samples, any rate and channel count; called on the backend's capture thread. */
+typedef void (*dsk_pcm_cb)(const float *pcm, int frames, int channels, int rate);
+int  dsk_audio_supported(void);       /* 1 if this computer's sound can be captured */
+int  dsk_audio_start(dsk_pcm_cb cb);  /* 0, or -1 */
+void dsk_audio_stop(void);            /* joins the capture; no cb after it returns; safe if not started */
+
 /* ---- input (agent thread) ---- */
 void dsk_mouse_move(const dsk_screen_t *s, double nx, double ny); /* 0..1 across the screen */
 void dsk_mouse_button(int button, int down);                       /* 0 left, 1 middle, 2 right, 3 back, 4 forward */
@@ -106,7 +113,7 @@ typedef struct {
     dsk_screen_t screens[DSK_MAX_SCREENS];
     int nscreens;
     int screen;          /* index into screens of the captured one */
-    int view_only, clip_sync, allow_shell, notify, lock_on_disc;
+    int view_only, clip_sync, allow_shell, notify, lock_on_disc, audio;
 } desk_t;
 
 extern desk_t D;
@@ -120,7 +127,9 @@ void        desk_status_changed(void);
 void        desk_notify(const char *text); /* the app's notification, or the platform's */
 
 /* session.c: the viewer session (ctrl channel, quality, stats) */
-void session_connected(const char *sid, const char *codec, const char *profile, const char *quality);
+/* audio: the viewer took the Opus track */
+void session_connected(const char *sid, const char *codec, const char *profile, const char *quality, int audio);
+void session_audio_update(void); /* the sound setting changed */
 void session_ended(const char *reason);
 void session_channel_open(const char *label);
 void session_message(const char *label, int binary, const uint8_t *d, size_t n);
@@ -166,6 +175,14 @@ void video_stop(void);
 void video_keyframe(void);
 void video_bitrate(int kbps);
 void video_info(int *w, int *h, double *fps, const char **encoder);
+
+/* audio.c: Opus over the WebRTC audio track (agent thread, except audio_pcm) */
+int  audio_available(void);
+int  audio_start(void);   /* 0, or -1 */
+void audio_stop(void);
+int  audio_running(void);
+void audio_pcm(const float *pcm, int frames, int channels, int rate);
+extern void (*audio_out)(const void *opus, size_t n, int64_t pts_us); /* rd_rtc_audio; tests replace it */
 
 /* yuv.c */
 /* BGRA (any size) → I420 at dw x dh (scaled, bilinear). y/u/v strides are dw, dw/2, dw/2. */

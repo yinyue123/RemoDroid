@@ -191,6 +191,7 @@ const DESK_SETTINGS = [
     ['desktop.notify', 'Notify at the computer when a viewer connects', 'bool'],
     ['desktop.lock_on_disconnect', 'Lock the computer after disconnecting', 'bool'],
     ['desktop.clipboard_sync', 'Sync the clipboard', 'bool'],
+    ['desktop.audio', 'Send the computer\'s sound to viewers', 'bool'],
     ['desktop.allow_shell', 'Allow shell commands from the viewer', 'bool', null, null, 'Shell commands run as the user who is logged in. Off unless you need it.'],
   ]],
   ['Video', [
@@ -437,20 +438,17 @@ async function pollCode() {
     setTimeout(() => { if (route().sub === 'connect') location.hash = '#agents/add/phone'; }, 1200);
   }
 }
-/* a computer: the code goes into the app's pairing window */
+/* a computer: the line goes into the app's pairing window (or a terminal, for remodroid-desktopd) */
 function renderPair(steps, foot, panel) {
   const expired = code.state === 'expired';
-  const cli = `remodroid-desktopd pair --panel ${panel} --code ${code.code}`;
-  main.innerHTML = `${steps}<div class="flow"><p class="eyebrow">02 — pair</p><h1>Enter this code in <em>RemoDroid</em></h1>
+  const line = `remodroid-desktopd pair --panel ${panel} --code ${code.code}`;
+  main.innerHTML = `${steps}<div class="flow"><p class="eyebrow">02 — pair</p><h1>Paste this into <em>RemoDroid</em></h1>
     ${expired ? '<div class="callout warn">That code expired. <button class="link-btn" type="button" id="again">Make a new one</button></div>' : ''}
-    <p class="lede">Open RemoDroid on the computer (its tray or menu bar icon → Pair with a panel) and type:</p>
-    <div class="num"><i>1</i>Panel address</div>${cmdBox(panel)}
-    <div class="num"><i>2</i>Pairing code</div>
-    <p style="margin:6px 0 14px"><span class="pill accent" style="font-size:24px;letter-spacing:3px;padding:8px 18px">${esc(code.code)}</span></p>
+    <p class="lede">Open RemoDroid on the computer (its tray or menu bar icon → Pair with a panel), paste the line and press Pair.</p>
+    ${cmdBox(line, hl(line))}
     <div class="term" id="term" ${code.state === 'pending' || expired ? 'hidden' : ''}>${code.state !== 'pending' && !expired ? `<div class="d">▸ paired as ${esc(newId)}</div>` : ''}</div>
     <p class="status" id="state">${code.state === 'online' ? `<b>${esc(newId)}</b> is online` : 'waiting for the computer'}</p>
-    <p class="small-print">code <b>${esc(code.code)}</b> · expires in <b id="expires">…</b> · single use</p>
-    <details style="margin-top:22px"><summary class="note">No screen, or Linux without the tray app?</summary>${cmdBox(cli, hl(cli))}</details>
+    <p class="small-print">code <b>${esc(code.code)}</b> · expires in <b id="expires">…</b> · single use · no screen, or Linux without the tray app? run the same line in a terminal</p>
     ${foot(code.state === 'online' ? '#agents/add/phone' : null)}</div>`;
   tickCode();
   if (expired) $('#again').onclick = () => { code = null; renderAdd('connect'); };

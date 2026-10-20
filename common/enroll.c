@@ -9,6 +9,64 @@
 #include "plat.h"
 #include "rd.h"
 
+/* "X5SX-K3M7" or "x5sxk3m7": 8 letters and digits, one optional dash in the middle */
+static int looks_like_code(const char *t)
+{
+    size_t n = 0, len = strlen(t);
+    if (len != 8 && !(len == 9 && t[4] == '-'))
+        return 0;
+    for (; *t; t++)
+        if (*t != '-')
+            n += (*t >= '0' && *t <= '9') || ((*t | 32) >= 'a' && (*t | 32) <= 'z');
+    return n == 8;
+}
+
+int rd_enroll_parse(const char *line, char *panel, size_t panelcap, char *code, size_t codecap)
+{
+    char tok[512], *want = NULL; /* the field the previous --panel / --code names */
+    size_t want_cap = 0;
+    int got = 0; /* 1: the panel, 2: the code */
+    for (const char *p = line ? line : ""; *p;) {
+        while (*p && strchr(" \t\r\n\\", *p)) /* a backslash continues a shell line */
+            p++;
+        size_t n = 0;
+        while (*p && !strchr(" \t\r\n", *p)) {
+            if (*p != '"' && *p != '\'' && n + 1 < sizeof tok)
+                tok[n++] = *p;
+            p++;
+        }
+        tok[n] = 0;
+        if (!n)
+            continue;
+        const char *val = tok;
+        if (want) {
+            snprintf(want, want_cap, "%s", val);
+            got |= want == panel ? 1 : 2;
+            want = NULL;
+            continue;
+        }
+        if (!strncmp(tok, "--panel", 7) || !strncmp(tok, "--code", 6)) {
+            int is_panel = tok[2] == 'p';
+            char *eq = strchr(tok, '=');
+            want = is_panel ? panel : code;
+            want_cap = is_panel ? panelcap : codecap;
+            if (!eq)
+                continue; /* the value is the next word */
+            val = eq + 1;
+        } else if (!strncmp(tok, "http://", 7) || !strncmp(tok, "https://", 8)) {
+            want = panel, want_cap = panelcap;
+        } else if (looks_like_code(tok)) {
+            want = code, want_cap = codecap;
+        } else {
+            continue; /* "remodroid", "enroll", "$", "sudo", … */
+        }
+        snprintf(want, want_cap, "%s", val);
+        got |= want == panel ? 1 : 2;
+        want = NULL;
+    }
+    return (got & 1) + (got >> 1);
+}
+
 int rd_enroll(const char *panel, const char *code, const char *name, const char *platform, const char *ca_file,
               const char *user_agent, rd_enroll_t *out, char *err, size_t errcap)
 {

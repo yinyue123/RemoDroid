@@ -68,10 +68,8 @@ int dsk_screens(dsk_screen_t *out, int max)
         snprintf(s->name, sizeof s->name, "Display %u", ids[i]);
         for (NSScreen *sc in [NSScreen screens]) {
             NSNumber *num = sc.deviceDescription[@"NSScreenNumber"];
-            if (num && num.unsignedIntValue == ids[i]) {
-                if (@available(macOS 10.15, *))
-                    snprintf(s->name, sizeof s->name, "%s", sc.localizedName.UTF8String ?: "Display");
-            }
+            if (num && num.unsignedIntValue == ids[i])
+                snprintf(s->name, sizeof s->name, "%s", sc.localizedName.UTF8String ?: "Display");
         }
         k++;
     }

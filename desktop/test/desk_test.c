@@ -2,11 +2,14 @@
  *   desk_test [web/app.js]
  * keymap.c against the viewer's table, input decoding, video sizes, colour
  * conversion and the software encoder. */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "desk.h"
+#include "opus.h"
+#include "rd_agent.h"
 #include "stubs.h"
 
 static int fails, checks;
@@ -82,6 +85,30 @@ static void test_android_keys(void)
     CHECK(keymap_android_to_hid(16) == 0x26, "KEYCODE_9");
     CHECK(keymap_android_to_hid(142) == 0x45, "KEYCODE_F12");
     CHECK(keymap_android_to_hid(26) == 0, "KEYCODE_POWER has no key");
+}
+
+/* ---------------- the pairing line ---------------- */
+
+static void pair_line(const char *line, int want, const char *panel, const char *code)
+{
+    char p[100] = "old", c[20] = "old";
+    int n = rd_agent_parse_pair(line, p, sizeof p, c, sizeof c);
+    CHECK(n == want && !strcmp(p, panel) && !strcmp(c, code), "\"%s\" → %d \"%s\" \"%s\"", line, n, p, c);
+}
+
+static void test_pair_line(void)
+{
+    pair_line("remodroid enroll --panel http://47.107.89.35:5580 --code ZUTF-U45Y", 2, "http://47.107.89.35:5580",
+              "ZUTF-U45Y");
+    pair_line("$ remodroid-desktopd pair --panel=https://remo.example.com --code=x5sxk3m7\r\n", 2,
+              "https://remo.example.com", "x5sxk3m7");
+    pair_line("curl -fsSL https://remo.example.com/install.sh | sh -s -- \\\n  --panel 'https://remo.example.com' --code \"X5SX-K3M7\"",
+              2, "https://remo.example.com", "X5SX-K3M7");
+    pair_line("  https://remo.example.com   X5SX-K3M7 ", 2, "https://remo.example.com", "X5SX-K3M7");
+    pair_line("X5SX-K3M7", 1, "old", "X5SX-K3M7");
+    pair_line("remodroid enroll --name Office --code X5SX-K3M7", 1, "old", "X5SX-K3M7");
+    pair_line("hello world", 0, "old", "old");
+    pair_line("", 0, "old", "old");
 }
 
 /* ---------------- input ---------------- */
@@ -231,6 +258,55 @@ static void test_swenc(void)
     CHECK(swenc_new(100, 48, 30, 1000) == NULL, "width not a multiple of 16 is refused");
 }
 
+/* ---------------- sound ---------------- */
+
+static struct {
+    int n, bad_pts;
+    int64_t last_pts;
+    OpusDecoder *dec;
+    double energy[2]; /* left, right after decoding */
+} AU;
+
+static void got_audio(const void *opus, size_t n, int64_t pts)
+{
+    if (AU.n && pts - AU.last_pts != 20000)
+        AU.bad_pts++;
+    AU.last_pts = pts;
+    AU.n++;
+    static float pcm[960 * 2];
+    int f = opus_decode_float(AU.dec, opus, (int)n, pcm, 960, 0);
+    for (int i = 0; AU.n > 5 && i < f; i++) { /* after the encoder settles */
+        AU.energy[0] += pcm[i * 2] * pcm[i * 2];
+        AU.energy[1] += pcm[i * 2 + 1] * pcm[i * 2 + 1];
+    }
+}
+
+static void test_audio(void)
+{
+    int err;
+    AU.dec = opus_decoder_create(48000, 2, &err);
+    audio_out = got_audio;
+    CHECK(audio_start() == 0 && audio_running(), "audio_start");
+    /* one second of 5.1 at 44.1 kHz, as WASAPI may mix: a 440 Hz tone on the front left only */
+    enum { R = 44100, CH = 6, CHUNK = 441 };
+    static float in[CHUNK * CH];
+    for (int c = 0; c < R / CHUNK; c++) {
+        for (int i = 0; i < CHUNK; i++) {
+            memset(in + i * CH, 0, CH * sizeof(float));
+            in[i * CH] = 0.5f * (float)sin(2 * M_PI * 440 * (c * CHUNK + i) / R);
+        }
+        audio_pcm(in, CHUNK, CH, R);
+    }
+    CHECK(AU.n >= 49 && AU.n <= 50, "1 s of sound → %d packets of 20 ms", AU.n);
+    CHECK(AU.bad_pts == 0, "pts steps of 20 ms (%d off)", AU.bad_pts);
+    CHECK(AU.energy[0] > 100 * AU.energy[1] && AU.energy[0] > 1000, "left %.0f, right %.0f", AU.energy[0], AU.energy[1]);
+    audio_stop();
+    int before = AU.n;
+    audio_pcm(in, CHUNK, CH, R);
+    CHECK(!audio_running() && AU.n == before, "nothing after audio_stop");
+    opus_decoder_destroy(AU.dec);
+}
+
 int main(int argc, char **argv)
 {
     rd_log_init("test", RD_LOG_WARN);
@@ -238,6 +314,7 @@ int main(int argc, char **argv)
     printf("keymap\n");
     test_keymap(argc > 1 ? argv[1] : NULL);
     test_android_keys();
+    test_pair_line();
     printf("input\n");
     test_input();
     printf("video sizes, colour\n");
@@ -245,6 +322,8 @@ int main(int argc, char **argv)
     test_yuv();
     printf("software encoder\n");
     test_swenc();
+    printf("sound\n");
+    test_audio();
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

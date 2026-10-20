@@ -37,10 +37,14 @@ static NSImage *icon_image(int style, CGFloat points)
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate>
 @property(strong) NSStatusItem *item;
 @property(strong) NSWindow *window;
-@property(strong) NSTextField *title, *state, *info, *panel, *code, *name, *capState, *ctlState;
+@property(strong) NSTextField *title, *state, *info, *line, *name, *capState, *ctlState;
 @property(strong) NSButton *pair, *unpair, *openPanel, *disconnect, *viewOnly, *login;
 @property(strong) NSView *pairBox, *pairedBox;
 @property(strong) NSTimer *permTimer;
+@property(strong) NSWindow *logWindow;
+@property(strong) NSTextView *logView;
+@property(strong) NSTimer *logTimer;
+@property(assign) unsigned logSeq;
 @property(assign) rd_status_t st;
 @property(assign) BOOL pairing;
 @property(strong) NSString *pairMsg;
@@ -127,41 +131,17 @@ static void on_notify(void *ud, const char *text)
 
 /* ---------------- start at login ---------------- */
 
-- (BOOL)loginEnabled
-{
-    if (@available(macOS 13.0, *))
-        return SMAppService.mainAppService.status == SMAppServiceStatusEnabled;
-    return [[NSFileManager defaultManager] fileExistsAtPath:[self launchAgentPath]];
-}
-
-- (NSString *)launchAgentPath
-{
-    return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/LaunchAgents/com.remodroid.desktop.plist"];
-}
+- (BOOL)loginEnabled { return SMAppService.mainAppService.status == SMAppServiceStatusEnabled; }
 
 - (void)setStartAtLogin:(BOOL)on
 {
-    if (@available(macOS 13.0, *)) {
-        NSError *e = nil;
-        if (on)
-            [SMAppService.mainAppService registerAndReturnError:&e];
-        else
-            [SMAppService.mainAppService unregisterAndReturnError:&e];
-        if (e)
-            [self notify:[NSString stringWithFormat:@"Start at login: %@", e.localizedDescription]];
-        return;
-    }
-    NSString *p = [self launchAgentPath]; /* macOS 12 */
-    if (!on) {
-        [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
-        return;
-    }
-    NSDictionary *plist = @{ @"Label" : @"com.remodroid.desktop",
-                             @"ProgramArguments" : @[ [[NSBundle mainBundle] executablePath], @"--background" ],
-                             @"RunAtLoad" : @YES };
-    [[NSFileManager defaultManager] createDirectoryAtPath:[p stringByDeletingLastPathComponent]
-                              withIntermediateDirectories:YES attributes:nil error:nil];
-    [plist writeToFile:p atomically:YES];
+    NSError *e = nil;
+    if (on)
+        [SMAppService.mainAppService registerAndReturnError:&e];
+    else
+        [SMAppService.mainAppService unregisterAndReturnError:&e];
+    if (e)
+        [self notify:[NSString stringWithFormat:@"Start at login: %@", e.localizedDescription]];
 }
 
 /* ---------------- menu ---------------- */
@@ -199,6 +179,7 @@ static void on_notify(void *ud, const char *text)
     if (self.st.panel[0])
         [m addItemWithTitle:@"Open panel" action:@selector(openPanel:) keyEquivalent:@""].target = self;
     [m addItemWithTitle:self.st.state == RD_UNPAIRED ? @"Pair with a panel…" : @"Pairing & status…" action:@selector(showWindow:) keyEquivalent:@""].target = self;
+    [m addItemWithTitle:@"Show log" action:@selector(showLog:) keyEquivalent:@""].target = self;
     [m addItem:[NSMenuItem separatorItem]];
     NSMenuItem *li = [m addItemWithTitle:@"Start at login" action:@selector(toggleLogin:) keyEquivalent:@""];
     li.target = self;
@@ -258,14 +239,16 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
 
     self.pairBox = [[NSView alloc] initWithFrame:NSMakeRect(0, 140, W, 190)];
     [v addSubview:self.pairBox];
-    label(@"Panel address", self.pairBox, NSMakeRect(20, 150, 110, 20), 13, NO);
-    self.panel = field(self.pairBox, NSMakeRect(136, 146, W - 156, 24), @"https://remodroid.example.com");
-    label(@"Pairing code", self.pairBox, NSMakeRect(20, 114, 110, 20), 13, NO);
-    self.code = field(self.pairBox, NSMakeRect(136, 110, W - 156, 24), @"XXXX-XXXX");
-    label(@"Name", self.pairBox, NSMakeRect(20, 78, 110, 20), 13, NO);
-    self.name = field(self.pairBox, NSMakeRect(136, 74, W - 156, 24), @"");
+    label(@"Pairing command", self.pairBox, NSMakeRect(20, 160, W - 40, 20), 13, NO);
+    self.line = field(self.pairBox, NSMakeRect(20, 130, W - 40, 26), @"remodroid enroll --panel https://… --code XXXX-XXXX");
+    self.line.font = [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];
+    self.line.usesSingleLineMode = YES; /* a pasted multi-line command becomes one line */
+    self.line.cell.scrollable = YES;
+    self.line.cell.wraps = NO;
+    label(@"Paste the whole line from the panel: Agents → Add → Computer.", self.pairBox, NSMakeRect(20, 104, W - 40, 20), 12, NO).textColor = NSColor.secondaryLabelColor;
+    label(@"Name", self.pairBox, NSMakeRect(20, 64, 60, 20), 13, NO);
+    self.name = field(self.pairBox, NSMakeRect(86, 60, W - 106, 24), @"");
     self.name.stringValue = [[NSHost currentHost] localizedName] ?: @"";
-    label(@"Get a code on the panel: Agents → Add → Computer.", self.pairBox, NSMakeRect(20, 44, W - 40, 20), 12, NO).textColor = NSColor.secondaryLabelColor;
     self.pair = button(@"Pair", self.pairBox, NSMakeRect(W - 120, 4, 100, 30), self, @selector(doPair:));
     self.pair.keyEquivalent = @"\r";
 
@@ -290,7 +273,7 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     self.login = [NSButton checkboxWithTitle:@"Start at login" target:self action:@selector(loginChanged:)];
     self.login.frame = NSMakeRect(140, 16, 140, 24);
     [v addSubview:self.login];
-    button(@"Copy log", v, NSMakeRect(W - 116, 12, 100, 30), self, @selector(copyLog:));
+    button(@"Show log", v, NSMakeRect(W - 116, 12, 100, 30), self, @selector(showLog:));
     [self.window center];
 }
 
@@ -326,28 +309,27 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     [NSApp activateIgnoringOtherApps:YES];
     [self.window makeKeyAndOrderFront:nil];
     if (self.st.state == RD_UNPAIRED)
-        [self.window makeFirstResponder:self.panel];
+        [self.window makeFirstResponder:self.line];
     if (!self.permTimer) /* permissions change in System Settings: keep the ticks current */
         self.permTimer = [NSTimer scheduledTimerWithTimeInterval:2 target:self selector:@selector(refresh) userInfo:nil repeats:YES];
 }
 
 - (void)windowWillClose:(NSNotification *)n
 {
+    if (n.object == self.logWindow) {
+        [self.logTimer invalidate];
+        self.logTimer = nil;
+        return;
+    }
     [self.permTimer invalidate];
     self.permTimer = nil;
 }
 
 - (void)doPair:(id)sender
 {
-    if (!self.panel.stringValue.length || !self.code.stringValue.length) {
-        self.pairMsg = @"Pairing failed: enter the panel address and the code shown on it.";
-        [self refresh];
-        return;
-    }
-    self.pairing = YES;
-    self.pairMsg = nil;
-    rd_agent_pair(self.panel.stringValue.UTF8String, self.code.stringValue.UTF8String, self.name.stringValue.UTF8String,
-                  on_paired, NULL);
+    const char *bad = rd_agent_pair_line(self.line.stringValue.UTF8String, self.name.stringValue.UTF8String, on_paired, NULL);
+    self.pairing = !bad;
+    self.pairMsg = bad ? [NSString stringWithFormat:@"Pairing failed: %s", bad] : nil;
     [self refresh];
 }
 
@@ -378,9 +360,87 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
 }
 
+/* ---------------- the log window ---------------- */
+
+- (void)showLog:(id)sender
+{
+    if (!self.logWindow) {
+        const CGFloat W = 820, H = 480;
+        NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, W, H)
+                                                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                                                            NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable
+                                                    backing:NSBackingStoreBuffered defer:NO];
+        w.title = @"RemoDroid log";
+        w.releasedWhenClosed = NO;
+        w.delegate = self;
+        w.minSize = NSMakeSize(420, 200);
+        NSView *v = w.contentView;
+        NSScrollView *sv = [[NSScrollView alloc] initWithFrame:NSMakeRect(12, 52, W - 24, H - 64)];
+        sv.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        sv.hasVerticalScroller = YES;
+        sv.hasHorizontalScroller = YES;
+        sv.borderType = NSBezelBorder;
+        NSTextView *tv = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, sv.contentSize.width, sv.contentSize.height)];
+        tv.editable = NO;
+        tv.selectable = YES;
+        tv.richText = NO;
+        tv.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+        tv.textContainerInset = NSMakeSize(4, 4);
+        tv.horizontallyResizable = YES; /* long lines scroll sideways instead of wrapping */
+        tv.maxSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
+        tv.textContainer.widthTracksTextView = NO;
+        tv.textContainer.containerSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
+        tv.autoresizingMask = NSViewHeightSizable;
+        sv.documentView = tv;
+        [v addSubview:sv];
+        NSTextField *path = label(str(rd_agent_log_path()), v, NSMakeRect(14, 18, W - 290, 18), 11, NO);
+        path.textColor = NSColor.secondaryLabelColor;
+        path.selectable = YES;
+        path.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        path.maximumNumberOfLines = 1;
+        path.autoresizingMask = NSViewWidthSizable;
+        button(@"Copy", v, NSMakeRect(W - 262, 10, 110, 30), self, @selector(copyLog:)).autoresizingMask = NSViewMinXMargin;
+        button(@"Show in Finder", v, NSMakeRect(W - 146, 10, 134, 30), self, @selector(revealLog:)).autoresizingMask =
+            NSViewMinXMargin;
+        self.logView = tv;
+        self.logWindow = w;
+        [w center];
+    }
+    self.logSeq = rd_agent_log_seq() - 1; /* fill it now */
+    [self logTick];
+    if (!self.logTimer)
+        self.logTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(logTick) userInfo:nil repeats:YES];
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.logWindow makeKeyAndOrderFront:nil];
+}
+
+/* New lines appear as they are logged; the view follows the end unless scrolled up. */
+- (void)logTick
+{
+    unsigned seq = rd_agent_log_seq();
+    if (seq == self.logSeq)
+        return;
+    self.logSeq = seq;
+    NSClipView *clip = self.logView.enclosingScrollView.contentView;
+    BOOL atEnd = NSMaxY(clip.bounds) >= NSHeight(self.logView.frame) - 4;
+    NSPoint keep = clip.bounds.origin;
+    char *log = rd_agent_log(1000);
+    self.logView.string = str(log);
+    rd_agent_free(log);
+    if (atEnd)
+        [self.logView scrollRangeToVisible:NSMakeRange(self.logView.string.length, 0)];
+    else
+        [clip scrollToPoint:keep];
+}
+
+- (void)revealLog:(id)sender
+{
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:str(rd_agent_log_path())] ]];
+}
+
 - (void)copyLog:(id)sender
 {
-    char *log = rd_agent_log(300);
+    char *log = rd_agent_log(1000);
     NSPasteboard *pb = [NSPasteboard generalPasteboard];
     [pb clearContents];
     [pb setString:str(log) forType:NSPasteboardTypeString];
@@ -432,12 +492,33 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
 
 @end
 
+/* ⌘X/⌘C/⌘V/⌘A/⌘Z in text fields and ⌘W are key equivalents of the main menu, which an accessory app
+ * never shows but still needs */
+static NSMenu *main_menu(void)
+{
+    NSMenu *bar = [[NSMenu alloc] init];
+    NSMenu *file = [[NSMenu alloc] initWithTitle:@"File"];
+    [file addItemWithTitle:@"Close Window" action:@selector(performClose:) keyEquivalent:@"w"];
+    [bar addItemWithTitle:@"" action:nil keyEquivalent:@""].submenu = file;
+    NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
+    [edit addItemWithTitle:@"Undo" action:NSSelectorFromString(@"undo:") keyEquivalent:@"z"];
+    [edit addItemWithTitle:@"Redo" action:NSSelectorFromString(@"redo:") keyEquivalent:@"Z"];
+    [edit addItem:[NSMenuItem separatorItem]];
+    [edit addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
+    [edit addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
+    [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+    [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+    [bar addItemWithTitle:@"Edit" action:nil keyEquivalent:@""].submenu = edit;
+    return bar;
+}
+
 int main(int argc, const char **argv)
 {
     @autoreleasepool {
         NSApplication *a = [NSApplication sharedApplication];
         app = [[AppDelegate alloc] init];
         a.delegate = app;
+        a.mainMenu = main_menu();
         [a setActivationPolicy:NSApplicationActivationPolicyAccessory]; /* menu bar only, no Dock icon */
         [a run];
     }

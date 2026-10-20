@@ -1425,7 +1425,8 @@ function renderComputerTab(add) {
   const OPTS = [['desktop.view_only', 'View only', 'Mouse and keyboard from viewers are ignored'],
     ['desktop.confirm', 'Ask before each session', 'Someone at the computer must click Allow'],
     ['desktop.notify', 'Notify at the computer', 'When a viewer connects and leaves'],
-    ['desktop.clipboard_sync', 'Clipboard sync'], ['desktop.lock_on_disconnect', 'Lock the computer after disconnect']];
+    ['desktop.clipboard_sync', 'Clipboard sync'], ['desktop.lock_on_disconnect', 'Lock the computer after disconnect'],
+    ['desktop.audio', 'Sound', 'Send what the computer plays to viewers']];
   (async () => {
     let cur = {};
     try { const r = await api('POST', `/devices/${encodeURIComponent(st.device.id)}/cmd`, { cmd: 'agent.config.get' }); cur = ((await r.json()).result) || {}; }

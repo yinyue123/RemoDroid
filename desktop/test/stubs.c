@@ -62,3 +62,8 @@ int dsk_lock(void) { return 0; }
 void dsk_notify(const char *title, const char *text) {}
 const char *dsk_config_dir(void) { return "."; }
 const char *dsk_downloads_dir(void) { return "."; }
+
+/* sound: the test feeds audio_pcm itself */
+int dsk_audio_supported(void) { return 1; }
+int dsk_audio_start(dsk_pcm_cb cb) { return 0; }
+void dsk_audio_stop(void) {}

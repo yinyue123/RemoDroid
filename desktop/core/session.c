@@ -12,6 +12,7 @@
 
 static struct {
     int active, ctrl_open, high;
+    int audio_ok, audio_off; /* the viewer took the sound track / switched Sound off */
     char sid[64], codec[8];
     cJSON *quality;
     int target_kbps;
@@ -121,7 +122,29 @@ static void send_screen_changed(void)
 
 /* ---------------- lifecycle ---------------- */
 
-void session_connected(const char *sid, const char *codec, const char *profile, const char *quality)
+/* ---------------- sound ---------------- */
+
+/* Capture runs only while it has somewhere to go: the viewer took the track, the computer's
+ * desktop.audio setting is on and the viewer hasn't switched Sound off (as Session.java). */
+void session_audio_update(void)
+{
+    int want = S.active && S.audio_ok && D.audio && !S.audio_off;
+    if (want && !audio_running())
+        audio_start();
+    else if (!want && audio_running())
+        audio_stop();
+}
+
+static void send_audio_state(void)
+{
+    cJSON *as = msg_new("audio.state", 0, NULL);
+    cJSON_AddBoolToObject(msg_d(as), "on", audio_running());
+    cJSON_AddBoolToObject(msg_d(as), "available", S.audio_ok && audio_available());
+    cJSON_AddBoolToObject(msg_d(as), "enabled", D.audio);
+    session_send(as);
+}
+
+void session_connected(const char *sid, const char *codec, const char *profile, const char *quality, int audio)
 {
     if (S.active)
         session_ended("replaced");
@@ -140,6 +163,8 @@ void session_connected(const char *sid, const char *codec, const char *profile, 
     desk_refresh_screens();
     apply_max_kbps();
     start_video();
+    S.audio_ok = audio;
+    session_audio_update();
 }
 
 void session_ended(const char *reason)
@@ -147,6 +172,7 @@ void session_ended(const char *reason)
     if (!S.active)
         return;
     video_stop();
+    audio_stop();
     input_release_all();
     files_cancel_all();
     dsk_session(0);
@@ -194,7 +220,7 @@ void session_channel_open(const char *label)
         cJSON_AddItemToArray(codecs, cJSON_CreateString("h265"));
     cJSON_AddItemToArray(codecs, cJSON_CreateString("h264"));
     cJSON_AddNumberToObject(caps, "max_fps", desk_conf_int("video", "max_fps", 60));
-    cJSON_AddBoolToObject(caps, "audio", 0);
+    cJSON_AddBoolToObject(caps, "audio", S.audio_ok && audio_available());
     cJSON_AddBoolToObject(caps, "keyboard", 1);
     cJSON_AddBoolToObject(caps, "mouse", 1);
     cJSON_AddBoolToObject(caps, "view_only", D.view_only);
@@ -410,13 +436,11 @@ static void control(cJSON *m)
         }
         reply(m, NULL);
     } else if (!strcmp(t, "audio.set")) {
-        cJSON *as = msg_new("audio.state", 0, NULL);
-        cJSON_AddBoolToObject(msg_d(as), "on", 0);
-        cJSON_AddBoolToObject(msg_d(as), "available", 0);
-        cJSON_AddBoolToObject(msg_d(as), "enabled", 0);
-        session_send(as);
+        S.audio_off = !msg_bool(d, "on", 1);
+        session_audio_update();
+        send_audio_state();
         cJSON *r = cJSON_CreateObject();
-        cJSON_AddBoolToObject(r, "on", 0);
+        cJSON_AddBoolToObject(r, "on", audio_running());
         reply(m, r);
     } else if (!strcmp(t, "screen.power")) {
         if (dsk_screen_power(msg_bool(d, "on", 1)) < 0)
@@ -541,7 +565,7 @@ void session_tick(void)
     cJSON_AddStringToObject(d, "path", !strcmp(msg_str(s, "local", ""), "relay") ? "relay" : "direct");
     cJSON_AddStringToObject(d, "panel", "on");
     cJSON_AddNumberToObject(d, "inputs", input_events());
-    cJSON_AddBoolToObject(d, "audio", 0);
+    cJSON_AddBoolToObject(d, "audio", audio_running());
     cJSON_AddStringToObject(d, "encoder", enc ? enc : "none");
     cJSON_Delete(s);
     session_send(m);

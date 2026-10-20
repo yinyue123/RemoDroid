@@ -1,4 +1,4 @@
-/* macOS video: ScreenCaptureKit (macOS 12.3+) delivers changed frames only,
+/* macOS video: ScreenCaptureKit delivers changed frames only,
  * with the pointer drawn in. Two consumers:
  *   dsk_hwvideo  NV12 at the encode size, scaled by the GPU, straight into a
  *                VideoToolbox session (H.264 / HEVC); no CPU copy.
@@ -307,10 +307,8 @@ static VTCompressionSessionRef make_session(int w, int h, int h265, int high, in
     spec[(__bridge NSString *)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder] = @YES;
     if (require_hw)
         spec[(__bridge NSString *)kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder] = @YES;
-    if (!h265) {
-        if (@available(macOS 11.3, *))
-            spec[(__bridge NSString *)kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = @YES;
-    }
+    if (!h265)
+        spec[(__bridge NSString *)kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = @YES;
     VTCompressionSessionRef s = NULL;
     OSStatus r = VTCompressionSessionCreate(NULL, w, h, h265 ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264,
                                             (__bridge CFDictionaryRef)spec, NULL, NULL, ref ? vt_output : NULL, ref, &s);
@@ -324,8 +322,7 @@ static VTCompressionSessionRef make_session(int w, int h, int h265, int high, in
     set_int(s, kVTCompressionPropertyKey_AverageBitRate, kbps * 1000);
     set_int(s, kVTCompressionPropertyKey_ExpectedFrameRate, fps);
     set_int(s, kVTCompressionPropertyKey_MaxKeyFrameInterval, fps * 60); /* keyframes mostly on request */
-    if (@available(macOS 12.0, *))
-        VTSessionSetProperty(s, kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, kCFBooleanTrue);
+    VTSessionSetProperty(s, kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, kCFBooleanTrue);
     VTCompressionSessionPrepareToEncodeFrames(s);
     return s;
 }

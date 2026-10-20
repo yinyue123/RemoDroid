@@ -56,6 +56,14 @@ RD_AGENT_API void rd_agent_stop(void);
  * on_done gets ok = 1 and the device name, or ok = 0 and the reason. */
 RD_AGENT_API void rd_agent_pair(const char *panel, const char *code, const char *name,
                                 void (*on_done)(void *ud, int ok, const char *msg), void *ud);
+/* Reads the line the panel shows for pairing ("remodroid enroll --panel https://… --code
+ * X5SX-K3M7", or just the address and the code) into panel and code; one the line lacks is left
+ * as it was. Returns how many of the two the line gave. */
+RD_AGENT_API int  rd_agent_parse_pair(const char *line, char *panel, size_t panelcap, char *code, size_t codecap);
+/* rd_agent_pair from that line: NULL once pairing has started (on_done follows), or a sentence
+ * for the user when the line lacks the address or the code. */
+RD_AGENT_API const char *rd_agent_pair_line(const char *line, const char *name,
+                                            void (*on_done)(void *ud, int ok, const char *msg), void *ud);
 /* Forgets the server credentials and disconnects. */
 RD_AGENT_API void rd_agent_unpair(void);
 /* The answer to on_confirm. */
@@ -65,8 +73,12 @@ RD_AGENT_API void rd_agent_end_session(void);
 /* Changes a [desktop] / [video] / [files] setting ("desktop.view_only", "true") and saves it. */
 RD_AGENT_API void rd_agent_set(const char *key, const char *value);
 RD_AGENT_API void rd_agent_status(rd_status_t *out);
-/* The last log lines, newest last, one per line (for a "Copy log" button). Caller frees. */
+/* The last log lines (up to 1000), newest last, one per line. Caller frees. */
 RD_AGENT_API char *rd_agent_log(int lines);
+/* Grows with every line logged: a log window refreshes when it changes. */
+RD_AGENT_API unsigned rd_agent_log_seq(void);
+/* desktop.log, which keeps everything (the window shows the latest lines). */
+RD_AGENT_API const char *rd_agent_log_path(void);
 RD_AGENT_API void rd_agent_free(void *p);
 RD_AGENT_API const char *rd_agent_version(void);
 

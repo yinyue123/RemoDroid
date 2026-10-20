@@ -17,4 +17,11 @@ typedef struct {
 int rd_enroll(const char *panel, const char *code, const char *name, const char *platform, const char *ca_file,
               const char *user_agent, rd_enroll_t *out, char *err, size_t errcap);
 
+/* Reads the line the panel shows ("remodroid enroll --panel https://… --code X5SX-K3M7", the
+ * desktop CLI's "remodroid-desktopd pair …", --panel=… forms, or just "https://… X5SX-K3M7") into
+ * the panel address and the code. Either may be missing from the line and is then left as it
+ * was, so a caller can pre-fill one (e.g. the panel it was paired with before). Returns the number
+ * of the two that the line gave. */
+int rd_enroll_parse(const char *line, char *panel, size_t panelcap, char *code, size_t codecap);
+
 #endif

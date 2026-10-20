@@ -83,12 +83,12 @@ def desktop_grid(names, ver):
         '| Computer | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Apple silicon, Snapdragon…</sub> |', '|:--|:-:|:-:|',
         f'| **Windows** 10 1809+, 11 | {cell((f"RemoDroid-{ver}-windows-x86_64.zip", "zip", "Windows .zip x86_64"))} | '
         f'{cell((f"RemoDroid-{ver}-windows-arm64.zip", "zip", "Windows .zip ARM64"))} |',
-        f'| **macOS** 12.3+ | {mac} | {mac} |',
+        f'| **macOS** 13+ | {mac} | {mac} |',
         f'| **Linux** (X11 session) | {linux("amd64", "x86_64", "x86_64")} | {linux("arm64", "aarch64", "aarch64")} |',
     ])
 
 
-DESKTOP_HINT = ('Remote desktop for the computer itself: install it there, then pair it with a code from the panel '
+DESKTOP_HINT = ('Remote desktop for the computer itself: install it there, then pair it by pasting the line from the panel '
                 '(Agents → Add → Computer). The macOS build runs on Apple silicon and Intel Macs.')
 
 

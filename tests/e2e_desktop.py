@@ -13,7 +13,8 @@ the device shows up as a Linux computer; video decodes and shows the
 quadrant colours in the right places; a click lands at the right X pixel; the
 wheel scrolls; physical keys arrive as the expected keycodes; text from the
 Keyboard sheet is typed; the clipboard syncs both ways; an upload lands in
-~/Downloads/RemoDroid; and from a touch screen, tap / long press / two-finger
+~/Downloads/RemoDroid; the computer's sound (a tone into a PulseAudio null sink)
+arrives as the Opus track, when pulseaudio is installed; and from a touch screen, tap / long press / two-finger
 drag become click / right click / scroll.
 
   python tests/e2e_desktop.py --bin build/host [--chrome PATH] [--verbose]
@@ -31,6 +32,9 @@ import tempfile
 import threading
 import time
 import urllib.request
+import wave
+import math
+import struct
 
 from playwright.async_api import async_playwright
 
@@ -43,6 +47,17 @@ def free_port():
     p = s.getsockname()[1]
     s.close()
     return p
+
+
+def tone_wav(path, seconds=90, hz=440):
+    """A 48 kHz stereo sine, for the computer to play while the viewer listens."""
+    with wave.open(path, "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        one = b"".join(struct.pack("<hh", v, v) for v in
+                       (int(12000 * math.sin(2 * math.pi * hz * i / 48000)) for i in range(48000)))
+        w.writeframes(one * seconds)
 
 
 def free_display():
@@ -118,6 +133,21 @@ notify = false
         time.sleep(0.1)
     probe = Probe(probe_bin, env)
     procs.append(probe.p)
+    # sound: a PulseAudio with a null sink as the default output, playing a tone the agent records
+    # from its monitor (@DEFAULT_MONITOR@)
+    sound = bool(shutil.which("pulseaudio") and shutil.which("paplay"))
+    if sound:
+        env["XDG_RUNTIME_DIR"] = f"{d}/run"
+        os.makedirs(env["XDG_RUNTIME_DIR"], mode=0o700)
+        procs.append(subprocess.Popen(["pulseaudio", "-n", "--daemonize=no", "--exit-idle-time=-1", "--use-pid-file=no",
+                                       "--load=module-null-sink sink_name=out", "--load=module-native-protocol-unix"],
+                                      env=env, stderr=quiet, stdout=quiet))
+        tone_wav(f"{d}/tone.wav")
+        for _ in range(50):
+            if subprocess.run(["pactl", "info"], env=env, capture_output=True).returncode == 0:
+                break
+            time.sleep(0.1)
+        procs.append(subprocess.Popen(["paplay", f"{d}/tone.wav"], env=env, stderr=quiet))
     procs.append(subprocess.Popen([f"{b}/remodroid-server", "-c", f"{d}/server.ini"], stderr=quiet))
     time.sleep(0.3)
     # pair the way a person does: a one-time code from the panel, redeemed by the agent
@@ -150,6 +180,8 @@ notify = false
                 launch["executable_path"] = args.chrome
             browser = await p.chromium.launch(**launch)
             ctx = await browser.new_context(viewport={"width": 1280, "height": 720})
+            await ctx.add_init_script("""(() => { const O = window.RTCPeerConnection; window.__pcs = [];
+                window.RTCPeerConnection = class extends O { constructor(...a) { super(...a); window.__pcs.push(this); } }; })()""")
             page = await ctx.new_page()
             logs = []
             page.on("console", lambda m: logs.append(m.text))
@@ -262,6 +294,17 @@ notify = false
                 await page.wait_for_timeout(100)
             res["upload_ok"] = os.path.exists(dest) and open(dest).read() == "hello computer\n"
             await page.locator("#sheet-photo button[data-close]").click()
+            # the computer's sound: Opus packets keep arriving, and they decode to a tone
+            stats = """async () => { let a = null; (await window.__pcs[window.__pcs.length - 1].getStats()).forEach(r => {
+                if (r.type === 'inbound-rtp' && r.kind === 'audio') a = r; });
+                return a && { packets: a.packetsReceived, energy: a.totalAudioEnergy || 0, samples: a.totalSamplesReceived || 0 }; }"""
+            a0 = await page.evaluate(stats)
+            await page.wait_for_timeout(2000)
+            a1 = await page.evaluate(stats)
+            res["sound"] = a0 and a1 and {"packets_2s": a1["packets"] - a0["packets"],
+                                          "energy_2s": round(a1["energy"] - a0["energy"], 4)}
+            if not sound:
+                res["sound"] = "skipped (no pulseaudio)"
             res["hud"] = await page.inner_text("#hud")
             res["errors"] = [l for l in logs if "PAGEERROR" in l][:5]
             await ctx.close()
@@ -308,6 +351,7 @@ notify = false
               and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("clip_to_viewer")
               and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok")
               and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
+              and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))
               and not res.get("errors"))
     finally:
         for pr in procs[::-1]:
