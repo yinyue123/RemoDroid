@@ -4,6 +4,7 @@
  * viewer's phone-style default) lands in [files] upload_dir. Runs on the agent
  * thread; pulls are paced by the data channel's send buffer. */
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,7 +108,7 @@ static int normalize(const char *in, char *out, size_t cap)
     if (!np)
         snprintf(out, cap, "/");
     /* follow symlinks of what exists, so a link can't point out of home */
-    char real[1024];
+    char real[PATH_MAX]; /* realpath writes up to PATH_MAX; fortified glibc aborts on less */
     if (realpath(out, real))
         snprintf(out, cap, "%s", real);
     return 0;

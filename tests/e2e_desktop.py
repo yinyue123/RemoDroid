@@ -13,7 +13,8 @@ the device shows up as a Linux computer; video decodes and shows the
 quadrant colours in the right places; a click lands at the right X pixel; the
 wheel scrolls; physical keys arrive as the expected keycodes; text from the
 Keyboard sheet is typed; the clipboard syncs both ways; an upload lands in
-~/Downloads/RemoDroid.
+~/Downloads/RemoDroid; and from a touch screen, tap / long press / two-finger
+drag become click / right click / scroll.
 
   python tests/e2e_desktop.py --bin build/host [--chrome PATH] [--verbose]
 """
@@ -263,11 +264,51 @@ notify = false
             await page.locator("#sheet-photo button[data-close]").click()
             res["hud"] = await page.inner_text("#hud")
             res["errors"] = [l for l in logs if "PAGEERROR" in l][:5]
+            await ctx.close()
+            # a phone-sized touch screen (an iPhone viewer): tap = click, long press = right click,
+            # two fingers = scroll
+            await asyncio.sleep(1.5)
+            tctx = await browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+            tp = await tctx.new_page()
+            tp.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
+            await tp.goto(f"http://127.0.0.1:{http_port}/")
+            await tp.fill("#user", "me")
+            await tp.fill("#password", "pw")
+            await tp.click("#go")
+            await tp.wait_for_url(f"http://127.0.0.1:{http_port}/")
+            await tp.wait_for_function("() => document.querySelector('#disc').hidden && document.querySelector('#video').videoWidth > 0",
+                                       timeout=30000)
+            await tp.wait_for_timeout(800)
+            tb = await tp.locator("#video").bounding_box()
+            at = lambda fx, fy: {"x": tb["x"] + tb["width"] * fx, "y": tb["y"] + tb["height"] * fy}
+            cdp = await tctx.new_cdp_session(tp)
+            touch = lambda kind, pts: cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": pts})
+            probe.drain()
+            await touch("touchStart", [at(0.75, 0.75)])
+            await touch("touchEnd", [])
+            ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == 1 and e["down"] == 1)
+            res["touch_tap"] = ev and [ev["x"], ev["y"]]
+            res["touch_tap_ok"] = bool(ev and abs(ev["x"] - 960) <= 6 and abs(ev["y"] - 540) <= 6)
+            await touch("touchStart", [at(0.25, 0.25)])
+            await asyncio.sleep(0.8)
+            await touch("touchEnd", [])
+            ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == 3 and e["down"] == 1)
+            res["touch_long_press_ok"] = bool(ev and abs(ev["x"] - 320) <= 6 and abs(ev["y"] - 180) <= 6)
+            await touch("touchStart", [at(0.5, 0.6), at(0.6, 0.6)])
+            for k in range(1, 8):
+                await touch("touchMove", [at(0.5, 0.6 - k * 0.04), at(0.6, 0.6 - k * 0.04)])
+                await asyncio.sleep(0.03)
+            await touch("touchEnd", [])
+            ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] in (4, 5))
+            res["touch_scroll"] = ev and ev["b"]
+            res["errors"] = [l for l in logs if "PAGEERROR" in l][:5]
             await browser.close()
         ok = (res.get("pair") and res.get("platform") == "linux" and res["video"]["w"] == 1280 and res.get("colours_ok") and res.get("click_ok")
               and res.get("right_click_ok") and res.get("wheel_ok") and res.get("key_a") == "a" and res.get("shift_1") == "exclam"
               and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("clip_to_viewer")
-              and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok") and not res.get("errors"))
+              and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok")
+              and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
+              and not res.get("errors"))
     finally:
         for pr in procs[::-1]:
             if pr.poll() is None:

@@ -57,14 +57,14 @@ static inline void sample(const uint8_t *src, int stride, const tap_t *tx, const
 {
     const uint8_t *p00 = src + (size_t)ty->i0 * stride + tx->i0 * 4, *p01 = src + (size_t)ty->i0 * stride + tx->i1 * 4;
     const uint8_t *p10 = src + (size_t)ty->i1 * stride + tx->i0 * 4, *p11 = src + (size_t)ty->i1 * stride + tx->i1 * 4;
-    int fx = tx->f, fy = ty->f;
+    int fx = tx->f, fy = ty->f, v[3];
     for (int c = 0; c < 3; c++) {
         int top = p00[c] * (256 - fx) + p01[c] * fx, bot = p10[c] * (256 - fx) + p11[c] * fx;
-        int val = (top * (256 - fy) + bot * fy + 32768) >> 16;
-        if (c == 0) *b = val;
-        else if (c == 1) *g = val;
-        else *r = val;
+        v[c] = (top * (256 - fy) + bot * fy + 32768) >> 16;
     }
+    *b = v[0];
+    *g = v[1];
+    *r = v[2];
 }
 
 void yuv_from_bgra(const uint8_t *src, int sw, int sh, int stride, uint8_t *y, uint8_t *u, uint8_t *v, int dw, int dh)

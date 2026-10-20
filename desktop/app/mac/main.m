@@ -44,6 +44,8 @@ static NSImage *icon_image(int style, CGFloat points)
 @property(assign) rd_status_t st;
 @property(assign) BOOL pairing;
 @property(strong) NSString *pairMsg;
+- (void)refresh;
+- (void)notify:(NSString *)text;
 @end
 
 static AppDelegate *app;
@@ -137,7 +139,7 @@ static void on_notify(void *ud, const char *text)
     return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/LaunchAgents/com.remodroid.desktop.plist"];
 }
 
-- (void)setLogin:(BOOL)on
+- (void)setStartAtLogin:(BOOL)on
 {
     if (@available(macOS 13.0, *)) {
         NSError *e = nil;
@@ -206,7 +208,7 @@ static void on_notify(void *ud, const char *text)
 
 - (void)disconnect:(id)sender { rd_agent_end_session(); }
 - (void)toggleViewOnly:(id)sender { rd_agent_set("desktop.view_only", self.st.view_only ? "false" : "true"); }
-- (void)toggleLogin:(id)sender { [self setLogin:![self loginEnabled]]; [self refresh]; }
+- (void)toggleLogin:(id)sender { [self setStartAtLogin:![self loginEnabled]]; [self refresh]; }
 
 - (void)openPanel:(id)sender
 {
@@ -361,7 +363,7 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
 }
 
 - (void)viewOnlyChanged:(id)sender { rd_agent_set("desktop.view_only", self.viewOnly.state == NSControlStateValueOn ? "true" : "false"); }
-- (void)loginChanged:(id)sender { [self setLogin:self.login.state == NSControlStateValueOn]; }
+- (void)loginChanged:(id)sender { [self setStartAtLogin:self.login.state == NSControlStateValueOn]; }
 
 - (void)openCaptureSettings:(id)sender
 {

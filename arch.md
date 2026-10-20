@@ -25,6 +25,7 @@ Contents
 14. [Packet reference, byte by byte](#14-packet-reference-byte-by-byte)
 15. [Glossary of abbreviations](#15-glossary-of-abbreviations)
 16. [Suggested reading order](#16-suggested-reading-order)
+17. [Computers: the desktop agents](#17-computers-the-desktop-agents)
 
 ---
 
@@ -1699,3 +1700,40 @@ The control side runs over `ctrl`:
    - Run `python tests/e2e_webrtc.py` (add `--relay` to force TURN) with `log_level = trace`.
    - Every tunnel CTRL message, ADB packet (`adb ->` / `adb <-`), ICE state and SCTP event is logged.
    - The web client's Logs tab shows the protocol log from the browser side.
+
+---
+
+## 17. Computers: the desktop agents
+
+Windows, macOS and Linux computers are devices too. Everything above still applies from the server outwards;
+what changes is that no router or phone process is involved. Design and decisions: [`multi-platform.md`](multi-platform.md).
+
+```
+ Browser ── WS /ws/viewer ──► remodroid-server ◄── WS /ws/agent ── ┐ one process on the computer
+    ▲                                                              │  app (tray / menu bar, pairing)
+    └──────────── WebRTC: video, input, ctrl, files ──────────────►│  libremodroid: wsc.c + rtc/ ("embed")
+                                                                   │  + desktop/core + desktop/<os>
+```
+
+- **One library, the phone's stack.** `rtc/` is the same code the phone runs. `rtc/host.c` runs it on a thread
+  behind `rd_rtc.h`; on the phone `android/native/jni.c` binds that to Java, on a computer the agent drives it.
+- **Signaling without a tunnel.** `net_new(…, "embed", …)`: the stack never listens. `desktop/core/agent.c` hands
+  it `session.start`, `signal` and `session.end` from the server WebSocket (`common/wsc.c`, the same client the
+  router agent uses) with `rtc_ctrl_in`, and sends its `signal` / `session.ended` back through `on_ctrl_out`.
+  UDP is always direct (the computer's own interfaces, plus TURN), as with a phone on Path B.
+- **Threads:** the agent thread (libev: WebSocket, ICE/DTLS/SCTP/RTP, ctrl, input injection, file chunks), the
+  video thread (`desktop/core/video.c`: capture → encode → `rd_rtc_video`), and the app's UI thread, which only
+  calls `rd_agent.h` and receives its callbacks posted over.
+- **Video:** the platform's hardware path where there is one (Windows: DXGI capture → NV12 → Media Foundation
+  MFT; macOS: ScreenCaptureKit NV12 → VideoToolbox, no CPU copy), else capture → `yuv.c` → minih264
+  (Constrained Baseline, what the SDP already offers). H.265 is offered only when a hardware HEVC encoder exists.
+- **Input:** the `input` channel gains mouse (0x03), key (0x04, USB HID usages from `KeyboardEvent.code`) and
+  reset (0x05) messages (§8.2 of the design). `desktop/core/keymap.c` maps a usage to a Windows scan code, a macOS
+  `kVK_` code and a Linux evdev code; the viewer's table must match it (`desk_test` checks).
+- **ctrl:** the phone's messages (`session.ready`, `quality.set`, `stats`, `text`, `clip.*`, `file.*`, …) with the
+  same shapes, plus `screen.select`; `session.ready` carries `platform`, `screens`, `home` and `upload_dir`.
+- **Pairing:** the app (or `remodroid-desktopd pair`) redeems a panel code with `common/enroll.c`, the code the
+  router's `remodroid-agent enroll` uses, and writes `[server]` into the per-user `desktop.ini`.
+- **Reading order:** `desktop/core/rd_agent.h` → `agent.c` (`on_loop`, `on_server_message`, `rtc_on_session`) →
+  `session.c` (`session_channel_open`, `control`) → `input.c` → `video.c` → one backend (`desktop/linux/` is the
+  shortest) → `tests/e2e_desktop.py`, which drives all of it on Xvfb.
