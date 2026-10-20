@@ -9,6 +9,7 @@
 
 #include "desk.h"
 #include "opus.h"
+#define RD_BUILDING_LIB /* linked with the library's objects, not the DLL */
 #include "rd_agent.h"
 #include "stubs.h"
 

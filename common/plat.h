@@ -27,6 +27,10 @@
 #ifndef MSG_DONTWAIT
 #define MSG_DONTWAIT 0 /* sockets are non-blocking already */
 #endif
+#ifdef gai_strerror /* UNICODE picks gai_strerrorW; messages here are char */
+#undef gai_strerror
+#define gai_strerror gai_strerrorA
+#endif
 #include <time.h>
 #define strtok_r strtok_s
 #ifndef strcasecmp
