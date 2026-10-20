@@ -20,11 +20,12 @@
 #include "desk.h"
 #include "win.h"
 
-/* codecapi.h declares these GUIDs only for C++ */
+/* codecapi.h declares these GUIDs only for C++, and no mingw library defines IID_ICodecAPI */
 DEFINE_GUID(RD_AVLowLatencyMode, 0x9c27891a, 0xed7a, 0x40e1, 0x88, 0xe8, 0xb2, 0x27, 0x27, 0xa0, 0x24, 0xee);
 DEFINE_GUID(RD_AVEncCommonRateControlMode, 0x1c0608e9, 0x370c, 0x4710, 0x8a, 0x58, 0xcb, 0x61, 0x81, 0xc4, 0x24, 0x23);
 DEFINE_GUID(RD_AVEncCommonMeanBitRate, 0xf7222374, 0x2144, 0x4815, 0xb5, 0x50, 0xa3, 0x7f, 0x8e, 0x12, 0xee, 0x52);
 DEFINE_GUID(RD_AVEncMPVGOPSize, 0x95f31b26, 0x95a4, 0x41aa, 0x93, 0x03, 0x24, 0x6a, 0x7f, 0xc6, 0xee, 0xf1);
+DEFINE_GUID(RD_IID_ICodecAPI, 0x901db4c7, 0x31ce, 0x41a2, 0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda);
 DEFINE_GUID(RD_AVEncVideoForceKeyFrame, 0x398c1b98, 0x8353, 0x475a, 0x9e, 0xf2, 0x8f, 0x26, 0x5d, 0x26, 0x03, 0x45);
 
 struct dsk_hwvideo {
@@ -141,7 +142,7 @@ static int configure(dsk_hwvideo_t *v, IMFActivate *act, char *err, size_t cap)
         snprintf(err, cap, "%s: no event generator", v->name);
         return -1;
     }
-    if (SUCCEEDED(IMFTransform_QueryInterface(v->mft, &IID_ICodecAPI, (void **)&v->api))) {
+    if (SUCCEEDED(IMFTransform_QueryInterface(v->mft, &RD_IID_ICodecAPI, (void **)&v->api))) {
         set_bool(v->api, &RD_AVLowLatencyMode, 1);
         set_u32(v->api, &RD_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
         set_u32(v->api, &RD_AVEncCommonMeanBitRate, (ULONG)c->kbps * 1000);
