@@ -51,7 +51,7 @@ static void test_keymap(const char *app_js)
     char *end = strstr(t, "};");
     int seen = 0;
     for (char *p = t + 14; p && p < end;) {
-        while (p < end && (*p == ' ' || *p == '\n' || *p == ','))
+        while (p < end && (*p == ' ' || *p == '\n' || *p == '\r' || *p == ','))
             p++;
         char name[40];
         unsigned v;
@@ -234,11 +234,16 @@ static void test_swenc(void)
 int main(int argc, char **argv)
 {
     rd_log_init("test", RD_LOG_WARN);
+    setvbuf(stdout, NULL, _IONBF, 0); /* a crash still shows which part was running */
+    printf("keymap\n");
     test_keymap(argc > 1 ? argv[1] : NULL);
     test_android_keys();
+    printf("input\n");
     test_input();
+    printf("video sizes, colour\n");
     test_fit();
     test_yuv();
+    printf("software encoder\n");
     test_swenc();
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;

@@ -379,7 +379,7 @@ void H264E_set_vbv_state(
 #error platform not supported
 #endif
 
-#if defined(__aarch64__) && defined(__clang__)
+#if defined(__aarch64__) && defined(__clang__) && !defined(_WIN32) /* RemoDroid: long is 32-bit on Windows */
 // uintptr_t broken with aarch64 clang on ubuntu 18
 #define uintptr_t unsigned long
 #endif
