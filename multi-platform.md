@@ -281,7 +281,7 @@ All system APIs, and nothing third-party. Minimum versions: **Windows 10 1809+**
 | | Windows (C, COM through `lpVtbl`) | macOS (C / Objective-C) | Linux (C) |
 |---|---|---|---|
 | Capture | DXGI Desktop Duplication (D3D11), dirty-rect aware | ScreenCaptureKit `SCStream`, NV12 (`420v`) output | XShm `XShmGetImage` (+ XDamage to skip unchanged frames) |
-| Colour conversion | `ID3D11VideoProcessor` BGRA→NV12 on the GPU | none needed (SCK delivers NV12) | `yuv.c` |
+| Colour conversion | `yuv.c` on the CPU (BGRA→NV12, scaled); an `ID3D11VideoProcessor` GPU path is a later optimisation | none needed (SCK delivers NV12, scaled) | `yuv.c` |
 | Encode | Media Foundation H.264/HEVC MFT, hardware async first, then the Microsoft software MFT, then minih264 | VideoToolbox `VTCompressionSession` (H.264, HEVC), real-time, no B-frames | minih264 (VA-API through `dlopen` later) |
 | Mouse | `SendInput` absolute with `MOUSEEVENTF_VIRTUALDESK` | `CGEventCreateMouseEvent` / `CGEventPost` (with drag events, click count for double-clicks) | `XTestFakeMotionEvent` / `ButtonEvent` |
 | Keys | `SendInput` with scan codes (`KEYEVENTF_SCANCODE`, `EXTENDEDKEY`) | `CGEventCreateKeyboardEvent` with `kVK_*` | `XTestFakeKeyEvent` with keycode = evdev + 8 |
@@ -556,14 +556,14 @@ conservative:
 
 ```
 make desktop                       host OS: libremodroid + app + headless
-make desktop TARGET=win-x86_64 CC="zig cc -target x86_64-windows-gnu"
-make desktop TARGET=win-arm64  CC="zig cc -target aarch64-windows-gnu"
-make desktop TARGET=mac        (on macOS: clang -arch arm64 -arch x86_64)
+make desktop desktop-app TARGET=win-x86_64 CC=gcc    (MSYS2 UCRT64 on Windows)
+make desktop desktop-app TARGET=win-arm64 CC=clang WINDRES=llvm-windres   (MSYS2 CLANGARM64)
+make desktop desktop-app TARGET=mac CC=clang ARCHFLAGS="-arch arm64 -arch x86_64 -mmacosx-version-min=12.3"
 ```
 
-Windows uses Zig's bundled mingw-w64 headers and import libraries (D3D11, DXGI, Media Foundation and Winsock
-are all included), cross-compiled from Linux like the existing static binaries. GUIDs that mingw lacks are
-defined locally with `INITGUID`. macOS requires a macOS runner, because Apple's frameworks can't be
+Windows builds natively on the Windows runners with MSYS2 (UCRT64 gcc for x86_64, CLANGARM64 clang for arm64),
+which also provides `windres` for the manifest and icon, and lets CI run the tests there. Codec property GUIDs
+that mingw declares only for C++ are defined locally. macOS requires a macOS runner, because Apple's frameworks can't be
 redistributed for cross builds. Linux is built natively on Ubuntu 22.04, for glibc 2.35 compatibility,
 against the distribution's X11/GTK development packages.
 
@@ -571,9 +571,9 @@ against the distribution's X11/GTK development packages.
 
 | Job | Runner | Produces | Runs tests |
 |---|---|---|---|
-| `desktop-linux` (x86_64, aarch64) | ubuntu-22.04 / ubuntu-22.04-arm | `remodroid-desktop`, `remodroid-desktopd`, `libremodroid.so` | rtc tests + desktop e2e on Xvfb (§14) |
-| `desktop-windows` (x86_64, arm64) | build on ubuntu (zig), test on windows-2022 | `RemoDroid.exe`, `remodroid.dll` | rtc_test.exe, the keymap test and a DXGI+MF smoke test on windows-2022 (x86_64) |
-| `desktop-macos` (universal2) | macos-14 | `RemoDroid.app` | rtc tests, the keymap test, a VideoToolbox encode test (capture needs a TCC grant runners don't have) |
+| `desktop-linux` (x86_64, aarch64) | ubuntu-22.04 / ubuntu-22.04-arm | `remodroid-desktop`, `remodroid-desktopd`, `libremodroid.so` | `desk_test`, a start-up smoke test, and `tests/e2e_desktop.py` on Xvfb (x86_64) |
+| `desktop-windows` (x86_64, arm64) | windows-2022 / windows-11-arm (MSYS2) | `RemoDroid.exe`, `remodroid-desktopd.exe`, `remodroid.dll` | `desk_test.exe`, a check that only system DLLs are imported, and a start-up smoke test |
+| `desktop-macos` (universal2) | macos-14 | `RemoDroid.app` | `desk_test`, signature check, a start-up smoke test (capture needs a TCC grant runners don't have) |
 | `phone` | unchanged | `libremodroid.so` built from `rtc/` + `host.c` + `jni.c` | unchanged |
 
 ### 13.3 Packages

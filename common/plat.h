@@ -27,6 +27,14 @@
 #ifndef MSG_DONTWAIT
 #define MSG_DONTWAIT 0 /* sockets are non-blocking already */
 #endif
+#include <time.h>
+#define strtok_r strtok_s
+#ifndef strcasecmp
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#endif
+static inline struct tm *rd_gmtime_r(const time_t *t, struct tm *tm) { return gmtime_s(tm, t) ? NULL : tm; }
+#define gmtime_r rd_gmtime_r
 typedef SRWLOCK rd_mutex_t;
 typedef CONDITION_VARIABLE rd_cond_t;
 typedef HANDLE rd_thread_t;

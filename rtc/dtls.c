@@ -15,6 +15,7 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 
+#include "plat.h"
 #include "rd.h"
 
 static mbedtls_entropy_context entropy;

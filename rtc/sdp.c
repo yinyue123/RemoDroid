@@ -5,6 +5,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "plat.h"
 #include "rd.h"
 
 const char *codec_name(int c) { return c == CODEC_H265 ? "h265" : c ? "h264" : "none"; }
