@@ -91,8 +91,8 @@ test-worker: all
 # WebRTC suites (need python with aiortc; the browser test also needs playwright + chromium)
 PY ?= python3
 test-webrtc: all rtc-tests
-	$(PY) android/native/test/rtc_interop.py --bin $(OUT)/rtc/rtc_test
-	$(PY) android/native/test/rtp_depack.py --bin $(OUT)/rtc/rtp_dump
+	$(PY) rtc/test/rtc_interop.py --bin $(OUT)/rtc/rtc_test
+	$(PY) rtc/test/rtp_depack.py --bin $(OUT)/rtc/rtp_dump
 	$(PY) tests/e2e_webrtc.py --bin $(OUT)
 	$(PY) tests/e2e_webrtc.py --bin $(OUT) --relay
 	$(PY) tests/e2e_browser.py --bin $(OUT)
@@ -106,7 +106,8 @@ clean:
 
 -include $(SERVER_OBJ:.o=.d) $(AGENT_OBJ:.o=.d) $(COMMON_OBJ:.o=.d)
 
-include android/native/rtc.mk
+include rtc/rtc.mk
+include desktop/desktop.mk
 
 .PHONY: all strip test test-worker test-webrtc dist clean
 

@@ -7,11 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/utsname.h>
 #include <unistd.h>
 
 #include "agent.h"
-#include "httpc.h"
+#include "enroll.h"
 #include "msg.h"
 
 static void usage(void)
@@ -36,77 +35,31 @@ int enroll_main(int argc, char **argv)
         usage();
         return 2;
     }
-    int tls = !strncmp(panel, "https://", 8);
-    if (!tls && strncmp(panel, "http://", 7)) {
+    if (strncmp(panel, "https://", 8) && strncmp(panel, "http://", 7)) {
         fprintf(stderr, "--panel must start with https:// or http://\n");
         return 2;
     }
-    char base[300];
-    snprintf(base, sizeof base, "%s", panel);
-    size_t bl = strlen(base);
-    while (bl > 8 && base[bl - 1] == '/')
-        base[--bl] = 0;
-    const char *hostport = base + (tls ? 8 : 7);
-    if (strchr(hostport, '/')) {
-        fprintf(stderr, "--panel is the panel's address only, e.g. https://remodroid.example.com\n");
-        return 2;
-    }
-
-    struct utsname u;
-    uname(&u);
     char host[64];
-    if (gethostname(host, sizeof host) < 0)
-        snprintf(host, sizeof host, "router");
-    host[sizeof host - 1] = 0;
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "code", code);
-    cJSON_AddStringToObject(req, "name", name ? name : host);
-    cJSON_AddStringToObject(req, "arch", u.machine);
-    cJSON_AddStringToObject(req, "version", RD_VERSION);
-    char *body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-
-    printf("▸ contacting the panel %s…\n", base);
+    rd_hostname(host, sizeof host);
+    printf("▸ contacting the panel %s…\n", panel);
     fflush(stdout);
-    char url[400], err[300];
-    snprintf(url, sizeof url, "%s/api/v1/enroll", base);
-    httpc_t *h = httpc_new(ca ? ca : "", "remodroid-agent/" RD_VERSION);
-    httpc_resp_t r;
-    int e = h ? httpc_request(h, "POST", url, "application/json", body, &r, err, sizeof err) : -1;
-    free(body);
-    httpc_free(h);
-    if (e < 0) {
-        fprintf(stderr, "✗ %s\n", h ? err : "out of memory");
+    rd_enroll_t en;
+    char err[300];
+    if (rd_enroll(panel, code, name ? name : host, "android", ca, "remodroid-agent/" RD_VERSION, &en, err,
+                  sizeof err) < 0) {
+        fprintf(stderr, "✗ %s\n", err);
         if (strstr(err, "trusted") || strstr(err, "CA bundle"))
             fprintf(stderr, "  (check the router's clock and that ca-bundle / ca-certificates is installed)\n");
         return 1;
     }
-    cJSON *res = cJSON_Parse(r.body);
-    if (r.status != 200) {
-        fprintf(stderr, "✗ %s\n", msg_str(res, "msg", r.status == 404 ? "this panel has no enrollment (wrong address?)"
-                                                                        : "the panel refused the code"));
-        cJSON_Delete(res);
-        httpc_resp_free(&r);
-        return 1;
-    }
-    httpc_resp_free(&r);
-    const char *id = msg_str(res, "device_id", ""), *secret = msg_str(res, "device_secret", "");
-    if (!*id || !*secret) {
-        fprintf(stderr, "✗ unexpected answer from the panel\n");
-        cJSON_Delete(res);
-        return 1;
-    }
-    char ws[400];
-    snprintf(ws, sizeof ws, "%s://%s%s", tls ? "wss" : "ws", hostport, msg_str(res, "ws_path", "/ws/agent"));
-    if (rd_conf_write(A.conf_path, "server", "url", ws) < 0 || rd_conf_write(A.conf_path, "server", "device_id", id) < 0 ||
-        rd_conf_write(A.conf_path, "server", "device_secret", secret) < 0 ||
+    if (rd_conf_write(A.conf_path, "server", "url", en.ws_url) < 0 ||
+        rd_conf_write(A.conf_path, "server", "device_id", en.device_id) < 0 ||
+        rd_conf_write(A.conf_path, "server", "device_secret", en.device_secret) < 0 ||
         (ca && rd_conf_write(A.conf_path, "server", "ca_file", ca) < 0)) {
         fprintf(stderr, "✗ cannot write %s (run as root?)\n", A.conf_path);
-        cJSON_Delete(res);
         return 1;
     }
-    printf("✓ enrolled as \"%s\" (%s); saved in %s\n", msg_str(res, "name", id), id, A.conf_path);
-    cJSON_Delete(res);
+    printf("✓ enrolled as \"%s\" (%s); saved in %s\n", en.name, en.device_id, A.conf_path);
 
     /* a running agent picks it up now; otherwise it's used on the next start */
     if (agent_reload() < 0)

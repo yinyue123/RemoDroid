@@ -1,0 +1,17 @@
+# RemoDroid desktop agent without a UI, as a systemd user service:
+#   remodroid-desktopd pair --panel https://your.panel --code XXXX-XXXX
+#   systemctl --user enable --now remodroid-desktopd
+# It needs the graphical session's DISPLAY (X11); `systemctl --user import-environment DISPLAY`
+# if your session doesn't pass it to user services.
+[Unit]
+Description=RemoDroid desktop agent
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/remodroid-desktopd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

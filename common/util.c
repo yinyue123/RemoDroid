@@ -7,11 +7,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <time.h>
+#ifdef _WIN32
+#include "plat.h"
+#include <bcrypt.h>
+#include <direct.h>
+#elif defined(__APPLE__)
+#include <sys/random.h>
+#include <unistd.h>
+#else
+#include <sys/syscall.h>
 #include <unistd.h>
 #if !defined(__ANDROID__) || __ANDROID_API__ >= 28
 #include <sys/random.h>
+#endif
 #endif
 
 #include <mbedtls/base64.h>
@@ -50,12 +59,16 @@ void rd_log(int level, const char *fmt, ...)
     if (level > rd_log_level)
         return;
     char line[1024];
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
+    uint64_t ms = rd_now_ms();
+    time_t sec = (time_t)(ms / 1000);
     struct tm tm;
-    localtime_r(&ts.tv_sec, &tm);
-    int n = snprintf(line, sizeof line, "%02d:%02d:%02d.%03ld %c %s: ", tm.tm_hour, tm.tm_min, tm.tm_sec,
-                     ts.tv_nsec / 1000000, tag[level], log_prog);
+#ifdef _WIN32
+    localtime_s(&tm, &sec);
+#else
+    localtime_r(&sec, &tm);
+#endif
+    int n = snprintf(line, sizeof line, "%02d:%02d:%02d.%03d %c %s: ", tm.tm_hour, tm.tm_min, tm.tm_sec,
+                     (int)(ms % 1000), tag[level], log_prog);
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(line + n, sizeof line - (size_t)n, fmt, ap);
@@ -135,6 +148,25 @@ void rd_buf_consume(rd_buf_t *b, size_t n)
 
 /* ---------------- misc ---------------- */
 
+#ifdef _WIN32
+
+uint64_t rd_now_ms(void)
+{
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    uint64_t t = (uint64_t)ft.dwHighDateTime << 32 | ft.dwLowDateTime; /* 100 ns since 1601 */
+    return t / 10000 - 11644473600000ULL;
+}
+
+uint64_t rd_mono_ms(void) { return GetTickCount64(); }
+
+int rd_random(void *out, size_t n)
+{
+    return BCryptGenRandom(NULL, out, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
+}
+
+#else
+
 uint64_t rd_now_ms(void)
 {
     struct timespec ts;
@@ -149,6 +181,20 @@ uint64_t rd_mono_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
+#ifdef __APPLE__
+int rd_random(void *out, size_t n)
+{
+    uint8_t *p = out;
+    while (n) { /* getentropy: at most 256 bytes per call */
+        size_t k = n > 256 ? 256 : n;
+        if (getentropy(p, k) < 0)
+            return -1;
+        p += k;
+        n -= k;
+    }
+    return 0;
+}
+#else
 static ssize_t sys_getrandom(void *p, size_t n)
 {
 #if defined(__ANDROID__) && __ANDROID_API__ < 28
@@ -179,6 +225,9 @@ int rd_random(void *out, size_t n)
     }
     return 0;
 }
+#endif
+
+#endif
 
 void rd_hex(const uint8_t *in, size_t n, char *out)
 {
@@ -192,10 +241,14 @@ void rd_hex(const uint8_t *in, size_t n, char *out)
 
 int rd_set_nonblock(int fd)
 {
+#ifdef _WIN32
+    return rd_sock_nonblock(fd);
+#else
     int fl = fcntl(fd, F_GETFL, 0);
     if (fl < 0)
         return -1;
     return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+#endif
 }
 
 char *rd_strdup(const char *s)
@@ -284,17 +337,26 @@ int rd_split_hostport(const char *in, char *host, size_t hostcap, char *port, si
     return 0;
 }
 
+#ifdef _WIN32
+#define MKDIR(p, m) _mkdir(p)
+#define RD_DIR_SEP '\\'
+#else
+#define MKDIR(p, m) mkdir(p, (mode_t)(m))
+#define RD_DIR_SEP '/'
+#endif
+
 int rd_mkdirs(const char *path, unsigned mode)
 {
     char tmp[512];
     snprintf(tmp, sizeof tmp, "%s", path);
     for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
+        if (*p == '/' || *p == RD_DIR_SEP) {
+            char sep = *p;
             *p = 0;
-            if (mkdir(tmp, 0755) < 0 && errno != EEXIST)
+            if (MKDIR(tmp, 0755) < 0 && errno != EEXIST && !(p > tmp && p[-1] == ':'))
                 return -1;
-            *p = '/';
+            *p = sep;
         }
     }
-    return mkdir(tmp, (mode_t)mode) < 0 && errno != EEXIST ? -1 : 0;
+    return MKDIR(tmp, mode) < 0 && errno != EEXIST ? -1 : 0;
 }

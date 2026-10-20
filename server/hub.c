@@ -57,10 +57,14 @@ cJSON *hub_device_json(device_t *d)
     cJSON_AddStringToObject(j, "name", d->name);
     cJSON_AddBoolToObject(j, "online", online(d));
     cJSON_AddNumberToObject(j, "last_seen", (double)d->last_seen);
+    /* what the agent controls: "android" (a router agent's phone) or "windows" / "macos" / "linux" */
+    cJSON_AddStringToObject(j, "platform", d->hello ? msg_str(d->hello, "platform", "android") : "android");
     cJSON *a = cJSON_AddObjectToObject(j, "agent");
     if (d->hello) {
         cJSON_AddStringToObject(a, "version", msg_str(d->hello, "version", ""));
         cJSON_AddStringToObject(a, "arch", msg_str(d->hello, "arch", ""));
+        if (*msg_str(d->hello, "os", ""))
+            cJSON_AddStringToObject(a, "os", msg_str(d->hello, "os", ""));
     }
     if (online(d))
         cJSON_AddNumberToObject(a, "uptime_s", (double)((rd_now_ms() - d->online_since) / 1000));
@@ -265,6 +269,7 @@ static void viewer_session_request(conn_t *c, cJSON *m)
     cJSON *start = msg_new("session.start", 0, vs->sid);
     cJSON *sd = msg_d(start);
     cJSON_AddStringToObject(sd, "sid", vs->sid);
+    cJSON_AddStringToObject(sd, "viewer", c->user); /* a computer shows who is watching */
     cJSON_AddItemToObject(sd, "ice_servers", cJSON_Duplicate(ice, 1));
     cJSON *q = cJSON_GetObjectItemCaseSensitive(d, "quality");
     if (q)

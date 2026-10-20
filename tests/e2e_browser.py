@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "android", "native", "test"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "rtc", "test"))
 from rtc_interop import make_clip  # noqa: E402
 from playwright.async_api import async_playwright  # noqa: E402
 

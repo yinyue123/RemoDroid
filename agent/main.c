@@ -168,7 +168,7 @@ int agent_reload_apply(void)
     LOGI("reloaded %s", A.conf_path);
     if (strcmp(old_url, A.url) || strcmp(old_id, A.device_id) || strcmp(old_secret, A.device_secret) ||
         strcmp(old_ca, A.ca_file))
-        wsc_restart();
+        server_link_apply();
     phone_config_changed();
     http_api_start();
     return 0;
@@ -229,9 +229,8 @@ int main(int argc, char **argv)
     if (cli_server_start() < 0)
         LOGW("CLI socket %s unavailable: %s", A.sock_path, strerror(errno));
     http_api_start();
-    if (A.url[0])
-        wsc_start();
-    else
+    server_link_apply();
+    if (!A.url[0])
         LOGW("[server] url is empty; running without a server connection");
     ev_signal_init(&A.sig_hup, on_hup, SIGHUP);
     ev_signal_start(A.loop, &A.sig_hup);

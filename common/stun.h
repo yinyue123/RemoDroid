@@ -4,7 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/socket.h>
+#include "plat.h"
 
 #define STUN_MAGIC 0x2112A442u
 

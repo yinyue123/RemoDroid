@@ -1,17 +1,17 @@
 #include "net.h"
 
-#include <arpa/inet.h>
 #include <errno.h>
-#include <ifaddrs.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <net/if.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <iphlpapi.h>
+#else
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/tcp.h>
 #include <sys/un.h>
-#include <unistd.h>
+#endif
 
 #include "rd.h"
 #include "tunnel.h"
@@ -32,6 +32,7 @@ struct net {
     net_cb_t cb;
     void *ud;
     int direct;
+    int embed;        /* "embed": signaling by function call, no tunnel (desktop agents) */
     int lfd;          /* listening socket */
     ev_io lio;
     int cfd;          /* the agent's connection */
@@ -50,7 +51,7 @@ static void conn_close(net_t *n, const char *why)
     LOGI("tunnel: agent disconnected (%s)", why);
     ev_io_stop(n->loop, &n->rio);
     ev_io_stop(n->loop, &n->wio);
-    close(n->cfd);
+    rd_sock_close(n->cfd);
     n->cfd = -1;
     rd_buf_reset(&n->in);
     rd_buf_reset(&n->out);
@@ -61,11 +62,12 @@ static void conn_close(net_t *n, const char *why)
 static void flush(net_t *n)
 {
     while (rd_buf_avail(&n->out)) {
-        ssize_t w = write(n->cfd, rd_buf_data(&n->out), rd_buf_avail(&n->out));
+        ssize_t w = send(n->cfd, (const char *)rd_buf_data(&n->out), rd_buf_avail(&n->out), MSG_NOSIGNAL);
         if (w < 0) {
-            if (errno == EAGAIN || errno == EINTR)
+            int e = rd_sock_error();
+            if (rd_sock_again(e))
                 break;
-            conn_close(n, strerror(errno));
+            conn_close(n, rd_sock_strerror(e));
             return;
         }
         rd_buf_consume(&n->out, (size_t)w);
@@ -156,11 +158,12 @@ static void on_conn_read(struct ev_loop *loop, ev_io *w, int revents)
 {
     net_t *n = w->data;
     rd_buf_reserve(&n->in, 65536);
-    ssize_t r = read(n->cfd, n->in.p + n->in.len, n->in.cap - n->in.len);
+    ssize_t r = recv(n->cfd, (char *)n->in.p + n->in.len, n->in.cap - n->in.len, 0);
     if (r <= 0) {
-        if (r < 0 && (errno == EAGAIN || errno == EINTR))
+        int e = rd_sock_error();
+        if (r < 0 && rd_sock_again(e))
             return;
-        conn_close(n, r == 0 ? "closed" : strerror(errno));
+        conn_close(n, r == 0 ? "closed" : rd_sock_strerror(e));
         return;
     }
     n->in.len += (size_t)r;
@@ -189,7 +192,7 @@ static void reopen_tunnel_socks(net_t *n)
             continue;
         struct sockaddr_storage any;
         memset(&any, 0, sizeof any);
-        any.ss_family = (sa_family_t)s->af;
+        any.ss_family = s->af;
         send_frame(n, TUN_UDP_OPEN, (uint8_t)s->id, &any, NULL, 0);
     }
 }
@@ -197,15 +200,15 @@ static void reopen_tunnel_socks(net_t *n)
 static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
 {
     net_t *n = w->data;
-    int fd = accept4(n->lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    int fd = rd_sock_accept(n->lfd);
     if (fd < 0)
         return;
     if (n->cfd >= 0)
         conn_close(n, "replaced by a new connection");
     int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); /* fails harmlessly on unix sockets */
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one); /* fails harmlessly on unix sockets */
     int sz = 1024 * 1024;
-    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char *)&sz, sizeof sz);
     n->cfd = fd;
     ev_io_init(&n->rio, on_conn_read, fd, EV_READ);
     ev_io_init(&n->wio, on_conn_write, fd, EV_WRITE);
@@ -220,24 +223,28 @@ static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
 static int listen_on(const char *spec)
 {
     int fd = -1;
+#ifdef _WIN32
+    if (0) {
+#else
     if (!strncmp(spec, "abstract:", 9)) {
         struct sockaddr_un sa = { .sun_family = AF_UNIX };
         size_t nl = strlen(spec + 9);
         if (nl + 1 > sizeof sa.sun_path)
             return -1;
         memcpy(sa.sun_path + 1, spec + 9, nl); /* leading NUL: Linux abstract namespace */
-        fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        fd = rd_socket(AF_UNIX, SOCK_STREAM, 0);
         if (fd < 0 || bind(fd, (struct sockaddr *)&sa, (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + nl)) < 0)
             goto fail;
+#endif
     } else if (!strncmp(spec, "tcp:", 4)) {
         char host[128], port[16];
         struct addrinfo hints = { .ai_socktype = SOCK_STREAM, .ai_flags = AI_PASSIVE }, *ai;
         if (rd_split_hostport(spec + 4, host, sizeof host, port, sizeof port, "27183") < 0 ||
             getaddrinfo(host, port, &hints, &ai))
             return -1;
-        fd = socket(ai->ai_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        fd = rd_socket(ai->ai_family, SOCK_STREAM, 0);
         int one = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof one);
         int r = fd < 0 ? -1 : bind(fd, ai->ai_addr, ai->ai_addrlen);
         freeaddrinfo(ai);
         if (r < 0)
@@ -249,9 +256,9 @@ static int listen_on(const char *spec)
         goto fail;
     return fd;
 fail:
-    LOGE("tunnel: cannot listen on %s: %s", spec, strerror(errno));
+    LOGE("tunnel: cannot listen on %s: %s", spec, rd_sock_strerror(rd_sock_error()));
     if (fd >= 0)
-        close(fd);
+        rd_sock_close(fd);
     return -1;
 }
 
@@ -263,6 +270,13 @@ net_t *net_new(struct ev_loop *loop, const char *listen_spec, int direct, net_cb
     n->ud = ud;
     n->direct = direct;
     n->cfd = -1;
+    rd_net_init();
+    if (!strcmp(listen_spec, "embed")) {
+        n->embed = n->direct = 1; /* the embedder carries signaling; media uses this computer's sockets */
+        n->lfd = -1;
+        LOGI("tunnel: none (embedded signaling, direct UDP)");
+        return n;
+    }
     n->lfd = listen_on(listen_spec);
     if (n->lfd < 0) {
         free(n);
@@ -275,11 +289,25 @@ net_t *net_new(struct ev_loop *loop, const char *listen_spec, int direct, net_cb
     return n;
 }
 
-void net_set_direct(net_t *n, int direct) { n->direct = direct; }
-int net_link_up(const net_t *n) { return n->cfd >= 0; }
+void net_set_direct(net_t *n, int direct) { n->direct = n->embed || direct; }
+int net_link_up(const net_t *n) { return n->embed || n->cfd >= 0; }
 size_t net_backlog(const net_t *n) { return rd_buf_avail(&n->out); }
 
-int net_ctrl_send(net_t *n, const char *json, size_t len) { return send_frame(n, TUN_CTRL, 0, NULL, json, len); }
+int net_ctrl_send(net_t *n, const char *json, size_t len)
+{
+    if (n->embed) {
+        if (n->cb.on_ctrl_out)
+            n->cb.on_ctrl_out(n->ud, json, len);
+        return 0;
+    }
+    return send_frame(n, TUN_CTRL, 0, NULL, json, len);
+}
+
+void net_ctrl_input(net_t *n, const char *json, size_t len)
+{
+    if (n->cb.on_ctrl)
+        n->cb.on_ctrl(n->ud, (const uint8_t *)json, len);
+}
 
 /* ---------------- UDP sockets ---------------- */
 
@@ -290,7 +318,7 @@ static void on_udp_read(struct ev_loop *loop, ev_io *w, int revents)
     for (int i = 0; i < 64; i++) {
         struct sockaddr_storage from;
         socklen_t fl = sizeof from;
-        ssize_t r = recvfrom(s->fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
+        ssize_t r = recvfrom(s->fd, (char *)buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
         if (r < 0)
             return;
         if (from.ss_family == AF_INET6 && IN6_IS_ADDR_V4MAPPED(&((struct sockaddr_in6 *)&from)->sin6_addr)) {
@@ -306,7 +334,27 @@ static void on_udp_read(struct ev_loop *loop, ev_io *w, int revents)
     }
 }
 
-/* Path B: host candidates are the phone's own interface addresses. */
+/* Path B: host candidates are this device's own interface addresses. */
+static void report_addr(nsock_t *s, const struct sockaddr *sa, int port)
+{
+    struct sockaddr_storage a;
+    memset(&a, 0, sizeof a);
+    if (sa->sa_family == AF_INET && s->af == AF_INET) {
+        memcpy(&a, sa, sizeof(struct sockaddr_in));
+        ((struct sockaddr_in *)&a)->sin_port = htons((uint16_t)port);
+    } else if (sa->sa_family == AF_INET6 && s->af == AF_INET6) {
+        const struct sockaddr_in6 *x = (const struct sockaddr_in6 *)sa;
+        if (IN6_IS_ADDR_LINKLOCAL(&x->sin6_addr))
+            return;
+        memcpy(&a, x, sizeof *x);
+        ((struct sockaddr_in6 *)&a)->sin6_port = htons((uint16_t)port);
+    } else {
+        return;
+    }
+    if (s->n->cb.on_bound)
+        s->n->cb.on_bound(s->n->ud, s, &a);
+}
+
 static void report_local_addrs(nsock_t *s)
 {
     struct sockaddr_storage me;
@@ -315,30 +363,36 @@ static void report_local_addrs(nsock_t *s)
         return;
     int port = me.ss_family == AF_INET ? ntohs(((struct sockaddr_in *)&me)->sin_port)
                                        : ntohs(((struct sockaddr_in6 *)&me)->sin6_port);
+#ifdef _WIN32
+    ULONG len = 16384;
+    IP_ADAPTER_ADDRESSES *aa = NULL;
+    for (int tries = 0; tries < 3; tries++) {
+        aa = malloc(len);
+        ULONG r = GetAdaptersAddresses((ULONG)s->af, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                                       GAA_FLAG_SKIP_DNS_SERVER, NULL, aa, &len);
+        if (r == NO_ERROR)
+            break;
+        free(aa);
+        aa = NULL;
+        if (r != ERROR_BUFFER_OVERFLOW)
+            return;
+    }
+    for (IP_ADAPTER_ADDRESSES *i = aa; i; i = i->Next) {
+        if (i->OperStatus != IfOperStatusUp || i->IfType == IF_TYPE_SOFTWARE_LOOPBACK)
+            continue;
+        for (IP_ADAPTER_UNICAST_ADDRESS *u = i->FirstUnicastAddress; u; u = u->Next)
+            report_addr(s, u->Address.lpSockaddr, port);
+    }
+    free(aa);
+#else
     struct ifaddrs *ifs, *i;
     if (getifaddrs(&ifs) < 0)
         return;
-    for (i = ifs; i; i = i->ifa_next) {
-        if (!i->ifa_addr || (i->ifa_flags & IFF_LOOPBACK) || !(i->ifa_flags & IFF_UP))
-            continue;
-        struct sockaddr_storage a;
-        memset(&a, 0, sizeof a);
-        if (i->ifa_addr->sa_family == AF_INET && s->af == AF_INET) {
-            memcpy(&a, i->ifa_addr, sizeof(struct sockaddr_in));
-            ((struct sockaddr_in *)&a)->sin_port = htons((uint16_t)port);
-        } else if (i->ifa_addr->sa_family == AF_INET6 && s->af == AF_INET6) {
-            struct sockaddr_in6 *x = (struct sockaddr_in6 *)i->ifa_addr;
-            if (IN6_IS_ADDR_LINKLOCAL(&x->sin6_addr))
-                continue;
-            memcpy(&a, x, sizeof *x);
-            ((struct sockaddr_in6 *)&a)->sin6_port = htons((uint16_t)port);
-        } else {
-            continue;
-        }
-        if (s->n->cb.on_bound)
-            s->n->cb.on_bound(s->n->ud, s, &a);
-    }
+    for (i = ifs; i; i = i->ifa_next)
+        if (i->ifa_addr && !(i->ifa_flags & IFF_LOOPBACK) && (i->ifa_flags & IFF_UP))
+            report_addr(s, i->ifa_addr, port);
     freeifaddrs(ifs);
+#endif
 }
 
 nsock_t *net_udp_open(net_t *n, int af)
@@ -363,24 +417,24 @@ nsock_t *net_udp_open(net_t *n, int af)
         n->socks = s;
         struct sockaddr_storage any;
         memset(&any, 0, sizeof any);
-        any.ss_family = (sa_family_t)af;
+        any.ss_family = af;
         send_frame(n, TUN_UDP_OPEN, (uint8_t)id, &any, NULL, 0);
         return s;
     }
-    s->fd = socket(af, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    s->fd = rd_socket(af, SOCK_DGRAM, 0);
     if (s->fd < 0) {
         free(s);
         return NULL;
     }
     int sz = 1024 * 1024;
-    setsockopt(s->fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
-    setsockopt(s->fd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
+    setsockopt(s->fd, SOL_SOCKET, SO_SNDBUF, (const char *)&sz, sizeof sz);
+    setsockopt(s->fd, SOL_SOCKET, SO_RCVBUF, (const char *)&sz, sizeof sz);
     ev_io_init(&s->io, on_udp_read, s->fd, EV_READ);
     s->io.data = s;
     ev_io_start(n->loop, &s->io);
     struct sockaddr_storage any;
     memset(&any, 0, sizeof any);
-    any.ss_family = (sa_family_t)af;
+    any.ss_family = af;
     bind(s->fd, (struct sockaddr *)&any, af == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
     s->next = n->socks;
     n->socks = s;
@@ -398,7 +452,7 @@ int net_udp_send(nsock_t *s, const struct sockaddr_storage *to, const void *d, s
     if (s->tunnel)
         return send_frame(s->n, TUN_UDP_SEND, (uint8_t)s->id, to, d, len);
     socklen_t tl = to->ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
-    return sendto(s->fd, d, len, MSG_DONTWAIT, (const struct sockaddr *)to, tl) < 0 ? -1 : 0;
+    return sendto(s->fd, (const char *)d, len, MSG_DONTWAIT, (const struct sockaddr *)to, tl) < 0 ? -1 : 0;
 }
 
 void net_udp_close(nsock_t *s)
@@ -417,7 +471,7 @@ void net_udp_close(nsock_t *s)
         n->used[s->id] = 0;
     } else {
         ev_io_stop(n->loop, &s->io);
-        close(s->fd);
+        rd_sock_close(s->fd);
     }
     free(s);
 }

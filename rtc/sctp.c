@@ -1,12 +1,12 @@
 #include "sctp.h"
 
-#include <arpa/inet.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "plat.h"
 #include "rd.h"
 #include "usrsctp.h"
 
@@ -262,6 +262,9 @@ sctp_t *sctp_new(struct ev_loop *loop, int dtls_client, int local_port, int remo
     struct sockaddr_conn sc;
     memset(&sc, 0, sizeof sc);
     sc.sconn_family = AF_CONN;
+#ifdef HAVE_SCONN_LEN
+    sc.sconn_len = sizeof sc;
+#endif
     sc.sconn_port = htons((uint16_t)local_port);
     sc.sconn_addr = s;
     if (usrsctp_bind(s->sock, (struct sockaddr *)&sc, sizeof sc) < 0) {

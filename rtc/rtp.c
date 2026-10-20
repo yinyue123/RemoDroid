@@ -2,7 +2,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 
 #include "rd.h"
 #include "sdp.h"
@@ -37,10 +36,9 @@ struct rtp {
 
 static uint64_t ntp_now(void)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    uint64_t sec = (uint64_t)tv.tv_sec + 2208988800ull;
-    uint64_t frac = ((uint64_t)tv.tv_usec << 32) / 1000000;
+    uint64_t ms = rd_now_ms();
+    uint64_t sec = ms / 1000 + 2208988800ull;
+    uint64_t frac = ((ms % 1000) << 32) / 1000;
     return sec << 32 | frac;
 }
 

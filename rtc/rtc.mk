@@ -1,8 +1,8 @@
-# Phone-side WebRTC library (android/native), included from the top Makefile.
-# Host build for tests:  make rtc-test
-RTC_DIR  := android/native
+# The WebRTC stack shared by the phone (android/native/jni.c) and the desktop
+# agents (desktop/), included from the top Makefile. Host build for tests:  make rtc-test
+RTC_DIR  := rtc
 RTC_OUT  := $(OUT)/rtc
-RTC_SRC  := $(filter-out $(RTC_DIR)/jni.c $(RTC_DIR)/image.c,$(wildcard $(RTC_DIR)/*.c))
+RTC_SRC  := $(wildcard $(RTC_DIR)/*.c)
 RTC_INCS := -I$(RTC_DIR) -Icommon -Ithird_party/libev -Ithird_party/cjson -Ithird_party/mbedtls/include \
             -Ithird_party/libsrtp/include -Ithird_party/libsrtp/crypto/include -Ithird_party/usrsctp/usrsctplib
 RTC_DEFS := -D_GNU_SOURCE $(EV_DEFS) -DMBEDTLS_CONFIG_FILE='"mbedtls_rtc_config.h"'
@@ -14,7 +14,7 @@ SCTP_SRC := $(wildcard third_party/usrsctp/usrsctplib/*.c) $(wildcard third_part
 SCTP_DEFS := -D__Userspace__ -DSCTP_SIMPLE_ALLOCATOR -DSCTP_PROCESS_LEVEL_LOCKS -DHAVE_SYS_QUEUE_H \
              -DHAVE_STDATOMIC_H -Wno-address-of-packed-member
 RTC_TP_SRC := third_party/libev/ev.c third_party/cjson/cJSON.c $(MBED_SRC) $(SRTP_SRC) $(SCTP_SRC)
-RTC_COMMON := common/util.c common/tunnel.c common/msg.c common/stun.c
+RTC_COMMON := common/util.c common/tunnel.c common/msg.c common/stun.c common/plat.c
 
 RTC_OBJ    := $(RTC_SRC:%.c=$(RTC_OUT)/%.o) $(RTC_COMMON:%.c=$(RTC_OUT)/%.o)
 RTC_TP_OBJ := $(RTC_TP_SRC:%.c=$(RTC_OUT)/%.o)

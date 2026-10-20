@@ -81,6 +81,8 @@ static void send_msg(rtc_t *r, cJSON *m)
 
 int rtc_send_ctrl(rtc_t *r, const char *json) { return net_ctrl_send(r->net, json, strlen(json)); }
 
+void rtc_ctrl_in(rtc_t *r, const char *json, size_t n) { net_ctrl_input(r->net, json, n); }
+
 static void send_signal(session_t *s, cJSON *d)
 {
     cJSON *m = msg_new("signal", 0, s->sid);
@@ -424,6 +426,13 @@ static void net_ctrl(void *ud, const uint8_t *json, size_t n)
     cJSON_Delete(m);
 }
 
+static void net_ctrl_out(void *ud, const char *json, size_t n)
+{
+    rtc_t *r = ud;
+    if (r->cb.on_ctrl_out)
+        r->cb.on_ctrl_out(r->ud, json, n);
+}
+
 static void net_link(void *ud, int up)
 {
     rtc_t *r = ud;
@@ -473,7 +482,7 @@ rtc_t *rtc_new(struct ev_loop *loop, const rtc_opts_t *o, rtc_cb_t cb, void *ud)
     if (!r->o.max_kbps) r->o.max_kbps = 20000;
     r->cb = cb;
     r->ud = ud;
-    r->net = net_new(loop, o->listen, o->direct, (net_cb_t){ net_udp, net_bound, net_ctrl, net_link }, r);
+    r->net = net_new(loop, o->listen, o->direct, (net_cb_t){ net_udp, net_bound, net_ctrl, net_link, net_ctrl_out }, r);
     if (!r->net) {
         free(r);
         return NULL;
@@ -503,6 +512,12 @@ int rtc_dc_send(rtc_t *r, const char *label, int binary, const void *d, size_t n
     if (!s || s->dying || !s->sctp)
         return -1;
     return sctp_send(s->sctp, label, binary, d, n);
+}
+
+size_t rtc_dc_buffered(rtc_t *r)
+{
+    session_t *s = r->s;
+    return s && s->sctp && !s->dying ? sctp_buffered(s->sctp) : 0;
 }
 
 int rtc_dc_open(rtc_t *r, const char *label)

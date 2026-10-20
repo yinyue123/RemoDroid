@@ -8,7 +8,9 @@
 #include "cJSON.h"
 #include "conf.h"
 #include "ev.h"
+#include "plat.h"
 #include "rd.h"
+#include "wsc.h"
 
 typedef struct transport_mgr transport_mgr_t;
 
@@ -48,12 +50,8 @@ transport_mgr_t *transport_start(struct ev_loop *loop, adb_t *adb, const char *s
 void             transport_reconnect(transport_mgr_t *m);
 const char      *transport_problem(const transport_mgr_t *m); /* e.g. "held by adb (pid 1234)", or NULL */
 
-/* wsc.c: WebSocket client to the server */
-void wsc_start(void);
-void wsc_send(cJSON *m); /* frees m; dropped while disconnected */
-void wsc_send_binary(const void *data, size_t n); /* dropped while disconnected */
-int  wsc_online(void);
-void wsc_restart(void);
+/* server.c: hello, status and server messages over common/wsc.c */
+void server_link_apply(void); /* (re)applies [server] and [keepalive]; first call starts it */
 
 /* phone.c: phone server supervisor, tunnel and UDP relay */
 void   phone_init(void);

@@ -429,7 +429,8 @@ export class Hub extends DurableObject {
     const vs = this.one('SELECT * FROM vsessions WHERE device = ?', d.id);
     return {
       id: d.id, name: d.name, online, last_seen: d.last_seen || 0,
-      agent: { ...(hello ? { version: hello.version || '', arch: hello.arch || '' } : {}), ...(online ? { uptime_s: Math.round((now() - d.online_since) / 1000) } : {}), public_ip: d.public_ip || '' },
+      platform: (hello && hello.platform) || 'android', // "windows" / "macos" / "linux" for a computer
+      agent: { ...(hello ? { version: hello.version || '', arch: hello.arch || '', ...(hello.os ? { os: hello.os } : {}) } : {}), ...(online ? { uptime_s: Math.round((now() - d.online_since) / 1000) } : {}), public_ip: d.public_ip || '' },
       phone: status.phone && typeof status.phone === 'object' ? status.phone : { attached: false },
       session: vs ? { active: true, sid: vs.sid, since: vs.since, viewer: vs.viewer } : { active: false },
     };
@@ -496,7 +497,7 @@ export class Hub extends DurableObject {
       this.sql.exec('INSERT INTO vsessions VALUES (?, ?, ?, ?)', sid, dev.id, a.user, now());
       ws.serializeAttachment({ ...a, sid });
       const ice = await this.iceServers();
-      const start = { sid, ice_servers: ice };
+      const start = { sid, viewer: a.user, ice_servers: ice }; // a computer shows who is watching
       if (d.quality) start.quality = d.quality;
       if (d.force_relay) start.force_relay = true;
       this.ctx.getWebSockets('agent:' + dev.id)[0].send(msg('session.start', start, { sid }));

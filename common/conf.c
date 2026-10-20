@@ -4,7 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "ini.h"
 #include "rd.h"
@@ -115,8 +120,10 @@ static char *trim(char *s)
 int rd_conf_write(const char *path, const char *sec, const char *key, const char *val)
 {
     FILE *f = fopen(path, "r");
+#ifndef _WIN32
     struct stat st;
     mode_t mode = f && fstat(fileno(f), &st) == 0 ? (st.st_mode & 07777) : 0600;
+#endif
     rd_buf_t out;
     rd_buf_init(&out);
     char line[2048], cur[64] = "";
@@ -198,16 +205,25 @@ int rd_conf_write(const char *path, const char *sec, const char *key, const char
     }
     char tmp[600];
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
-    FILE *w = fopen(tmp, "w");
+    FILE *w = fopen(tmp, "wb");
+#ifndef _WIN32
     if (w)
         fchmod(fileno(w), mode);
+#endif
     int ok = w && fwrite(out.p, 1, out.len, w) == out.len;
     if (w && fclose(w) != 0)
         ok = 0;
     rd_buf_free(&out);
+#ifdef _WIN32 /* the user profile already restricts access; rename() won't replace a file here */
+    if (!ok || !MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
+        _unlink(tmp);
+        return -1;
+    }
+#else
     if (!ok || rename(tmp, path) < 0) {
         unlink(tmp);
         return -1;
     }
+#endif
     return 0;
 }

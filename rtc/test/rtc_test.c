@@ -176,7 +176,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
     T.loop = EV_DEFAULT;
     rtc_opts_t o = { .listen = listen, .direct = direct, .offer_h265 = h265, .offer_audio = T.audio, .start_kbps = 1500 };
-    rtc_cb_t cb = { on_ctrl, on_link, on_session, on_channel_open, on_message, on_keyframe, on_bitrate };
+    rtc_cb_t cb = { on_ctrl, on_link, on_session, on_channel_open, on_message, on_keyframe, on_bitrate, NULL };
     T.rtc = rtc_new(T.loop, &o, cb, NULL);
     if (!T.rtc)
         return 1;

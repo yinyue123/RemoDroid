@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=RemoDroid
+GenericName=Remote desktop
+Comment=Control this computer from your RemoDroid panel
+Exec=remodroid-desktop
+Icon=remodroid
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=remote;desktop;control;vnc;
+StartupNotify=false

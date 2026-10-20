@@ -1,0 +1,66 @@
+# nFPM definition for remodroid-desktop (deb, rpm): the Linux remote desktop agent with its
+# tray app. Used by packaging/desktop/package.sh:
+#   PKG_ARCH=<distro arch> VERSION=<x.y> DESK=<dir with the desktop build>
+name: remodroid-desktop
+arch: ${PKG_ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+release: "1"
+section: net
+priority: optional
+maintainer: yinyue123 <798523593@qq.com>
+homepage: https://github.com/yinyue123/RemoDroid
+description: "RemoDroid for Linux: control this computer from a browser through your RemoDroid panel. Tray app (GTK 3), X11 sessions."
+recommends:
+  - ca-certificates
+overrides:
+  deb:
+    depends:
+      - libgtk-3-0 | libgtk-3-0t64
+      - libx11-6
+      - libxext6
+      - libxtst6
+      - libxrandr2
+      - libxdamage1
+      - libxfixes3
+  rpm:
+    depends:
+      - gtk3
+      - libX11
+      - libXext
+      - libXtst
+      - libXrandr
+      - libXdamage
+      - libXfixes
+contents:
+  - src: ${DESK}/libremodroid.so
+    dst: /usr/lib/remodroid/libremodroid.so
+  - src: ${DESK}/remodroid-desktop
+    dst: /usr/bin/remodroid-desktop
+    file_info:
+      mode: 0755
+  - src: ${DESK}/remodroid-desktopd
+    dst: /usr/bin/remodroid-desktopd
+    file_info:
+      mode: 0755
+  - src: ./packaging/desktop/remodroid-desktop.desktop
+    dst: /usr/share/applications/remodroid-desktop.desktop
+  - src: ./packaging/desktop/remodroid-desktopd.service
+    dst: /usr/lib/systemd/user/remodroid-desktopd.service
+  - src: ${DESK}/icons/16x16/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/16x16/apps/remodroid.png
+  - src: ${DESK}/icons/24x24/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/24x24/apps/remodroid.png
+  - src: ${DESK}/icons/32x32/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/32x32/apps/remodroid.png
+  - src: ${DESK}/icons/48x48/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/48x48/apps/remodroid.png
+  - src: ${DESK}/icons/64x64/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/64x64/apps/remodroid.png
+  - src: ${DESK}/icons/128x128/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/128x128/apps/remodroid.png
+  - src: ${DESK}/icons/256x256/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/256x256/apps/remodroid.png
+  - src: ${DESK}/icons/512x512/apps/remodroid.png
+    dst: /usr/share/icons/hicolor/512x512/apps/remodroid.png

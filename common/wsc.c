@@ -1,18 +1,15 @@
-/* WebSocket client to the AWS control server (plan §4.5, Appendix A.5):
- * ws:// or wss:// (TLS 1.2 via mbedTLS, certificate checked against the
- * system CA bundle or [server] ca_file); Basic auth on first connect, then the
- * session cookie; ping/pong keepalive; reconnect with exponential backoff. */
+#include "wsc.h"
+
 #include <errno.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define strncasecmp _strnicmp
+#else
+#include <netinet/tcp.h>
 #include <strings.h>
-#include <sys/socket.h>
-#include <sys/utsname.h>
-#include <unistd.h>
+#endif
 
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
@@ -21,14 +18,21 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 
-#include "agent.h"
+#include "cas.h"
 #include "msg.h"
 #include "picohttpparser.h"
+#include "plat.h"
+#include "rd.h"
 #include "ws.h"
 
 enum { W_IDLE, W_CONNECTING, W_TLS, W_HANDSHAKE, W_OPEN };
 
 static struct {
+    struct ev_loop *loop;
+    wsc_cb_t cb;
+    void *ud;
+    wsc_conf_t c;
+    int inited, started, stopped;
     int state, fd;
     ev_io rio, wio;
     ev_timer timer;     /* connect timeout / reconnect backoff */
@@ -43,6 +47,7 @@ static struct {
     int sent_basic;
     char *pending[32];  /* events raised while disconnected, sent after hello */
     int npending;
+    char problem[200];
     /* wss:// */
     int tls, ssl_on;
     size_t tls_wlen;    /* length of a TLS write to repeat after WANT_WRITE */
@@ -63,6 +68,14 @@ static void schedule_reconnect(void);
 static void ws_close_conn(const char *why);
 
 int wsc_online(void) { return W.state == W_OPEN; }
+const char *wsc_problem(void) { return W.problem; }
+
+static void set_problem(const char *p)
+{
+    snprintf(W.problem, sizeof W.problem, "%s", p ? p : "");
+    if (W.cb.on_state)
+        W.cb.on_state(W.ud, W.state == W_OPEN, p);
+}
 
 /* ---------------- transport: plain or TLS ---------------- */
 
@@ -77,21 +90,21 @@ static const char *tls_err(int r)
 
 static int bio_send(void *ctx, const unsigned char *b, size_t n)
 {
-    ssize_t r = send(W.fd, b, n, MSG_NOSIGNAL);
+    ssize_t r = send(W.fd, (const char *)b, n, MSG_NOSIGNAL);
     if (r < 0)
-        return errno == EAGAIN || errno == EINTR ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
+        return rd_sock_again(rd_sock_error()) ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
     return (int)r;
 }
 
 static int bio_recv(void *ctx, unsigned char *b, size_t n)
 {
-    ssize_t r = recv(W.fd, b, n, 0);
+    ssize_t r = recv(W.fd, (char *)b, n, 0);
     if (r < 0)
-        return errno == EAGAIN || errno == EINTR ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
+        return rd_sock_again(rd_sock_error()) ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
     return (int)r; /* 0 = EOF */
 }
 
-/* Trusted roots: [server] ca_file, else the distribution's bundle. */
+/* Trusted roots: [server] ca_file, else the system's. */
 static int tls_global(void)
 {
     if (T.ready)
@@ -101,26 +114,12 @@ static int tls_global(void)
     mbedtls_x509_crt_init(&T.ca);
     if (mbedtls_ctr_drbg_seed(&T.drbg, mbedtls_entropy_func, &T.entropy, (const unsigned char *)"remodroid-wss", 13))
         return -1;
-    static const char *bundles[] = {
-        "/etc/ssl/certs/ca-certificates.crt", /* OpenWrt (ca-bundle), Debian, Ubuntu, Alpine */
-        "/etc/pki/tls/certs/ca-bundle.crt",   /* RHEL, CentOS, Fedora */
-        "/etc/ssl/cert.pem",                  /* Alpine, BSD-style */
-    };
-    if (A.ca_file[0]) {
-        int r = mbedtls_x509_crt_parse_file(&T.ca, A.ca_file);
-        if (r < 0) {
-            LOGE("[server] ca_file %s: %s", A.ca_file, tls_err(r));
-            return -1;
-        }
-        snprintf(T.ca_from, sizeof T.ca_from, "%s", A.ca_file);
-    } else {
-        for (size_t i = 0; i < RD_ARRAY_LEN(bundles) && !T.ca_from[0]; i++)
-            if (access(bundles[i], R_OK) == 0 && mbedtls_x509_crt_parse_file(&T.ca, bundles[i]) >= 0)
-                snprintf(T.ca_from, sizeof T.ca_from, "%s", bundles[i]);
-        if (!T.ca_from[0]) {
-            LOGE("wss: no CA bundle found (install ca-bundle / ca-certificates, or set [server] ca_file)");
-            return -1;
-        }
+    char err[256];
+    if (rd_load_cas(&T.ca, W.c.ca_file, T.ca_from, sizeof T.ca_from, err, sizeof err) < 0) {
+        LOGE("wss: %s", err);
+        mbedtls_x509_crt_free(&T.ca);
+        mbedtls_x509_crt_init(&T.ca);
+        return -1;
     }
     LOGD("wss: trusting the CAs in %s", T.ca_from);
     T.ready = 1;
@@ -140,8 +139,8 @@ static void tls_free(void)
 static ssize_t io_read(void *buf, size_t n)
 {
     if (!W.tls) {
-        ssize_t r = read(W.fd, buf, n);
-        return r < 0 && (errno == EAGAIN || errno == EINTR) ? IO_AGAIN : r;
+        ssize_t r = recv(W.fd, (char *)buf, n, 0);
+        return r < 0 && rd_sock_again(rd_sock_error()) ? IO_AGAIN : r;
     }
     int r = mbedtls_ssl_read(&W.ssl, buf, n);
     if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE)
@@ -154,8 +153,8 @@ static ssize_t io_read(void *buf, size_t n)
 static ssize_t io_write(const void *buf, size_t n)
 {
     if (!W.tls) {
-        ssize_t r = write(W.fd, buf, n);
-        return r < 0 && (errno == EAGAIN || errno == EINTR) ? IO_AGAIN : r;
+        ssize_t r = send(W.fd, (const char *)buf, n, MSG_NOSIGNAL);
+        return r < 0 && rd_sock_again(rd_sock_error()) ? IO_AGAIN : r;
     }
     /* after WANT_WRITE mbedTLS must be called again with the same length */
     size_t len = W.tls_wlen ? W.tls_wlen : RD_MIN(n, (size_t)16384);
@@ -174,11 +173,11 @@ static void tls_step(void)
 {
     int r = mbedtls_ssl_handshake(&W.ssl);
     if (r == MBEDTLS_ERR_SSL_WANT_READ) {
-        ev_io_stop(A.loop, &W.wio);
+        ev_io_stop(W.loop, &W.wio);
         return;
     }
     if (r == MBEDTLS_ERR_SSL_WANT_WRITE) {
-        ev_io_start(A.loop, &W.wio);
+        ev_io_start(W.loop, &W.wio);
         return;
     }
     if (r) {
@@ -189,7 +188,7 @@ static void tls_step(void)
             mbedtls_x509_crt_verify_info(info, sizeof info, "", flags);
             info[strcspn(info, "\n")] = 0;
             snprintf(why, sizeof why, "certificate of %s not trusted: %s", W.host, info);
-            LOGW("wss: %s (CA bundle %s; is the router's clock right?)", why, T.ca_from);
+            LOGW("wss: %s (CAs from %s; is the clock right?)", why, T.ca_from);
         } else {
             snprintf(why, sizeof why, "TLS handshake: %s", tls_err(r));
         }
@@ -198,7 +197,7 @@ static void tls_step(void)
     }
     LOGD("wss: %s, %s", mbedtls_ssl_get_version(&W.ssl), mbedtls_ssl_get_ciphersuite(&W.ssl));
     W.state = W_HANDSHAKE;
-    ev_io_stop(A.loop, &W.wio);
+    ev_io_stop(W.loop, &W.wio);
     send_upgrade();
 }
 
@@ -237,15 +236,15 @@ static void flush(void)
         if (n == IO_AGAIN)
             break;
         if (n <= 0) {
-            ws_close_conn(n == 0 ? "connection closed" : W.tls ? "TLS write failed" : strerror(errno));
+            ws_close_conn(n == 0 ? "connection closed" : W.tls ? "TLS write failed" : rd_sock_strerror(rd_sock_error()));
             return;
         }
         rd_buf_consume(&W.out, (size_t)n);
     }
     if (rd_buf_avail(&W.out))
-        ev_io_start(A.loop, &W.wio);
+        ev_io_start(W.loop, &W.wio);
     else
-        ev_io_stop(A.loop, &W.wio);
+        ev_io_stop(W.loop, &W.wio);
 }
 
 static void send_frame(int op, const void *data, size_t n)
@@ -278,21 +277,21 @@ void wsc_send(cJSON *m)
 
 void wsc_send_binary(const void *data, size_t n) { send_frame(WS_OP_BIN, data, n); }
 
-static void send_hello(void)
+static void send_status(void)
 {
-    struct utsname u;
-    uname(&u);
-    cJSON *m = msg_new("hello", 0, NULL);
-    cJSON *d = msg_d(m);
-    cJSON_AddNumberToObject(d, "proto", RD_PROTO);
-    cJSON_AddStringToObject(d, "version", RD_VERSION);
-    cJSON_AddStringToObject(d, "arch", u.machine);
-    cJSON_AddItemToObject(d, "phone", phone_status_json());
+    if (!W.cb.status)
+        return;
+    cJSON *m = msg_new("status", 0, NULL);
+    cJSON_ReplaceItemInObjectCaseSensitive(m, "d", W.cb.status(W.ud));
     wsc_send(m);
-    cJSON *st = msg_new("status", 0, NULL);
-    cJSON_ReplaceItemInObjectCaseSensitive(st, "d", agent_status_json());
-    wsc_send(st);
-    W.last_status = ev_now(A.loop);
+    W.last_status = ev_now(W.loop);
+}
+
+static void on_opened(void)
+{
+    if (W.cb.on_open)
+        W.cb.on_open(W.ud); /* hello */
+    send_status();
     for (int i = 0; i < W.npending; i++) {
         send_frame(WS_OP_TEXT, W.pending[i], strlen(W.pending[i]));
         free(W.pending[i]);
@@ -304,22 +303,30 @@ static void ws_close_conn(const char *why)
 {
     if (W.state == W_IDLE)
         return;
-    if (W.state == W_OPEN) {
+    int was_open = W.state == W_OPEN;
+    if (was_open)
         LOGW("server connection lost: %s", why);
-        phone_server_lost();
-    } else
+    else
         LOGD("server connect failed: %s", why);
-    ev_io_stop(A.loop, &W.rio);
-    ev_io_stop(A.loop, &W.wio);
-    ev_timer_stop(A.loop, &W.ping);
+    ev_io_stop(W.loop, &W.rio);
+    ev_io_stop(W.loop, &W.wio);
+    ev_timer_stop(W.loop, &W.ping);
     tls_free();
-    close(W.fd);
+    if (W.fd >= 0)
+        rd_sock_close(W.fd);
     W.fd = -1;
     W.state = W_IDLE;
     rd_buf_reset(&W.in);
     rd_buf_reset(&W.out);
     ws_asm_free(&W.wsa);
-    schedule_reconnect();
+    if (strcmp(why, "restart") && strcmp(why, "stopped"))
+        set_problem(why);
+    else if (W.cb.on_state)
+        W.cb.on_state(W.ud, 0, NULL);
+    if (was_open && W.cb.on_lost)
+        W.cb.on_lost(W.ud);
+    if (!W.stopped)
+        schedule_reconnect();
 }
 
 /* ---------------- handshake ---------------- */
@@ -334,16 +341,16 @@ static void send_upgrade(void)
         W.sent_basic = 0;
     } else {
         char cred[256], b64[400];
-        int n = snprintf(cred, sizeof cred, "%s:%s", A.device_id, A.device_secret);
+        int n = snprintf(cred, sizeof cred, "%s:%s", W.c.device_id, W.c.device_secret);
         rd_b64_encode(cred, (size_t)n, b64, sizeof b64);
         snprintf(auth, sizeof auth, "Authorization: Basic %s\r\n", b64);
         W.sent_basic = 1;
     }
     rd_buf_printf(&W.out,
                   "GET %s HTTP/1.1\r\nHost: %s%s%s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                  "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: remodroid-agent/%s\r\n%s\r\n",
+                  "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: %s\r\n%s\r\n",
                   W.path, W.host, strcmp(W.port, defport) ? ":" : "", strcmp(W.port, defport) ? W.port : "", W.key,
-                  RD_VERSION, auth);
+                  W.c.user_agent[0] ? W.c.user_agent : "remodroid/" RD_VERSION, auth);
     flush();
 }
 
@@ -380,17 +387,18 @@ static int handle_handshake(void)
             LOGI("server session expired; logging in again");
             W.cookie[0] = 0;
             W.backoff = 0; /* retry right away with Basic auth */
+            ws_close_conn("session expired");
         } else {
-            LOGE("server rejected device '%s' (check device_id/device_secret in agent.ini)", A.device_id);
+            LOGE("server rejected device '%s' (check device_id/device_secret)", W.c.device_id);
+            ws_close_conn("the server rejected this device (unpaired on the panel?)");
         }
-        ws_close_conn("unauthorized");
         return -1;
     }
     if (status != 101) {
         char why[64];
         snprintf(why, sizeof why, "HTTP %d", status);
         if (status == 429)
-            W.backoff = A.reconnect_max_s;
+            W.backoff = W.c.reconnect_max_s;
         ws_close_conn(why);
         return -1;
     }
@@ -402,13 +410,14 @@ static int handle_handshake(void)
     rd_buf_consume(&W.in, (size_t)n);
     W.state = W_OPEN;
     W.attempt--; /* stay on the address that worked */
-    ev_timer_stop(A.loop, &W.timer); /* connect timeout covers TCP, TLS and the upgrade */
+    ev_timer_stop(W.loop, &W.timer); /* connect timeout covers TCP, TLS and the upgrade */
     W.backoff = 0;
-    W.last_rx = ev_now(A.loop);
+    W.last_rx = ev_now(W.loop);
     LOGI("connected to the server at %s://%s:%s", W.tls ? "wss" : "ws", W.host, W.port);
-    ev_timer_set(&W.ping, A.ping_s, A.ping_s);
-    ev_timer_start(A.loop, &W.ping);
-    send_hello();
+    ev_timer_set(&W.ping, W.c.ping_s, W.c.ping_s);
+    ev_timer_start(W.loop, &W.ping);
+    set_problem(NULL);
+    on_opened();
     return 0;
 }
 
@@ -416,52 +425,20 @@ static int handle_handshake(void)
 
 static void handle_message(cJSON *m)
 {
-    const char *t = msg_type(m);
-    long id = msg_id(m);
-    if (!strcmp(t, "welcome")) {
+    if (!strcmp(msg_type(m), "welcome")) {
         cJSON *d = msg_d(m);
-        int p = (int)msg_num(d, "ping_s", A.ping_s), to = (int)msg_num(d, "timeout_s", A.timeout_s);
-        int hb = (int)msg_num(d, "heartbeat_s", A.heartbeat_s);
+        int p = (int)msg_num(d, "ping_s", W.c.ping_s), to = (int)msg_num(d, "timeout_s", W.c.timeout_s);
+        int hb = (int)msg_num(d, "heartbeat_s", W.c.heartbeat_s);
         if (p > 0)
-            A.ping_s = p;
+            W.c.ping_s = p;
         if (to > 0)
-            A.timeout_s = to;
+            W.c.timeout_s = to;
         if (hb > 0)
-            A.heartbeat_s = hb;
-    } else if (!strcmp(t, "cmd")) {
-        cJSON *d = msg_d(m);
-        const char *cmd = msg_str(d, "cmd", "");
-        char err[200] = "";
-        LOGI("server command: %s", cmd);
-        if (!strcmp(cmd, "agent.config.get")) {
-            wsc_send(msg_ack(id, phone_config_json()));
-            return;
-        }
-        int r = phone_run_cmd(cmd, cJSON_GetObjectItemCaseSensitive(d, "args"), err, sizeof err);
-        if (r == 0) {
-            cJSON *res = cJSON_CreateObject();
-            cJSON_AddStringToObject(res, "cmd", cmd);
-            wsc_send(msg_ack(id, res));
-        } else if (r > 0) {
-            /* the phone answers later (forwarded with the same id) */
-        } else {
-            wsc_send(msg_error(id, err[0] ? "offline" : "unsupported", err[0] ? err : cmd));
-        }
-    } else if (!strcmp(t, "diag")) {
-        int lines = (int)msg_num(msg_d(m), "lines", 200);
-        cJSON *res = cJSON_CreateObject();
-        cJSON_AddItemToObject(res, "agent_log", agent_log_tail(lines));
-        cJSON_AddItemToObject(res, "server_stderr", phone_server_log_tail(lines));
-        wsc_send(msg_ack(id, res));
-    } else if (!strcmp(t, "api")) {
-        api_relay(id, msg_d(m));
-    } else if (!strncmp(t, "session.", 8) || !strcmp(t, "signal")) {
-        phone_on_server_msg(m);
-    } else if (!strcmp(t, "error")) {
-        LOGW("server error: %s", msg_str(msg_d(m), "msg", "?"));
-    } else if (strcmp(t, "ack")) {
-        LOGD("ignoring server message %s", t);
+            W.c.heartbeat_s = hb;
+        return;
     }
+    if (W.cb.on_message)
+        W.cb.on_message(W.ud, m);
 }
 
 static void process_frames(void)
@@ -483,7 +460,7 @@ static void process_frames(void)
             ws_close_conn("bad fragment");
             return;
         }
-        W.last_rx = ev_now(A.loop);
+        W.last_rx = ev_now(W.loop);
         if (ok == 1) {
             if (op == WS_OP_PING) {
                 send_frame(WS_OP_PONG, msg, ml);
@@ -518,7 +495,7 @@ static void on_read(struct ev_loop *loop, ev_io *w, int revents)
         if (n == IO_AGAIN)
             break;
         if (n <= 0) {
-            ws_close_conn(n == 0 ? "connection closed" : W.tls ? "TLS read failed" : strerror(errno));
+            ws_close_conn(n == 0 ? "connection closed" : W.tls ? "TLS read failed" : rd_sock_strerror(rd_sock_error()));
             return;
         }
         W.in.len += (size_t)n;
@@ -536,9 +513,9 @@ static void on_write(struct ev_loop *loop, ev_io *w, int revents)
     if (W.state == W_CONNECTING) {
         int err = 0;
         socklen_t el = sizeof err;
-        getsockopt(W.fd, SOL_SOCKET, SO_ERROR, &err, &el);
+        getsockopt(W.fd, SOL_SOCKET, SO_ERROR, (char *)&err, &el);
         if (err) {
-            ws_close_conn(strerror(err));
+            ws_close_conn(rd_sock_strerror(err));
             return;
         }
         ev_io_start(loop, &W.rio);
@@ -560,30 +537,29 @@ static void on_write(struct ev_loop *loop, ev_io *w, int revents)
 static void on_ping(struct ev_loop *loop, ev_timer *w, int revents)
 {
     ev_tstamp now = ev_now(loop);
-    if (now - W.last_rx > A.timeout_s) {
+    if (now - W.last_rx > W.c.timeout_s) {
         ws_close_conn("no reply from the server");
         return;
     }
     send_frame(WS_OP_PING, "rd", 2);
-    if (now - W.last_status >= A.heartbeat_s - 0.5) {
-        cJSON *m = msg_new("status", 0, NULL);
-        cJSON_ReplaceItemInObjectCaseSensitive(m, "d", agent_status_json());
-        wsc_send(m);
-        W.last_status = now;
-    }
-    ev_timer_set(w, RD_MIN(A.ping_s, A.heartbeat_s), RD_MIN(A.ping_s, A.heartbeat_s));
+    if (now - W.last_status >= W.c.heartbeat_s - 0.5)
+        send_status();
+    ev_timer_set(w, RD_MIN(W.c.ping_s, W.c.heartbeat_s), RD_MIN(W.c.ping_s, W.c.heartbeat_s));
     ev_timer_again(loop, w);
 }
 
 static void connect_now(void)
 {
     struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM, .ai_flags = AI_ADDRCONFIG }, *res, *ai;
+    rd_net_init();
     int e = getaddrinfo(W.host, W.port, &hints, &res);
     if (e) {
-        LOGW("server %s: %s", W.host, gai_strerror(e));
+        char why[200];
+        snprintf(why, sizeof why, "cannot resolve %s: %s", W.host, gai_strerror(e));
+        LOGW("server %s", why);
         W.state = W_CONNECTING; /* so close logic schedules a retry */
         W.fd = -1;
-        ws_close_conn("dns");
+        ws_close_conn(why);
         return;
     }
     /* each failed attempt moves to the next address (e.g. IPv4 when IPv6 has no route) */
@@ -594,23 +570,29 @@ static void connect_now(void)
     for (unsigned k = W.attempt % (unsigned)n; k; k--)
         ai = ai->ai_next;
     W.attempt++;
-    W.fd = socket(ai->ai_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    int one = 1;
-    setsockopt(W.fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    setsockopt(W.fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
+    W.fd = rd_socket(ai->ai_family, SOCK_STREAM, 0);
     W.state = W_CONNECTING;
-    if (W.fd < 0 || (connect(W.fd, ai->ai_addr, ai->ai_addrlen) < 0 && errno != EINPROGRESS)) {
+    if (W.fd < 0) {
         freeaddrinfo(res);
-        ws_close_conn(strerror(errno));
+        ws_close_conn(rd_sock_strerror(rd_sock_error()));
+        return;
+    }
+    int one = 1;
+    setsockopt(W.fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
+    setsockopt(W.fd, SOL_SOCKET, SO_KEEPALIVE, (const char *)&one, sizeof one);
+    if (connect(W.fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) < 0 && !rd_sock_again(rd_sock_error())) {
+        int err = rd_sock_error();
+        freeaddrinfo(res);
+        ws_close_conn(rd_sock_strerror(err));
         return;
     }
     freeaddrinfo(res);
     ev_io_init(&W.rio, on_read, W.fd, EV_READ);
     ev_io_init(&W.wio, on_write, W.fd, EV_WRITE);
-    ev_io_start(A.loop, &W.wio);
-    ev_timer_stop(A.loop, &W.timer);
+    ev_io_start(W.loop, &W.wio);
+    ev_timer_stop(W.loop, &W.timer);
     ev_timer_set(&W.timer, 10., 0.);
-    ev_timer_start(A.loop, &W.timer);
+    ev_timer_start(W.loop, &W.timer);
 }
 
 static void on_timer(struct ev_loop *loop, ev_timer *w, int revents)
@@ -623,19 +605,19 @@ static void on_timer(struct ev_loop *loop, ev_timer *w, int revents)
 
 static void schedule_reconnect(void)
 {
-    double base = W.backoff ? RD_MIN(W.backoff * 2, A.reconnect_max_s) : 1.;
+    double base = W.backoff ? RD_MIN(W.backoff * 2, W.c.reconnect_max_s) : 1.;
     W.backoff = base;
     uint8_t r;
     rd_random(&r, 1);
     double delay = base * (0.75 + (r / 255.) * 0.5);
-    ev_timer_stop(A.loop, &W.timer);
+    ev_timer_stop(W.loop, &W.timer);
     ev_timer_set(&W.timer, delay, 0.);
-    ev_timer_start(A.loop, &W.timer);
+    ev_timer_start(W.loop, &W.timer);
 }
 
 static int parse_url(void)
 {
-    const char *u = A.url;
+    const char *u = W.c.url;
     if (!strncmp(u, "ws://", 5)) {
         W.tls = 0;
         u += 5;
@@ -657,34 +639,71 @@ static int parse_url(void)
     return rd_split_hostport(hp, W.host, sizeof W.host, W.port, sizeof W.port, W.tls ? "443" : "80");
 }
 
-static int started;
-
-void wsc_start(void)
+void wsc_init(struct ev_loop *loop, wsc_cb_t cb, void *ud)
 {
-    started = 1;
+    W.loop = loop;
+    W.cb = cb;
+    W.ud = ud;
     W.fd = -1;
     ev_timer_init(&W.timer, on_timer, 0., 0.);
-    ev_timer_init(&W.ping, on_ping, A.ping_s, A.ping_s);
-    if (parse_url() < 0) {
-        LOGE("server connection disabled: bad url");
-        return;
-    }
-    ev_timer_start(A.loop, &W.timer);
+    ev_timer_init(&W.ping, on_ping, 20., 20.);
+    W.inited = 1;
 }
 
 void wsc_restart(void)
 {
-    if (!started) { /* no URL at startup: the first one comes from enroll or a reload */
-        if (A.url[0])
-            wsc_start();
+    if (!W.inited)
+        return;
+    if (W.state != W_IDLE) {
+        W.stopped = 1; /* no backoff timer from the close */
+        ws_close_conn("restart");
+    }
+    W.stopped = 0;
+    ev_timer_stop(W.loop, &W.timer);
+    if (!W.c.url[0]) {
+        W.started = 0;
         return;
     }
-    if (W.state != W_IDLE)
-        ws_close_conn("restart");
-    if (parse_url() == 0) {
-        W.backoff = 0;
-        ev_timer_stop(A.loop, &W.timer);
-        ev_timer_set(&W.timer, 0.1, 0.);
-        ev_timer_start(A.loop, &W.timer);
+    if (parse_url() < 0) {
+        set_problem("bad server URL");
+        LOGE("server connection disabled: bad url");
+        return;
     }
+    W.started = 1;
+    W.backoff = 0;
+    ev_timer_set(&W.timer, 0.1, 0.);
+    ev_timer_start(W.loop, &W.timer);
+}
+
+void wsc_configure(const wsc_conf_t *c)
+{
+    wsc_conf_t n = *c;
+    if (n.ping_s < 1) n.ping_s = 20;
+    if (n.timeout_s < 1) n.timeout_s = 60;
+    if (n.heartbeat_s < 1) n.heartbeat_s = 30;
+    if (n.reconnect_max_s < 1) n.reconnect_max_s = 30;
+    int changed = strcmp(n.url, W.c.url) || strcmp(n.device_id, W.c.device_id) ||
+                  strcmp(n.device_secret, W.c.device_secret) || strcmp(n.ca_file, W.c.ca_file);
+    if (strcmp(n.ca_file, W.c.ca_file) && T.ready) { /* reload the roots on the next connect */
+        mbedtls_x509_crt_free(&T.ca);
+        mbedtls_x509_crt_init(&T.ca);
+        mbedtls_ctr_drbg_free(&T.drbg);
+        mbedtls_entropy_free(&T.entropy);
+        T.ready = 0;
+    }
+    if (strcmp(n.device_id, W.c.device_id) || strcmp(n.url, W.c.url))
+        W.cookie[0] = 0;
+    W.c = n;
+    if (changed || (!W.started && n.url[0] && !W.stopped))
+        wsc_restart();
+}
+
+void wsc_stop(void)
+{
+    if (!W.inited)
+        return;
+    W.stopped = 1;
+    ev_timer_stop(W.loop, &W.timer);
+    ws_close_conn("stopped");
+    W.started = 0;
 }

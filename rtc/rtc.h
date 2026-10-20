@@ -14,7 +14,9 @@ typedef struct rtc rtc_t;
 enum { RTC_SESSION_CONNECTING, RTC_SESSION_CONNECTED, RTC_SESSION_ENDED };
 
 typedef struct {
-    const char *listen;   /* "abstract:remodroid" (phone) or "tcp:127.0.0.1:27183" (tests) */
+    /* "abstract:remodroid" (phone), "tcp:127.0.0.1:27183" (tests), or "embed" (desktop agents:
+     * signaling goes through rtc_ctrl_in / on_ctrl_out, media over this computer's sockets) */
+    const char *listen;
     int direct;           /* 1 = Path B: the phone's own UDP sockets */
     int offer_h265;       /* the phone has a usable hardware HEVC encoder */
     int offer_audio;      /* the phone can capture its sound (Opus track) */
@@ -33,6 +35,8 @@ typedef struct {
     void (*on_message)(void *ud, const char *label, int binary, const uint8_t *d, size_t n);
     void (*on_keyframe)(void *ud);
     void (*on_bitrate)(void *ud, int kbps);
+    /* "embed" only: messages for the server (signal, session.ended, and what rtc_send_ctrl sends) */
+    void (*on_ctrl_out)(void *ud, const char *json, size_t n);
 } rtc_cb_t;
 
 typedef struct {
@@ -49,6 +53,10 @@ rtc_t *rtc_new(struct ev_loop *loop, const rtc_opts_t *o, rtc_cb_t cb, void *ud)
 void   rtc_free(rtc_t *r);
 /* Everything below must be called on the loop's thread (jni.c marshals). */
 int    rtc_send_ctrl(rtc_t *r, const char *json);  /* to the agent: ready, status, event */
+/* "embed": a message from the server (session.start, signal, session.end); others go to on_ctrl. */
+void   rtc_ctrl_in(rtc_t *r, const char *json, size_t n);
+/* Bytes waiting in the data channels' send buffer (approximate). */
+size_t rtc_dc_buffered(rtc_t *r);
 int    rtc_dc_send(rtc_t *r, const char *label, int binary, const void *d, size_t n);
 int    rtc_dc_open(rtc_t *r, const char *label);
 /* One encoded access unit (Annex-B, with parameter sets before keyframes). */

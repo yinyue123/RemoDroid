@@ -15,7 +15,7 @@ const DEFAULTS = {
   mode: 'auto', preset: '720p', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: false,
   screenOff: true, lockOnDisc: true, grace: 10, rotation: 'auto', clipSync: true, autoPaste: false, overheat: 45,
   destDir: '/sdcard/DCIM/RemoDroid', mediaScan: true, overwrite: false, maxMb: 2048, route: 'auto', relay: false,
-  audio: true, sound: true, device: ''
+  audio: true, sound: true, device: '', swapCmd: 'auto'
 };
 const S = Object.assign({}, DEFAULTS);
 try { Object.assign(S, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
@@ -214,14 +214,19 @@ function maybeStart() {
   if (!DEMO && st.listed && !st.device && !st.devices.length) { setOverlay('No routers yet', 'Install the agent on the router the phone is plugged into, then enroll it with a code.'); return; }
   if (DEMO || !wantSession || st.sid || !st.device) return;
   const ph = st.device.phone || {};
+  if (desk()) {
+    if (!st.device.online) { setOverlay('Computer offline', `${st.device.name} isn't connected to the server. Is it on, with RemoDroid running?`); return; }
+    if (ph.server !== 'running') { setOverlay('Computer not ready', ph.problem ? `${st.device.name}: ${ph.problem}.` : `${st.device.name} can't be controlled right now.`); return; }
+  } else {
   if (!st.device.online) { setOverlay('Router offline', `${st.device.name} isn't connected to the server.`); return; }
   if (!ph.attached) { setOverlay(ph.problem ? 'Phone busy' : 'No phone', ph.problem ? `The router sees the phone, but ${ph.problem}.` : 'Plug the phone into the router.'); return; }
   if (ph.adb_state === 'unauthorized') { setOverlay('Allow USB debugging', 'Accept the prompt on the phone (tick Always allow).'); return; }
   if (ph.server !== 'running') { setOverlay('Starting', 'The phone server is starting…'); return; }
+  }
   const vs = st.device.session;
   if (vs && vs.active) {
     const who = vs.viewer ? `${vs.viewer} is` : 'Someone is', at = vs.since ? ` since ${new Date(vs.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
-    setOverlay('In use', `${who} viewing this phone from another browser${at}. Take over to disconnect them and connect here.`, false, true);
+    setOverlay('In use', `${who} viewing this ${noun()} from another browser${at}. Take over to disconnect them and connect here.`, false, true);
     return;
   }
   startSession();
@@ -308,10 +313,12 @@ function sessionEnded(reason) {
   st.ended = true;
   if (reason === 'taken_over') wantSession = false; /* don't grab it straight back */
   const nice = { viewer_left: 'You left the session.', agent_offline: 'The router agent went offline.', phone_unavailable: 'The phone server is not ready.',
-    ice_failed: 'No network path to the phone.', connection_failed: 'The connection dropped.', replaced: 'Another session started.',
-    taken_over: 'Another browser took over this phone.',
-    timeout: 'The phone did not answer in time.' };
-  setOverlay('Disconnected', (nice[reason] || reason) + (S.lockOnDisc && reason !== 'taken_over' ? ` The phone locks in ${S.grace} s.` : ''), true);
+    ice_failed: `No network path to the ${noun()}.`, connection_failed: 'The connection dropped.', replaced: 'Another session started.',
+    taken_over: `Another browser took over this ${noun()}.`,
+    timeout: `The ${noun()} did not answer in time.`,
+    declined: 'The person at the computer declined the connection.', ended_at_computer: 'Disconnected at the computer.',
+    computer_unavailable: 'The computer can\'t be controlled right now (see the device list).' };
+  setOverlay('Disconnected', (nice[reason] || reason) + (S.lockOnDisc && !desk() && reason !== 'taken_over' ? ` The phone locks in ${S.grace} s.` : ''), true);
 }
 function endSession() {
   wantSession = false;
@@ -367,7 +374,8 @@ function onChannel(label, data) {
     st.ready = d;
     st.screen = d.screen || st.screen;
     $('#disc').hidden = true; ball.hidden = !!openId;
-    toast(`Connected · ${codecLabel()}`);
+    toast(`Connected · ${codecLabel()}${d.caps && d.caps.view_only ? ' · view only' : ''}`);
+    if (desk()) { renderQuickKeys(); if (document.fullscreenElement) lockKeys(true); }
     if (S.mode !== 'auto' || S.preset !== '720p') sendCtrl('quality.set', quality());
     if (!S.sound && d.caps && d.caps.audio) sendCtrl('audio.set', { on: false }); /* keep the phone's speaker */
     syncMenuStates();
@@ -467,6 +475,7 @@ function norm(e) {
   return [clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)];
 }
 function down(e) {
+  if (desk()) { deskPointer('down', e); return; }
   e.preventDefault(); closeMenu();
   try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
   const pid = allocPid(e.pointerId), [x, y] = norm(e);
@@ -475,6 +484,7 @@ function down(e) {
   sendTouch(0, pid, x, y, e.pressure || 1);
 }
 function move(e) {
+  if (desk()) { deskPointer('move', e); return; }
   if (!pidMap.has(e.pointerId)) return;
   e.preventDefault();
   const pid = pidMap.get(e.pointerId), [x, y] = norm(e);
@@ -483,6 +493,7 @@ function move(e) {
   sendTouch(2, pid, x, y, e.pressure || 1);
 }
 function up(e, action) {
+  if (desk()) { deskPointer(action === 1 ? 'up' : 'cancel', e); return; }
   if (!pidMap.has(e.pointerId)) return;
   const pid = pidMap.get(e.pointerId), [x, y] = norm(e);
   sendTouch(action, pid, x, y, 0);
@@ -496,14 +507,187 @@ for (const t of [video, cv]) {
   t.addEventListener('contextmenu', e => e.preventDefault());
 }
 document.addEventListener('gesturestart', e => e.preventDefault());
-stage.addEventListener('wheel', e => {
-  e.preventDefault();
-  const [x, y] = norm(e), b = new ArrayBuffer(13), v = new DataView(b);
+/* deltaMode: pixels (most browsers), lines (Firefox with a mouse wheel) or pages; 100 px = one notch */
+const wheelPx = (d, mode) => mode === 1 ? d * 33 : mode === 2 ? d * 800 : d;
+function sendScroll(x, y, dx, dy) {
+  const b = new ArrayBuffer(13), v = new DataView(b);
   v.setUint8(0, 2); v.setUint16(1, Math.round(x * 65535)); v.setUint16(3, Math.round(y * 65535));
-  v.setInt16(5, clamp(Math.round(-e.deltaX / 100 * 256), -32768, 32767)); v.setInt16(7, clamp(Math.round(-e.deltaY / 100 * 256), -32768, 32767));
+  v.setInt16(5, clamp(Math.round(-dx / 100 * 256), -32768, 32767)); v.setInt16(7, clamp(Math.round(-dy / 100 * 256), -32768, 32767));
   v.setUint32(9, Math.floor(now()) >>> 0);
   const c = st.ch.input; if (c && c.readyState === 'open') c.send(new Uint8Array(b));
+}
+stage.addEventListener('wheel', e => {
+  e.preventDefault();
+  const [x, y] = norm(e);
+  sendScroll(x, y, wheelPx(e.deltaX, e.deltaMode), wheelPx(e.deltaY, e.deltaMode));
 }, { passive: false });
+
+/* ================= computers: mouse and keyboard (multi-platform.md §8.2, §9) ================= */
+const desk = () => !DEMO && !!(st.device && st.device.platform && st.device.platform !== 'android');
+const appleHere = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+const noun = () => desk() ? 'computer' : 'phone';
+function sendInput(u8, log) {
+  st.inputs++; st.lastHex = hex(u8);
+  const c = st.ch.input;
+  if (c && c.readyState === 'open') c.send(u8);
+  if (log) logProto('→', 'input', `${log} [${st.lastHex}]`);
+}
+/* DOM buttons (left 1, right 2, middle 4, back 8, forward 16) → one bit per button number */
+const btnBits = b => (b & 1) | ((b & 4) >> 1) | ((b & 2) << 1) | (b & 24);
+function sendMouse(action, button, buttons, x, y) {
+  const b = new ArrayBuffer(12), v = new DataView(b);
+  v.setUint8(0, 3); v.setUint8(1, action); v.setUint8(2, Math.max(0, button)); v.setUint8(3, btnBits(buttons));
+  v.setUint16(4, Math.round(x * 65535)); v.setUint16(6, Math.round(y * 65535)); v.setUint32(8, Math.floor(now()) >>> 0);
+  sendInput(new Uint8Array(b), action ? `mouse ${action === 1 ? 'down' : 'up'} b${button}` : null);
+}
+/* moves are sent at most once per frame */
+let moveQ = null, moveRaf = 0;
+function flushMove() {
+  if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
+  if (moveQ) { sendMouse(0, 0, moveQ.buttons, moveQ.x, moveQ.y); moveQ = null; }
+}
+function queueMove(x, y, buttons) {
+  moveQ = { x, y, buttons };
+  if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; flushMove(); });
+}
+const touchPts = new Map();
+let tstate = null; /* one gesture: { x, y, sx, sy, mode: null|'drag'|'scroll'|'done', timer, cx, cy } */
+function deskTouch(type, e) {
+  e.preventDefault();
+  const [x, y] = norm(e);
+  if (type === 'down') {
+    closeMenu();
+    try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touchPts.size === 1) {
+      tstate = { x, y, sx: e.clientX, sy: e.clientY, mode: null };
+      tstate.timer = setTimeout(() => { /* long press: right click */
+        if (tstate && !tstate.mode) { tstate.mode = 'done'; sendMouse(0, 0, 0, tstate.x, tstate.y); sendMouse(1, 2, 2, tstate.x, tstate.y); sendMouse(2, 2, 0, tstate.x, tstate.y); if (navigator.vibrate) navigator.vibrate(10); }
+      }, 550);
+    } else if (tstate && tstate.mode !== 'drag') { /* two fingers: scroll */
+      clearTimeout(tstate.timer);
+      tstate.mode = 'scroll';
+      const pts = [...touchPts.values()];
+      tstate.cx = pts.reduce((a, p) => a + p.x, 0) / pts.length; tstate.cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+    }
+    return;
+  }
+  if (!touchPts.has(e.pointerId) || !tstate) return;
+  if (type === 'move') {
+    touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (tstate.mode === 'scroll') {
+      const pts = [...touchPts.values()];
+      const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length, cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+      sendScroll(x, y, (tstate.cx - cx) * 2, (tstate.cy - cy) * 2); /* content follows the fingers */
+      tstate.cx = cx; tstate.cy = cy;
+    } else if (!tstate.mode && Math.hypot(e.clientX - tstate.sx, e.clientY - tstate.sy) > 8) {
+      clearTimeout(tstate.timer);
+      tstate.mode = 'drag';
+      sendMouse(0, 0, 0, tstate.x, tstate.y); sendMouse(1, 0, 1, tstate.x, tstate.y);
+    }
+    if (tstate.mode === 'drag') queueMove(x, y, 1);
+    return;
+  }
+  touchPts.delete(e.pointerId);
+  if (touchPts.size) return;
+  clearTimeout(tstate.timer);
+  if (tstate.mode === 'drag') { flushMove(); sendMouse(2, 0, 0, x, y); }
+  else if (!tstate.mode && type === 'up') { sendMouse(0, 0, 0, tstate.x, tstate.y); sendMouse(1, 0, 1, tstate.x, tstate.y); sendMouse(2, 0, 0, tstate.x, tstate.y); }
+  tstate = null;
+  unmute();
+}
+function deskPointer(type, e) {
+  if (e.pointerType === 'touch') { deskTouch(type, e); return; }
+  const [x, y] = norm(e);
+  if (type === 'down') {
+    e.preventDefault(); closeMenu();
+    try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    flushMove(); sendMouse(1, e.button, e.buttons, x, y);
+  } else if (type === 'move') {
+    if (e.button >= 0) { /* a second button pressed or released during a drag (chorded buttons) */
+      flushMove();
+      const bit = [1, 4, 2, 8, 16][e.button] || 0;
+      sendMouse(e.buttons & bit ? 1 : 2, e.button, e.buttons, x, y);
+    } else queueMove(x, y, e.buttons);
+  } else {
+    flushMove(); sendMouse(2, Math.max(0, e.button), e.buttons, x, y);
+  }
+}
+/* KeyboardEvent.code → USB HID usage (desktop/core/keymap.c has the same names) */
+const KEYS = {
+  KeyA: 0x04, KeyB: 0x05, KeyC: 0x06, KeyD: 0x07, KeyE: 0x08, KeyF: 0x09, KeyG: 0x0A, KeyH: 0x0B, KeyI: 0x0C, KeyJ: 0x0D,
+  KeyK: 0x0E, KeyL: 0x0F, KeyM: 0x10, KeyN: 0x11, KeyO: 0x12, KeyP: 0x13, KeyQ: 0x14, KeyR: 0x15, KeyS: 0x16, KeyT: 0x17,
+  KeyU: 0x18, KeyV: 0x19, KeyW: 0x1A, KeyX: 0x1B, KeyY: 0x1C, KeyZ: 0x1D,
+  Digit1: 0x1E, Digit2: 0x1F, Digit3: 0x20, Digit4: 0x21, Digit5: 0x22, Digit6: 0x23, Digit7: 0x24, Digit8: 0x25,
+  Digit9: 0x26, Digit0: 0x27, Enter: 0x28, Escape: 0x29, Backspace: 0x2A, Tab: 0x2B, Space: 0x2C, Minus: 0x2D, Equal: 0x2E,
+  BracketLeft: 0x2F, BracketRight: 0x30, Backslash: 0x31, Semicolon: 0x33, Quote: 0x34, Backquote: 0x35, Comma: 0x36,
+  Period: 0x37, Slash: 0x38, CapsLock: 0x39, F1: 0x3A, F2: 0x3B, F3: 0x3C, F4: 0x3D, F5: 0x3E, F6: 0x3F, F7: 0x40,
+  F8: 0x41, F9: 0x42, F10: 0x43, F11: 0x44, F12: 0x45, PrintScreen: 0x46, ScrollLock: 0x47, Pause: 0x48, Insert: 0x49,
+  Home: 0x4A, PageUp: 0x4B, Delete: 0x4C, End: 0x4D, PageDown: 0x4E, ArrowRight: 0x4F, ArrowLeft: 0x50, ArrowDown: 0x51,
+  ArrowUp: 0x52, NumLock: 0x53, NumpadDivide: 0x54, NumpadMultiply: 0x55, NumpadSubtract: 0x56, NumpadAdd: 0x57,
+  NumpadEnter: 0x58, Numpad1: 0x59, Numpad2: 0x5A, Numpad3: 0x5B, Numpad4: 0x5C, Numpad5: 0x5D, Numpad6: 0x5E,
+  Numpad7: 0x5F, Numpad8: 0x60, Numpad9: 0x61, Numpad0: 0x62, NumpadDecimal: 0x63, IntlBackslash: 0x64,
+  ContextMenu: 0x65, NumpadEqual: 0x67, F13: 0x68, F14: 0x69, F15: 0x6A, F16: 0x6B, F17: 0x6C, F18: 0x6D, F19: 0x6E,
+  F20: 0x6F, AudioVolumeMute: 0x7F, AudioVolumeUp: 0x80, AudioVolumeDown: 0x81, NumpadComma: 0x85, IntlRo: 0x87,
+  KanaMode: 0x88, IntlYen: 0x89, Convert: 0x8A, NonConvert: 0x8B, Lang1: 0x90, Lang2: 0x91,
+  ControlLeft: 0xE0, ShiftLeft: 0xE1, AltLeft: 0xE2, MetaLeft: 0xE3, ControlRight: 0xE4, ShiftRight: 0xE5,
+  AltRight: 0xE6, MetaRight: 0xE7, OSLeft: 0xE3, OSRight: 0xE7,
+};
+/* ⌘ on one side, Ctrl on the other: swap them so shortcuts keep their meaning (Settings → Stream) */
+const swapCmd = () => S.swapCmd === 'on' || (S.swapCmd === 'auto' && st.device && appleHere !== (st.device.platform === 'macos'));
+const SWAP = { 0xE0: 0xE3, 0xE3: 0xE0, 0xE4: 0xE7, 0xE7: 0xE4 };
+let held = 0; /* modifiers down here, bit n = usage 0xE0 + n (before swapping) */
+function sendKey(down, hid, mods) {
+  const b = new ArrayBuffer(10), v = new DataView(b);
+  v.setUint8(0, 4); v.setUint8(1, down ? 0 : 1); v.setUint16(2, hid); v.setUint16(4, mods); v.setUint32(6, Math.floor(now()) >>> 0);
+  sendInput(new Uint8Array(b), down ? `key 0x${hid.toString(16)}` : null);
+}
+function remoteMods(m) {
+  if (!swapCmd()) return m;
+  const ctrl = m & 0x11, meta = m & 0x88;
+  return (m & ~0x99) | (ctrl << 3) | (meta >> 3);
+}
+function keyTarget(e) {
+  const t = e.target;
+  return !(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)));
+}
+function onKey(e, down) {
+  if (!desk() || !st.connected || openId || !menu.hidden || !keyTarget(e) || e.isComposing || e.key === 'Process') return;
+  const local = KEYS[e.code];
+  if (!local) return;
+  e.preventDefault();
+  if (local >= 0xE0) held = down ? held | (1 << (local - 0xE0)) : held & ~(1 << (local - 0xE0));
+  /* resync with what the browser says is down (keys released while another window had focus) */
+  if (!e.ctrlKey) held &= ~0x11;
+  if (!e.shiftKey) held &= ~0x22;
+  if (!e.altKey) held &= ~0x44;
+  if (!e.metaKey) held &= ~0x88;
+  const hid = swapCmd() && SWAP[local] ? SWAP[local] : local;
+  sendKey(down, hid, remoteMods(held));
+}
+document.addEventListener('keydown', e => onKey(e, true));
+document.addEventListener('keyup', e => onKey(e, false));
+function releaseAll() {
+  if (!desk()) return;
+  held = 0;
+  const b = new ArrayBuffer(5), v = new DataView(b);
+  v.setUint8(0, 5); v.setUint32(1, Math.floor(now()) >>> 0);
+  sendInput(new Uint8Array(b), 'reset');
+}
+window.addEventListener('blur', releaseAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+/* A key combination from the Keys sheet: press in order, release in reverse. */
+function sendCombo(hids) {
+  for (const h of hids) sendKey(true, h, 0);
+  for (const h of hids.slice().reverse()) sendKey(false, h, 0);
+}
+/* full screen on Chromium: also capture Esc, Alt+Tab, Ctrl+W… */
+function lockKeys(on) {
+  try { if (navigator.keyboard && navigator.keyboard.lock) { if (on && desk()) navigator.keyboard.lock(); else navigator.keyboard.unlock(); } } catch (_) {}
+}
+function selectScreen(index) {
+  sendCtrl('screen.select', { index }, true).then(() => toast(`Screen ${index + 1}`)).catch(e => toast(e.msg || e.message));
+}
 
 /* ---- demo stream (offline preview) ---- */
 const demoPlayer = { x: .5, y: .62, tx: .5, ty: .62 };
@@ -681,9 +865,14 @@ function closeMenu() { if (menu.hidden) return; menu.hidden = true; ball.setAttr
 document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target) && e.target !== ball) closeMenu(); }, true);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); closeSheet(); } });
 function syncMenuStates() {
+  const dk = desk(), screens = (st.ready && st.ready.screens) || [];
+  for (const a of ['back', 'home', 'recents', 'photo']) menu.querySelector(`[data-act="${a}"]`).hidden = dk && a !== 'photo';
+  menu.querySelector('[data-act="photo"] span').textContent = dk ? 'Upload' : 'Photo';
+  $('#menuSound').hidden = dk && !(st.ready && st.ready.caps && st.ready.caps.audio);
+  $('#menuMonitor').hidden = !dk || screens.length < 2;
   const sb = $('#menuScreen');
   sb.classList.toggle('on', st.panel === 'off');
-  sb.querySelector('span').textContent = st.panel === 'off' ? 'Screen on' : 'Screen off';
+  sb.querySelector('span').textContent = dk ? (st.panel === 'off' ? 'Display on' : 'Display off') : st.panel === 'off' ? 'Screen on' : 'Screen off';
   $('#menuStats').classList.toggle('on', S.stats);
   const snd = $('#menuSound'), audible = S.sound && !video.muted;
   snd.classList.toggle('on', audible); snd.classList.toggle('muted', !audible);
@@ -749,7 +938,7 @@ function reconnectStream() {
   setOverlay('Reconnecting', st.device ? `Connecting to ${st.device.name}…` : '…');
   if (!st.ws) connectWs(); else setTimeout(maybeStart, 300);
 }
-document.addEventListener('fullscreenchange', () => { layout(); syncMenuStates(); });
+document.addEventListener('fullscreenchange', () => { layout(); syncMenuStates(); lockKeys(!!document.fullscreenElement); });
 document.addEventListener('webkitfullscreenchange', () => { layout(); syncMenuStates(); });
 menu.addEventListener('click', e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
@@ -757,16 +946,20 @@ menu.addEventListener('click', e => {
   if (['photo', 'clip', 'settings', 'keys'].includes(a)) { closeMenu(); openSheet(a); }
   else if (['back', 'home', 'recents'].includes(a)) { sendCtrl('nav', { button: a }).catch(() => toast('Not connected')); closeMenu(); }
   else if (a === 'screen') {
-    const on = st.panel === 'off';
+    const on = st.panel === 'off', what = desk() ? 'Display' : 'Phone screen';
     sendCtrl('screen.power', { on }, true).then(() => { st.panel = on ? 'on' : 'off'; syncMenuStates();
-      toast(on ? 'Phone screen turned on' : 'Phone screen turned off — stream continues'); }).catch(e => toast(e.message));
+      toast(on ? `${what} turned on` : `${what} turned off — stream continues`); }).catch(e => toast(e.msg || e.message));
+  } else if (a === 'monitor') {
+    const n = ((st.ready && st.ready.screens) || []).length, cur = (st.screen && st.screen.index) || 0;
+    if (n > 1) selectScreen((cur + 1) % n);
   } else if (a === 'stats') { S.stats = !S.stats; save(); tickStats(); syncMenuStates(); }
   else if (a === 'sound') { toggleSound(); }
   else if (a === 'bark') { toggleBark(); }
   else if (a === 'lock') {
     closeMenu();
-    if (st.locked) cmd('phone.wake', {}, 'Phone woken').then(ok => { if (ok) { st.locked = false; syncMenuStates(); } });
-    else cmd('phone.sleep', {}, 'Phone locked').then(ok => { if (ok) { st.locked = true; syncMenuStates(); } });
+    const N = desk() ? 'Computer' : 'Phone';
+    if (st.locked) cmd('phone.wake', {}, `${N} woken`).then(ok => { if (ok) { st.locked = false; syncMenuStates(); } });
+    else cmd('phone.sleep', {}, `${N} locked`).then(ok => { if (ok) { st.locked = true; syncMenuStates(); } });
   }
   else if (a === 'reconnect') { closeMenu(); reconnectStream(); }
   else if (a === 'fullscreen') { closeMenu(); toggleFullscreen(); }
@@ -782,7 +975,8 @@ function openSheet(id) {
   $('#sheet-' + id).hidden = false;
   if (id === 'clip') refreshClip();
   if (id === 'settings') renderTab(currentTab);
-  if (id === 'photo') $('#ph-dest').textContent = `to ${S.destDir}${S.mediaScan ? ' · added to Gallery' : ''}`;
+  if (id === 'photo') $('#ph-dest').textContent = desk() ? `to ${uploadDir()}` : `to ${S.destDir}${S.mediaScan ? ' · added to Gallery' : ''}`;
+  $('#photoInput').accept = desk() ? '' : 'image/*';
   ball.hidden = true;
 }
 function closeSheet() {
@@ -842,8 +1036,34 @@ $('#clipSim').addEventListener('click', () => { closeSheet(); androidCopied('Gif
 
 /* ================= keyboard ================= */
 const QUICK = [['Enter', 66], ['Delete', 67], ['Tab', 61], ['Esc', 111], ['↑', 19], ['↓', 20], ['←', 21], ['→', 22], ['Vol −', 25], ['Vol +', 24], ['Power', 26], ['Menu', 82]];
-for (const [label, code] of QUICK)
-  $('#kbKeys').append(el('button', { type: 'button', text: label, onclick: () => sendCtrl('key', { action: 'press', code, meta: 0 }).catch(() => toast('Not connected')) }));
+/* computers: combinations as HID usages; ⌘ stands for the remote's own command key */
+function deskQuick() {
+  const mac = st.device && st.device.platform === 'macos', win = st.device && st.device.platform === 'windows';
+  const CMD = mac ? 0xE3 : 0xE0, ALT = 0xE2, SHIFT = 0xE1, GUI = 0xE3;
+  const k = [['Esc', [0x29]], ['Tab', [0x2B]], ['Enter', [0x28]], ['⌫', [0x2A]], ['Del', [0x4C]],
+    ['↑', [0x52]], ['↓', [0x51]], ['←', [0x50]], ['→', [0x4F]], ['Home', [0x4A]], ['End', [0x4D]], ['PgUp', [0x4B]], ['PgDn', [0x4E]],
+    [mac ? '⌘C' : 'Ctrl+C', [CMD, 0x06]], [mac ? '⌘V' : 'Ctrl+V', [CMD, 0x19]], [mac ? '⌘X' : 'Ctrl+X', [CMD, 0x1B]],
+    [mac ? '⌘Z' : 'Ctrl+Z', [CMD, 0x1D]], [mac ? '⌘A' : 'Ctrl+A', [CMD, 0x04]], [mac ? '⌘S' : 'Ctrl+S', [CMD, 0x16]],
+    [mac ? '⌘Tab' : 'Alt+Tab', [mac ? GUI : ALT, 0x2B]], [mac ? '⌘Q' : 'Alt+F4', mac ? [GUI, 0x14] : [ALT, 0x3D]],
+    [mac ? '⌘Space' : win ? 'Win' : 'Super', mac ? [GUI, 0x2C] : [GUI]]];
+  if (win) k.push(['Win+D', [GUI, 0x07]], ['Win+E', [GUI, 0x08]], ['Ctrl+Shift+Esc', [0xE0, SHIFT, 0x29]], ['Win+L', [GUI, 0x0F]]);
+  if (mac) k.push(['⌃↑ Mission', [0xE0, 0x52]], ['⌘⇧3 Shot', [GUI, SHIFT, 0x20]], ['⌃⌘Q Lock', [0xE0, GUI, 0x14]]);
+  for (let i = 1; i <= 12; i++) k.push(['F' + i, [0x39 + i]]);
+  return k;
+}
+function renderQuickKeys() {
+  const box = $('#kbKeys'); box.textContent = '';
+  if (desk()) {
+    for (const [label, hids] of deskQuick())
+      box.append(el('button', { type: 'button', text: label, onclick: () => { if (!st.connected) toast('Not connected'); else sendCombo(hids); } }));
+  } else {
+    for (const [label, code] of QUICK)
+      box.append(el('button', { type: 'button', text: label, onclick: () => sendCtrl('key', { action: 'press', code, meta: 0 }).catch(() => toast('Not connected')) }));
+  }
+  const sub = $('#sheet-keys header small');
+  if (sub) sub.textContent = desk() ? 'Typing on a keyboard here goes straight to the computer; this sends text and shortcuts' : 'Text goes into the focused field on the phone';
+}
+renderQuickKeys();
 $('#kbSend').addEventListener('click', () => {
   const v = $('#kbText').value; if (!v) { toast('Type something first'); return; }
   sendCtrl('text', { text: v }, true).then(() => { $('#kbText').value = ''; toast('Text sent'); }).catch(e => toast(e.message));
@@ -885,7 +1105,7 @@ async function pumpUploads() {
     try {
       j.st.className = 'pill warn'; j.st.textContent = 'Hashing';
       const buf = await j.f.arrayBuffer(), sum = await sha256(buf);
-      const xfer = xferId++, path = `${S.destDir.replace(/\/+$/, '')}/${j.name}`;
+      const xfer = xferId++, path = `${(desk() ? uploadDir() : S.destDir).replace(/[\/\\]+$/, '')}/${j.name}`;
       uploads.set(xfer, j);
       await sendCtrl('file.push', { xfer, path, size: j.f.size, sha256: sum, overwrite: S.overwrite, media_scan: S.mediaScan }, true);
       j.st.textContent = 'Sending';
@@ -899,9 +1119,10 @@ async function pumpUploads() {
         if (bytes.length === 0) break;
       }
       const res = await sendCtrl('file.done', { xfer }, true);
-      j.st.className = 'pill ok'; j.st.textContent = S.mediaScan ? 'In Gallery' : 'Saved';
+      const gallery = S.mediaScan && !desk();
+      j.st.className = 'pill ok'; j.st.textContent = gallery ? 'In Gallery' : 'Saved';
       j.meta.textContent = `${fmtSize(j.f.size)} · ${(res && res.path) || path}`;
-      toast(`${j.name} saved to ${S.mediaScan ? 'the Android Gallery' : S.destDir}`);
+      toast(`${j.name} saved to ${gallery ? 'the Android Gallery' : (res && res.path) || path}`);
     } catch (e) {
       j.st.className = 'pill bad'; j.st.textContent = 'Failed';
       j.meta.textContent = e.msg || e.message;
@@ -909,6 +1130,9 @@ async function pumpUploads() {
   }
   uploading = false;
 }
+
+/* computers: the agent's upload folder (session.ready), "~" until it is known */
+const uploadDir = () => (st.ready && st.ready.upload_dir) || '~/Downloads/RemoDroid';
 
 /* ---- pulls (phone -> iPhone) ---- */
 function onFileChunk(u8) {
@@ -1013,20 +1237,24 @@ function renderTab(id) {
   const body = $('#settingsBody'); body.textContent = '';
   const add = (...n) => body.append(...n);
   const d = st.device, ph = (d && d.phone) || {};
-  $('#st-sub').textContent = d ? `${d.name} · ${ph.model || 'phone'}${ph.android ? ' · Android ' + ph.android : ''}` : (DEMO ? 'Demo mode' : 'No device');
+  $('#st-sub').textContent = d ? (desk() ? `${d.name} · ${ph.os || d.platform}` : `${d.name} · ${ph.model || 'phone'}${ph.android ? ' · Android ' + ph.android : ''}`) : (DEMO ? 'Demo mode' : 'No device');
+  $$('#tabs button').forEach(b => { if (b.dataset.tab === 'phone') b.textContent = desk() ? 'Computer' : 'Phone'; });
 
   if (id === 'stream') {
     add(group('Quality',
       segRow('mode', 'Quality mode', [['auto', 'Auto'], ['manual', 'Manual']], 'Auto adapts bitrate and resolution to the network.'),
-      segRow('preset', 'Resolution', ['1080p', '720p', '540p', '360p'], 'Changing it restarts the encoder for about 0.2 s.'),
+      segRow('preset', 'Resolution', desk() ? [['native', 'Native'], '1080p', '720p', '540p'] : ['1080p', '720p', '540p', '360p'], 'Changing it restarts the encoder for about 0.2 s.'),
       segRow('fps', 'Frame rate', [[30, '30'], [60, '60'], [90, '90'], [120, '120']]),
       rangeRow('kbps', S.mode === 'auto' ? 'Max bitrate' : 'Bitrate', 1000, 20000, 500, v => (v / 1000).toFixed(1) + ' Mbps'),
       segRow('codec', 'Codec', [['auto', 'Auto'], ['h265', 'H.265'], ['h264', 'H.264']], 'Auto uses H.265 when this iPhone decodes it in hardware.')));
     add(group('Overlay',
       toggleRow('stats', 'Stats overlay', 'fps, bitrate, round-trip time, decoder, last input bytes'),
       toggleRow('touches', 'Show touches', 'Draw your touch points (demo stream only)')));
+    if (desk()) add(group('Keyboard',
+      segRow('swapCmd', '⌘ and Ctrl', [['auto', 'Auto'], ['on', 'Swap'], ['off', 'As is']], 'Auto swaps them when only one side is a Mac, so ⌘C copies on Windows and Ctrl+C copies on a Mac.')));
   }
-  if (id === 'phone') {
+  if (id === 'phone' && desk()) renderComputerTab(add);
+  if (id === 'phone' && !desk()) {
     const card = el('div', { class: 'card' });
     statusRefresh = () => {
       const dd = st.device || {}, p = dd.phone || {}, a = (dd.adb) || {};
@@ -1064,14 +1292,17 @@ function renderTab(id) {
       el('button', { class: 'btn', type: 'button', text: 'Reconnect USB', onclick: () => cmd('adb.reconnect', {}, 'Reconnecting ADB over USB') }),
       el('button', { class: 'btn danger', type: 'button', text: 'Reboot phone…', onclick: () => { confirmBox.hidden = false; } })), confirmBox));
   }
-  if (id === 'files') {
+  if (id === 'files' && desk()) {
+    add(group('Uploads', el('div', { class: 'row' }, lbl('Upload folder', 'Set on the computer ([files] upload_dir in desktop.ini)'), el('span', { class: 'val', text: uploadDir() }))));
+  }
+  if (id === 'files' && !desk()) {
     add(group('Uploads',
       textRow('destDir', 'Upload folder', 'Photos from the iPhone land here.'),
       toggleRow('mediaScan', 'Add uploads to Gallery', 'Runs a media scan so photos show up in Android albums'),
       toggleRow('overwrite', 'Overwrite existing files'),
       stepRow('maxMb', 'Max file size', 100, 4096, 100, ' MB')));
     const pathIn = el('input', { type: 'text', id: 'browsePath', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
-    pathIn.value = '/sdcard/Download';
+    pathIn.value = desk() ? ((st.ready && st.ready.home) || '~') : '/sdcard/Download';
     const list = el('ul', { class: 'files' });
     const browse = async () => {
       list.textContent = '';
@@ -1081,14 +1312,14 @@ function renderTab(id) {
         if (!entries.length) list.append(el('li', { class: 'note', text: 'Empty folder.' }));
         for (const e of entries) {
           const meta = el('div', { class: 'meta', text: e.dir ? 'folder' : fmtSize(e.size) });
-          const full = pathIn.value.replace(/\/+$/, '') + '/' + e.name;
+          const full = pathIn.value.replace(/[\/\\]+$/, '') + (pathIn.value.includes('\\') && !pathIn.value.includes('/') ? '\\' : '/') + e.name;
           const btn = e.dir ? el('button', { class: 'btn', type: 'button', text: 'Open', onclick: () => { pathIn.value = full; browse(); } })
             : el('button', { class: 'btn', type: 'button', text: 'Download', onclick: () => pull(full, e.name, meta) });
           list.append(el('li', {}, el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 'nm', text: e.name }), meta), btn));
         }
       } catch (e) { list.append(el('li', { class: 'note', text: e.msg || e.message })); }
     };
-    add(group('Browse the phone', el('div', { class: 'row stack' },
+    add(group(`Browse the ${noun()}`, el('div', { class: 'row stack' },
       el('div', { style: 'display:flex;gap:8px' }, pathIn, el('button', { class: 'btn primary', type: 'button', text: 'List', onclick: browse })), list)));
     if (st.connected) browse();
   }
@@ -1120,7 +1351,7 @@ function renderTab(id) {
         });
       } catch (e) { toast(e.msg || e.message); }
     });
-    add(group('Logcat', el('div', { class: 'row stack' }, filt, el('div', { style: 'display:flex;gap:8px;align-items:center' }, el('div', { style: 'flex:1' }, lvl), startBtn), lc)));
+    if (!desk()) add(group('Logcat', el('div', { class: 'row stack' }, filt, el('div', { style: 'display:flex;gap:8px;align-items:center' }, el('div', { style: 'flex:1' }, lvl), startBtn), lc)));
     const shIn = el('input', { type: 'text', id: 'shellIn', placeholder: 'getprop ro.build.version.release', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
     const shOut = el('pre', { class: 'log', style: 'height:150px', 'aria-label': 'Shell output' });
     const run = async () => {
@@ -1133,9 +1364,9 @@ function renderTab(id) {
       shOut.scrollTop = shOut.scrollHeight; shIn.value = '';
     };
     shIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
-    add(group('Shell (runs on the phone as the shell user)', el('div', { class: 'row stack' },
+    add(group(desk() ? 'Shell (only when the computer allows it: [desktop] allow_shell)' : 'Shell (runs on the phone as the shell user)', el('div', { class: 'row stack' },
       el('div', { style: 'display:flex;gap:8px' }, shIn, el('button', { class: 'btn primary', type: 'button', text: 'Run', onclick: run })),
-      el('div', { class: 'btns' }, ...['wm size', 'dumpsys battery', 'pm list packages -3'].map(c => el('button', { class: 'btn', type: 'button', text: c, onclick: () => { shIn.value = c; run(); } }))), shOut)));
+      el('div', { class: 'btns' }, ...(desk() ? (st.device.platform === 'windows' ? ['ver', 'tasklist', 'ipconfig'] : ['uname -a', 'uptime', 'df -h']) : ['wm size', 'dumpsys battery', 'pm list packages -3']).map(c => el('button', { class: 'btn', type: 'button', text: c, onclick: () => { shIn.value = c; run(); } }))), shOut)));
     const pr = el('pre', { class: 'log', 'aria-label': 'Protocol messages' });
     renderProto = () => {
       pr.textContent = '';
@@ -1158,7 +1389,7 @@ function renderTab(id) {
           onclick: () => { S.device = dv.id; save(); endSession(); st.device = dv; wantSession = true; maybeStart(); renderTab('conn'); } })))));
     }
     add(group('Route',
-      segRow('route', 'Media route', [['auto', 'Auto'], ['tunnel', 'Via router'], ['wifi', 'Phone Wi-Fi']], 'Auto picks whichever measured faster.'),
+      desk() ? null : segRow('route', 'Media route', [['auto', 'Auto'], ['tunnel', 'Via router'], ['wifi', 'Phone Wi-Fi']], 'Auto picks whichever measured faster.'),
       toggleRow('relay', 'Always relay through AWS', 'Forces TURN even when a direct path exists (next connection)')));
     add(group('Session', el('div', { class: 'card' }, kv([
       ['Server', location.host || '—'], ['Device', st.device ? st.device.id : '—'], ['Session', st.sid || '—'],
@@ -1170,7 +1401,55 @@ function renderTab(id) {
   }
   body.scrollTop = 0;
 }
+/* Settings → Computer: status and the settings in the computer's desktop.ini (agent.config). */
+function renderComputerTab(add) {
+  const card = el('div', { class: 'card' });
+  statusRefresh = () => {
+    const dd = st.device || {}, p = dd.phone || {}, ps = st.phoneStats || {}, sc = (st.ready && st.ready.screens) || p.screens || [];
+    card.textContent = '';
+    card.append(kv([
+      ['Computer', `${p.model || dd.name || '—'}`], ['System', p.os || dd.platform || '—'],
+      ['State', pill(p.server === 'running' ? 'ready' : (p.problem || 'not ready'), p.server === 'running' ? 'ok' : 'bad')],
+      ['Screens', sc.length ? sc.map((x, i) => `${i + 1}: ${x.w}×${x.h}${x.primary ? ' (main)' : ''}`).join(', ') : '—'],
+      ['Encoder', ps.encoder ? `${ps.encoder} · ${ps.width || 0}×${ps.height || 0}` : '—'],
+      ['Agent', dd.online ? `online · ${(dd.agent && dd.agent.version) || ''} · ${(dd.agent && dd.agent.arch) || ''}` : 'offline'],
+    ]));
+  };
+  statusRefresh();
+  add(group('Status', card));
+  const sc = (st.ready && st.ready.screens) || [];
+  if (sc.length > 1) add(group('Screen', el('div', { class: 'btns', style: 'padding-top:10px' },
+    ...sc.map((x, i) => el('button', { class: 'btn' + ((st.screen && st.screen.index) === i ? ' primary' : ''), type: 'button', text: `${i + 1}: ${x.w}×${x.h}`, onclick: () => selectScreen(i) })))));
+  const box = el('div');
+  add(box);
+  const OPTS = [['desktop.view_only', 'View only', 'Mouse and keyboard from viewers are ignored'],
+    ['desktop.confirm', 'Ask before each session', 'Someone at the computer must click Allow'],
+    ['desktop.notify', 'Notify at the computer', 'When a viewer connects and leaves'],
+    ['desktop.clipboard_sync', 'Clipboard sync'], ['desktop.lock_on_disconnect', 'Lock the computer after disconnect']];
+  (async () => {
+    let cur = {};
+    try { const r = await api('POST', `/devices/${encodeURIComponent(st.device.id)}/cmd`, { cmd: 'agent.config.get' }); cur = ((await r.json()).result) || {}; }
+    catch (e) { box.append(el('p', { class: 'note', text: 'Settings unavailable: ' + e.message })); return; }
+    const rows = OPTS.map(([k, label, help]) => {
+      const cb = el('input', { type: 'checkbox', class: 'sw', 'aria-label': label });
+      cb.checked = cur[k] === true;
+      cb.addEventListener('change', () => cmd('agent.config', { [k]: cb.checked }, 'Saved to the computer'));
+      return el('div', { class: 'row' }, lbl(label, help), cb);
+    });
+    const enc = el('div', { class: 'seg', role: 'group' });
+    for (const [v, t] of [['auto', 'Auto'], ['hardware', 'Hardware'], ['software', 'Software']]) {
+      const b = el('button', { type: 'button', 'aria-pressed': String((cur['video.encoder'] || 'auto') === v), text: t });
+      b.addEventListener('click', () => { enc.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); cmd('agent.config', { 'video.encoder': v }, 'Saved · applies on the next connection'); });
+      enc.append(b);
+    }
+    box.append(group('Settings', ...rows, el('div', { class: 'row stack' }, lbl('Video encoder', 'Auto uses the graphics card when it can'), enc)));
+  })();
+  add(group('Actions', el('div', { class: 'btns', style: 'padding-top:10px' },
+    el('button', { class: 'btn', type: 'button', text: 'Wake the display', onclick: () => cmd('phone.wake', {}, 'Wake sent') }),
+    el('button', { class: 'btn', type: 'button', text: 'Lock the computer', onclick: () => cmd('phone.sleep', {}, 'Computer locked') }))));
+}
 function deviceChanged() {
+  if (desk() !== !!st.wasDesk) { st.wasDesk = desk(); renderQuickKeys(); video.style.cursor = desk() ? 'default' : ''; }
   if (!menu.hidden) syncMenuStates();
   if (openId === 'settings' && ['phone', 'conn'].includes(currentTab)) { if (statusRefresh) statusRefresh(); }
   tickStats();

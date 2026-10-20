@@ -1,15 +1,16 @@
 #include "httpc.h"
 
 #include <errno.h>
-#include <netdb.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>
-#include <sys/socket.h>
 #include <sys/time.h>
-#include <unistd.h>
+#else
+#define strncasecmp _strnicmp
+#endif
 
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
@@ -18,7 +19,9 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 
+#include "cas.h"
 #include "picohttpparser.h"
+#include "plat.h"
 #include "rd.h"
 
 #define MAX_BODY (1024 * 1024)
@@ -89,24 +92,8 @@ static int tls_init(httpc_t *h, char *err, size_t cap)
 {
     if (h->tls_ready)
         return 0;
-    if (h->ca_file[0]) {
-        int r = mbedtls_x509_crt_parse_file(&h->ca, h->ca_file);
-        if (r < 0)
-            return seterr(err, cap, "cannot read CA file %s: %s", h->ca_file, mbed_err(r));
-    } else {
-        /* static binaries: look where distributions keep the CA bundle */
-        static const char *bundles[] = {
-            "/etc/ssl/certs/ca-certificates.crt", /* Debian, Ubuntu, Alpine, OpenWrt (ca-bundle) */
-            "/etc/pki/tls/certs/ca-bundle.crt",   /* RHEL, CentOS, Fedora, Amazon Linux */
-            "/etc/ssl/cert.pem",                  /* Alpine, BSD-style */
-            "/etc/ssl/ca-bundle.pem",             /* openSUSE */
-        };
-        int found = 0;
-        for (size_t i = 0; i < RD_ARRAY_LEN(bundles) && !found; i++)
-            found = access(bundles[i], R_OK) == 0 && mbedtls_x509_crt_parse_file(&h->ca, bundles[i]) >= 0;
-        if (!found)
-            return seterr(err, cap, "no CA bundle found (install ca-certificates / ca-bundle, or give a CA file)");
-    }
+    if (rd_load_cas(&h->ca, h->ca_file, NULL, 0, err, cap) < 0)
+        return -1;
     int r = mbedtls_ssl_config_defaults(&h->conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM,
                                         MBEDTLS_SSL_PRESET_DEFAULT);
     if (r)
@@ -120,13 +107,13 @@ static int tls_init(httpc_t *h, char *err, size_t cap)
 
 static int bsend(void *ctx, const unsigned char *b, size_t n)
 {
-    ssize_t r = send(*(int *)ctx, b, n, MSG_NOSIGNAL);
+    ssize_t r = send(*(int *)ctx, (const char *)b, n, MSG_NOSIGNAL);
     return r < 0 ? MBEDTLS_ERR_NET_SEND_FAILED : (int)r;
 }
 
 static int brecv(void *ctx, unsigned char *b, size_t n)
 {
-    ssize_t r = recv(*(int *)ctx, b, n, 0);
+    ssize_t r = recv(*(int *)ctx, (char *)b, n, 0);
     return r < 0 ? MBEDTLS_ERR_NET_RECV_FAILED : (int)r; /* blocking, with SO_RCVTIMEO */
 }
 
@@ -177,7 +164,7 @@ static int io_write(io_t *io, const void *d, size_t n)
 
 static int io_read(io_t *io, void *d, size_t n)
 {
-    return io->ssl ? mbedtls_ssl_read(io->ssl, d, n) : (int)recv(io->fd, d, n, 0);
+    return io->ssl ? mbedtls_ssl_read(io->ssl, d, n) : (int)recv(io->fd, (char *)d, n, 0);
 }
 
 int httpc_request(httpc_t *h, const char *method, const char *url, const char *ctype, const char *body,
@@ -206,25 +193,36 @@ int httpc_request(httpc_t *h, const char *method, const char *url, const char *c
         return seterr(err, errcap, "bad URL %.200s", url);
 
     struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM }, *ai, *p;
+    rd_net_init();
     int e = getaddrinfo(host, port, &hints, &ai);
     if (e)
         return seterr(err, errcap, "%s: %s", host, gai_strerror(e));
-    int fd = -1;
+    int fd = -1, cerr = 0;
     for (p = ai; p; p = p->ai_next) { /* every address, e.g. IPv4 after a failed IPv6 */
+#ifdef _WIN32
+        fd = (int)socket(p->ai_family, SOCK_STREAM, 0);
+        if (fd == (int)INVALID_SOCKET) {
+            fd = -1;
+            continue;
+        }
+        DWORD tv = 20000;
+#else
         fd = socket(p->ai_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
         if (fd < 0)
             continue;
         struct timeval tv = { 20, 0 };
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        if (connect(fd, p->ai_addr, p->ai_addrlen) == 0)
+#endif
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof tv);
+        if (connect(fd, p->ai_addr, (socklen_t)p->ai_addrlen) == 0)
             break;
-        close(fd);
+        cerr = rd_sock_error();
+        rd_sock_close(fd);
         fd = -1;
     }
     freeaddrinfo(ai);
     if (fd < 0)
-        return seterr(err, errcap, "cannot connect to %s:%s: %s", host, port, strerror(errno));
+        return seterr(err, errcap, "cannot connect to %s:%s: %s", host, port, rd_sock_strerror(cerr));
 
     int ret = -1, k;
     rd_buf_t in;
@@ -329,7 +327,7 @@ out:
     if (tls)
         mbedtls_ssl_close_notify(&ssl);
     mbedtls_ssl_free(&ssl);
-    close(fd);
+    rd_sock_close(fd);
     rd_buf_free(&in);
     if (ret < 0)
         httpc_resp_free(r);

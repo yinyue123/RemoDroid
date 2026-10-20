@@ -33,7 +33,7 @@ for abi in ${ABIS:-arm64-v8a armeabi-v7a}; do
     make -j"$(nproc)" TARGET="android-$abi" CC="$cc" AR="$TC/llvm-ar" OPT=-Os build/android-$abi/rtc/librtc.a >/dev/null
     mkdir -p "$OUT/$abi"
     "$cc" -shared -o "$OUT/$abi/libremodroid.so" -Os -s -Wl,--gc-sections -Wl,--exclude-libs,ALL \
-        -Iandroid/native -Icommon -Ithird_party/libev -Ithird_party/cjson -DEV_STANDALONE=1 \
+        -Iandroid/native -Irtc -Icommon -Ithird_party/libev -Ithird_party/cjson -DEV_STANDALONE=1 \
         android/native/jni.c android/native/image.c build/android-$abi/rtc/librtc.a -llog -ldl -lm
     ls -l "$OUT/$abi/libremodroid.so"
 done
