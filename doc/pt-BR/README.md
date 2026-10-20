@@ -299,7 +299,7 @@ Todos os testes da tabela abaixo passam, inclusive com Chrome real como visualiz
 |---|---|---|
 | `server/` | Servidor de controle: página de login + cookies (autenticação Basic para roteadores), API REST, WebSockets do visualizador/agente, relay TURN integrado, HTTPS opcional com certificados automáticos Let's Encrypt (ACME) | C + libev + mbedTLS |
 | `agent/` | Agente do roteador: cliente ADB integrado (usbfs), supervisor do celular, relay UDP, cliente WebSocket, interface de linha de comando | C + libev |
-| `android/native/` | Pilha WebRTC do celular: ICE + cliente TURN, DTLS-SRTP, canais de dados SCTP, RTP H.265/H.264, controle de congestionamento | C |
+| `rtc/` | Pilha WebRTC do celular: ICE + cliente TURN, DTLS-SRTP, canais de dados SCTP, RTP H.265/H.264, controle de congestionamento | C |
 | `android/java/` | Servidor do celular: captura de tela, MediaCodec, injeção de entrada, área de transferência, energia da tela, arquivos, logcat | Java (app_process) |
 | `web/` | Cliente iPhone (PWA): vídeo, som, multitoque, menu da bola flutuante, envio de fotos, área de transferência, todas as configurações; `panel.html` (abas Dispositivos, Agentes, Servidor) e `wizard.html` (configuração inicial) | HTML/CSS/JS |
 | `worker/` | O mesmo painel no Cloudflare Workers + um Durable Object, com TURN do Cloudflare | JS |
@@ -351,8 +351,8 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | (em `make test`) | Encaminhamento de notificações: a configuração `[notify]` chega ao celular, uma notificação capturada chega ao visualizador por WebSocket e o servidor a envia em JSON a um endpoint Bark simulado |
 | `python3 tests/python_sdk.py` | SDK de controle por IA, CLI `rd` e executor de habilidades com uma API de celular simulada: seletores, capturas em memória, transferência para a IA (saída 3), retomada com `--from-step` |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | O mesmo, com binários estáticos de roteador MIPS sob emulação em modo usuário |
-| `python android/native/test/rtc_interop.py` | Pilha WebRTC do celular ↔ aiortc: ICE, DTLS-SRTP, SCTP, quadros H.264 decodificados, canais de dados |
-| `python android/native/test/rtp_depack.py` | Empacotadores H.265 e H.264: ida e volta exata bit a bit por um desempacotador independente + FFmpeg |
+| `python rtc/test/rtc_interop.py` | Pilha WebRTC do celular ↔ aiortc: ICE, DTLS-SRTP, SCTP, quadros H.264 decodificados, canais de dados |
+| `python rtc/test/rtp_depack.py` | Empacotadores H.265 e H.264: ida e volta exata bit a bit por um desempacotador independente + FFmpeg |
 | `python tests/e2e_webrtc.py [--relay]` | Caminho completo: visualizador → servidor → agente → túnel → pilha do celular; `--relay` força o TURN integrado |
 | `python tests/e2e_browser.py` | Cliente web real no Chrome sem interface com a pilha completa: vídeo, toques, menu, protocolo |
 | `node tests/setup.mjs build/host` | Assistente inicial (token de configuração, salvamento, reinício na nova porta), login, códigos de registro com o `enroll` do agente real, configurações do roteador pelo painel, renomear, remover |

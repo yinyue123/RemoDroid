@@ -729,7 +729,7 @@ of work, and the phone stays unlocked.
 
 ## 9. Where each step lives in the code
 
-| Step | Phone (`android/native/`) | Router (`agent/`) | Server (`server/`) | Browser (`web/app.js`) |
+| Step | Phone (`rtc/`) | Router (`agent/`) | Server (`server/`) | Browser (`web/app.js`) |
 |---|---|---|---|---|
 | 0, 2, 3 | — | `wsc.c` | `hub.c`, `auth.c` | `connectWs`, `startSession` |
 | 4, 7, 8 | `ice.c`, `stun` (`common/stun.c`), `net.c` | `phone.c` (UDP relay, `UDP_BOUND`) | `turn.c` | `onicecandidate`, `addIceCandidate` |
@@ -1036,7 +1036,7 @@ confirmed on Safari; add CVO if rotation glitches matter in games. **Key:**
   - GCC (draft-ietf-rmcat-gcc): a delay-based estimate from the trend of one-way delay
     variation, plus a loss-based bound (decrease if loss > 10%, increase if < 2%).
   - Send-side BWE uses transport-cc feedback; receive-side uses REMB.
-- **RemoDroid's controller (`android/native/cc.c`):**
+- **RemoDroid's controller (`rtc/cc.c`):**
   - **Signals:** a trendline over 20 packet groups with an adaptive threshold, and a loss bound.
     REMB is ignored while transport-cc feedback is arriving.
   - **Decrease:** to 85% of the acknowledged rate on overuse.

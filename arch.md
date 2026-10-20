@@ -73,7 +73,7 @@ These are the places where the obvious mental model differs from what the code d
 | Worker (alternative to the server) | Cloudflare | JS | `worker/` | The same panel on a Durable Object, with Cloudflare TURN |
 | `remodroid-agent` | Router | C + libev | `agent/` | ADB client over USB, installs and supervises the phone server, UDP relay ("tunnel"), WebSocket to AWS, local CLI |
 | Phone server (Java) | Phone, as shell user | Java 8 bytecode (dex) | `android/java/` | Screen capture + hardware encoder, input injection, clipboard, screen power, files, shell, logcat |
-| Phone WebRTC stack | Phone, same process | C (JNI library) | `android/native/` | ICE/TURN client, DTLS, SRTP, RTP packetizing, RTCP feedback, congestion control, SCTP data channels, SDP |
+| Phone WebRTC stack | Phone, same process | C (JNI library) | `rtc/` | ICE/TURN client, DTLS, SRTP, RTP packetizing, RTCP feedback, congestion control, SCTP data channels, SDP |
 
 Shared C code used by the server, agent and phone stack lives in `common/` (buffers, base64, SHA, WebSocket
 framing, tunnel framing, STUN encoding, JSON envelope, ini reading).
@@ -544,7 +544,7 @@ Think of WebRTC as a stack. Each layer solves one problem:
 
 | Protocol | Problem it solves | In RemoDroid | Code |
 |---|---|---|---|
-| **SDP** | "What will we send, how, and how do I recognise you?" A text description of codecs, payload types, ICE credentials, the DTLS fingerprint and data-channel parameters | Phone writes the offer, Safari writes the answer; carried by signaling | `android/native/sdp.c` |
+| **SDP** | "What will we send, how, and how do I recognise you?" A text description of codecs, payload types, ICE credentials, the DTLS fingerprint and data-channel parameters | Phone writes the offer, Safari writes the answer; carried by signaling | `rtc/sdp.c` |
 | **ICE** | Both sides are behind NATs. Collect every address each side might be reachable at (*candidates*), test every pair with STUN messages (*connectivity checks*), pick the best working one (*nomination*), and keep checking it (*consent*) | The phone is the controlling agent and nominates | `ice.c` |
 | **STUN** | A tiny request/response protocol. (a) "What is my public IP:port?" (Binding to a STUN server gives a *server-reflexive* candidate). (b) The message format of ICE connectivity checks, authenticated with the ICE password | Server answers Binding on UDP 3478; ICE checks between phone and Safari | `common/stun.c` |
 | **TURN** | When no direct path works (symmetric NAT, firewall), a server on the internet relays the packets. The phone *allocates* a relay port on the TURN server, which gives a *relay* candidate | Built into `remodroid-server`; phone is the client | `server/turn.c`, `ice.c` |
@@ -983,7 +983,7 @@ All of them are vendored in `third_party/` and compiled into the binaries (stati
 | **inih** | `.ini` file parser | ✓ | ✓ | | `server.ini`, `agent.ini` (`common/conf.c`) |
 | **picohttpparser** | Fast, zero-copy HTTP header parser | ✓ | ✓ | | Server: every request. Agent: the WebSocket upgrade response (`wsc.c`) |
 | **crypt_blowfish** | bcrypt (`$2b$`) password hashing from Openwall | ✓ | | | `auth.c`: checking user and device passwords; `hashpw` |
-| **mbedTLS** 3.6.2 | Crypto and (D)TLS library | ✓ | ✓ | ✓ | All: SHA-1, SHA-256, HMAC, MD5, base64 (`common/util.c`) for WebSocket accept keys, TURN credentials and STUN integrity. Server: HTTPS (TLS 1.2), and the ACME client (ECDSA P-256 keys, ES256 signatures, certificate requests, HTTPS to the CA). Agent: RSA-2048 key generation and signing for ADB auth, `wss://` client. Phone: DTLS 1.2 with `use_srtp`, ECDSA P-256 self-signed certificate, key export, random numbers. Config: `common/rd_mbedtls_config.h` (agent, server), `android/native/mbedtls_rtc_config.h` (phone) |
+| **mbedTLS** 3.6.2 | Crypto and (D)TLS library | ✓ | ✓ | ✓ | All: SHA-1, SHA-256, HMAC, MD5, base64 (`common/util.c`) for WebSocket accept keys, TURN credentials and STUN integrity. Server: HTTPS (TLS 1.2), and the ACME client (ECDSA P-256 keys, ES256 signatures, certificate requests, HTTPS to the CA). Agent: RSA-2048 key generation and signing for ADB auth, `wss://` client. Phone: DTLS 1.2 with `use_srtp`, ECDSA P-256 self-signed certificate, key export, random numbers. Config: `common/rd_mbedtls_config.h` (agent, server), `rtc/mbedtls_rtc_config.h` (phone; the desktop library uses both through `desktop/mbedtls_desktop_config.h`) |
 | **libsrtp** 2.6.0 | Cisco's SRTP library | | | ✓ | Encrypting every RTP/RTCP packet (`srtp_protect`, `srtp_protect_rtcp`) and decrypting incoming RTCP; uses its own built-in AES and HMAC |
 | **usrsctp** 0.9.5.0 | The FreeBSD SCTP stack as a user-space library | | | ✓ | Data channels. Run with `usrsctp_init_nothreads`: we feed it packets (`usrsctp_conninput`), it gives packets back through a callback (`conn_output` → DTLS), and our libev timer drives its timers (`usrsctp_handle_timers`) |
 
@@ -1688,11 +1688,11 @@ The control side runs over `ctrl`:
    - `web/app.js` (`connectWs`, `startSession`, `startPeer`, `onSignal`, `down`);
    - `server/hub.c` (`viewer_session_request`, `agent_message`);
    - `agent/phone.c` (`phone_on_server_msg`, `handle_ctrl`, `udp_send`, `on_udp`);
-   - `android/native/rtc.c` (`start_session`, `on_signal`, `ice_state_cb`, `dtls_up`, `ice_data`).
+   - `rtc/rtc.c` (`start_session`, `on_signal`, `ice_state_cb`, `dtls_up`, `ice_data`).
 2. **The phone process:** `Server.java` → `jni.c` → `Session.java` → `ScreenEncoder.java` → `Controller.java`.
 3. **ADB:** `agent/usb.c: scan_usb, try_usb` → `agent/adb.c: adb_attach, handle_auth, adb_open, adb_shell,
    adb_push` → `agent/phone.c: start_server … launch_server`.
-4. **One protocol at a time:** `common/stun.c` + `android/native/ice.c`, then `dtls.c`, `rtp.c` + `cc.c`,
+4. **One protocol at a time:** `common/stun.c` + `rtc/ice.c`, then `dtls.c`, `rtp.c` + `cc.c`,
    `sctp.c`, `sdp.c`.
 5. **The server's edges:** `server/http.c: handle_request`, `server/auth.c`, `server/turn.c`.
 6. **Watching it happen:**

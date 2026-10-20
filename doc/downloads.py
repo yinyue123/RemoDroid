@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Download grids (CPU x platform, one for the server and one for the agent) from a release's files.
+"""Download grids (CPU x platform: the server, the router agent, and the desktop agents) from a release's files.
 
   doc/downloads.py 0.3.4 packages/            Markdown for the release notes (CI, release job)
   gh release view v0.3.4 --json assets -q '.assets[].name' | doc/downloads.py 0.3.4 - --readme README.md
-                                                    rewrites the server and agent grids between the
-                                                    README's <!-- downloads:server --> / <!-- downloads:agent --> markers
+                                                    rewrites the server, agent and desktop grids between
+                                                    the README's <!-- downloads:PART --> markers
 """
 import os
 import re
@@ -68,6 +68,30 @@ def merlin_note(names, ver):
             + '. RT-AC86U and RT-AX88U: choose aarch64. These are agent-only plugins, not OpenWrt packages.') if merlin else ''
 
 
+def desktop_grid(names, ver):
+    """The remote desktop agents: one row per OS, one column per CPU (packaging/desktop/package.sh)."""
+    url = f'https://github.com/{REPO}/releases/download/v{ver}/'
+    btn = lambda name, badge, alt: f'[<img src="{BADGE}{badge}.svg" alt="{alt}" height="24">]({url}{name})'
+    def cell(*files):
+        bs = [btn(n, b, alt) for n, b, alt in files if n in names]
+        return '<br>'.join(bs) or '—'
+    linux = lambda deb, rpm, tar: cell((f'remodroid-desktop_{ver}-1_{deb}.deb', 'deb', f'desktop .deb {tar}'),
+                                       (f'remodroid-desktop-{ver}-1.{rpm}.rpm', 'rpm', f'desktop .rpm {tar}'),
+                                       (f'remodroid-desktop-{ver}-linux-{tar}.tar.gz', 'tar', f'desktop .tar.gz {tar}'))
+    mac = cell((f'RemoDroid-{ver}-macos.zip', 'zip', 'macOS .zip (Apple silicon and Intel)'))
+    return '\n'.join([
+        '| Computer | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Apple silicon, Snapdragon…</sub> |', '|:--|:-:|:-:|',
+        f'| **Windows** 10 1809+, 11 | {cell((f"RemoDroid-{ver}-windows-x86_64.zip", "zip", "Windows .zip x86_64"))} | '
+        f'{cell((f"RemoDroid-{ver}-windows-arm64.zip", "zip", "Windows .zip ARM64"))} |',
+        f'| **macOS** 12.3+ | {mac} | {mac} |',
+        f'| **Linux** (X11 session) | {linux("amd64", "x86_64", "x86_64")} | {linux("arm64", "aarch64", "aarch64")} |',
+    ])
+
+
+DESKTOP_HINT = ('Remote desktop for the computer itself: install it there, then pair it with a code from the panel '
+                '(Agents → Add → Computer). The macOS build runs on Apple silicon and Intel Macs.')
+
+
 def checksums(ver):
     return f'Checksums: [SHA256SUMS](https://github.com/{REPO}/releases/download/v{ver}/SHA256SUMS)'
 
@@ -77,12 +101,16 @@ def markdown(names, ver):
         f'### Downloads (v{ver})', '', HINT, '',
         grid('server', names, ver), '',
         grid('agent', names, ver), '', merlin_note(names, ver), '',
+        '#### Remote desktop (Windows, macOS, Linux)', '', DESKTOP_HINT, '', desktop_grid(names, ver), '',
         checksums(ver),
     ])
 
 
 def section(part, names, ver):
     """One part's grid for its own install step in the README."""
+    if part == 'desktop':
+        return '\n'.join([f'#### Download RemoDroid for your computer (v{ver})', '', DESKTOP_HINT, '',
+                          desktop_grid(names, ver), '', checksums(ver)])
     note = merlin_note(names, ver) if part == 'agent' else ''
     return '\n'.join([f'#### Download the {part} (v{ver})', '', HINT, '', grid(part, names, ver), '']
                       + ([note, ''] if note else []) + [checksums(ver)])
@@ -96,9 +124,11 @@ def main():
     if '--readme' in sys.argv:
         path = sys.argv[sys.argv.index('--readme') + 1]
         text = open(path).read()
-        for part in ('server', 'agent'):
+        for part in ('server', 'agent', 'desktop'):
             begin, end = f'<!-- downloads:{part} -->', f'<!-- /downloads:{part} -->'
             if begin not in text or end not in text:
+                if part == 'desktop': # translations may not have the section yet
+                    continue
                 sys.exit(f'{path} has no {begin} … {end} markers')
             md = section(part, names, ver)
             text = re.sub(re.escape(begin) + '.*?' + re.escape(end), lambda _: f'{begin}\n{md}\n{end}', text, flags=re.S)

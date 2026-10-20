@@ -4,6 +4,8 @@
 
 Control an Android phone from your iPhone's Safari with low latency, good enough for cloud gaming.
 The phone stays at home on a USB cable to your router. You watch and tap it from anywhere.
+Windows, macOS and Linux computers work too: a small tray app makes them remote desktops in the same panel,
+with mouse and keyboard from the browser.
 
 <p align="center"><a href="https://remodroid.pages.dev/"><img src="wizard/button.svg" alt="Install RemoDroid with the wizard: remodroid.pages.dev" width="318" height="64"></a></p>
 
@@ -251,10 +253,36 @@ On the phone, turn on **Developer options → USB debugging**. Plug it into the 
 Open your panel in Safari, log in, then **Share → Add to Home Screen**. Started from the Home Screen it runs full
 screen (Safari can't hide its bars for a normal page). Tap your phone to connect.
 
+### Computers: Windows, macOS, Linux
+
+A computer needs no router: install **RemoDroid** on it, start it, and pair it from its tray (or menu bar) icon
+with a code from the panel's **Agents → Add → Computer**. It runs as the logged-in user, shows a notification
+whenever someone connects, and its icon turns red while it is being viewed (**Disconnect viewer** is one click
+away). Windows 10 1809+ and macOS 12.3+; Linux needs an X11 session (on GNOME: "GNOME on Xorg").
+
+<!-- downloads:desktop -->
+#### Download RemoDroid for your computer
+
+Remote desktop for the computer itself: install it there, then pair it with a code from the panel
+(Agents → Add → Computer). The first release with it fills in this table.
+<!-- /downloads:desktop -->
+
+- **Windows**: unzip and run `RemoDroid.exe`. **macOS**: move `RemoDroid.app` to Applications, open it
+  (the first time: right-click → Open), and allow **Screen Recording** and **Accessibility** when asked.
+  **Linux**: install the `.deb` / `.rpm` and start *RemoDroid* from the app menu.
+- No screen or no tray? `remodroid-desktopd pair --panel https://your.panel --code XXXX-XXXX`, then run
+  `remodroid-desktopd` (a systemd user unit comes with the Linux packages).
+- Settings are in `desktop.ini` (`%APPDATA%\RemoDroid`, `~/Library/Application Support/RemoDroid`,
+  `~/.config/remodroid`) and in the panel. Design: [`multi-platform.md`](multi-platform.md).
+
 ## Using it
 
 - **Touch** works as on the phone, multi-touch included. The **floating ball** opens the menu: lock, reconnect,
   full screen, sound, photo upload, clipboard and settings.
+- **On a computer** the mouse and keyboard go straight through (keys are physical, so the computer's own layout
+  applies; ⌘ and Ctrl swap when only one side is a Mac). From an iPhone: tap to click, long-press to right-click,
+  drag with one finger, scroll with two. The **Keyboard** sheet sends text and shortcuts, and **Next screen**
+  switches monitors.
 - **Sound** comes from the phone (Android 12+) and its own speaker goes quiet while you're connected. Tap the
   picture once to unmute it in Safari; the menu's **Sound** switch hands it back to the phone.
 - **Update** the server or router later with one command. It updates whichever parts are installed to the latest
@@ -333,13 +361,14 @@ support, hardware decoding), and congestion control on real networks.
 |---|---|---|
 | `server/` | Control server: login page + cookies (Basic auth for routers), REST API, viewer/agent WebSockets, built-in TURN relay, optional HTTPS with automatic Let's Encrypt (ACME) certificates | C + libev + mbedTLS |
 | `agent/` | Router agent: built-in ADB client (usbfs), phone supervisor, UDP relay, WebSocket client, CLI | C + libev |
-| `android/native/` | Phone WebRTC stack: ICE + TURN client, DTLS-SRTP, SCTP data channels, H.265/H.264 RTP, congestion control | C |
+| `rtc/` | The WebRTC stack shared by the phone and the computers: ICE + TURN client, DTLS-SRTP, SCTP data channels, H.265/H.264 RTP, congestion control; `host.c` runs it on its own thread behind a C interface (`rd_rtc.h`) | C |
+| `desktop/` | Remote desktop agents: `core/` (session, input, files, video pipeline, server link), `win/`, `mac/`, `linux/` backends, and `app/` (tray / menu bar apps, headless `remodroid-desktopd`); built as `libremodroid` (.dll / .dylib / .so) | C, Objective-C |
 | `android/java/` | Phone server: screen capture, MediaCodec, input injection, clipboard, screen power, files, logcat | Java (app_process) |
 | `web/` | iPhone client (PWA): video, sound, multi-touch, floating-ball menu, photo upload, clipboard, all settings; `panel.html` (Devices, Agents, Server tabs) and `wizard.html` (first-run setup) | HTML/CSS/JS |
 | `worker/` | The same panel on Cloudflare Workers + a Durable Object, with Cloudflare TURN | JS |
 | `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev), `install_server.sh`, `install_agent.sh`, `update.sh` | HTML, sh |
 | `common/` | Shared C: WebSocket framing, tunnel frames, STUN, JSON envelope, ini, utilities | C |
-| `third_party/` | Vendored libraries, linked statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp | C |
+| `third_party/` | Vendored libraries, linked statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp, minih264 | C |
 | `deploy/` | Example `server.ini` / `agent.ini`, systemd units, OpenRC and procd scripts | |
 | `packaging/`, `.github/workflows/` | nFPM package definitions (deb, rpm, apk, ipk) and the CI build/release workflow | |
 | `python/`, `skills/`, `.claude/skills/phone/` | AI control: the `remodroid` SDK and `rd` CLI, replayable skills, and the Claude Code skill that uses them | Python |
@@ -385,13 +414,15 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | (in `make test`) | Notification forwarding: the `[notify]` config reaches the phone, a captured notification reaches a viewer over WebSocket, and the server pushes it to a stub Bark endpoint as JSON |
 | `python3 tests/python_sdk.py` | The AI control SDK, `rd` CLI and skill runner against a fake phone API: selectors, in-memory screenshots, hand-over to the AI (exit 3), resume with `--from-step` |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | The same, on the static MIPS router binaries under user-mode emulation |
-| `python android/native/test/rtc_interop.py` | Phone WebRTC stack ↔ aiortc: ICE, DTLS-SRTP, SCTP, H.264 decoded frames, data channels |
-| `python android/native/test/rtp_depack.py` | H.265 and H.264 packetizers: bit-exact round trip through an independent depacketizer + FFmpeg |
+| `python rtc/test/rtc_interop.py` | Phone WebRTC stack ↔ aiortc: ICE, DTLS-SRTP, SCTP, H.264 decoded frames, data channels |
+| `python rtc/test/rtp_depack.py` | H.265 and H.264 packetizers: bit-exact round trip through an independent depacketizer + FFmpeg |
 | `python tests/e2e_webrtc.py [--relay]` | Full path: viewer → server → agent → tunnel → phone stack; `--relay` forces the built-in TURN |
 | `python tests/e2e_browser.py` | The real web client in headless Chrome against the full stack: video, touch, menu, protocol |
 | `node tests/setup.mjs build/host` | First-run wizard (setup token, saving, restart on the new port), login, enrollment codes with the real agent's `enroll`, router settings through the panel, rename, remove |
 | `node tests/worker.mjs build/host` | The Cloudflare Worker under `wrangler dev` (after `cd worker && npm install`) with the real agent: setup, login, enrollment, viewer WebSocket and signaling, commands, rename, remove |
 | `sudo tests/openwrt.sh IP [VERSION]` | OpenWrt (19.07–24.10) in podman on its own LAN address (macvlan) with LuCI, the agent ipk built from this repository and a server; open `http://IP/` from another device and pair on Services → RemoDroid |
+| `make desktop-test && build/host/desktop/desk_test web/app.js` | Desktop core without a display: the key table against the viewer's, input decoding, video sizes, colour conversion, the software encoder |
+| `python tests/e2e_desktop.py` | A Linux desktop end to end: pairing with a code, then the real viewer in headless Chrome controlling Xvfb through the server and `remodroid-desktopd`: picture, clicks, wheel, keys, text, clipboard both ways, upload |
 | `node tests/tls.mjs build/host` | HTTPS, redirect, `Secure` cookies, viewer and agent over `wss://` (trusted and untrusted CA), certificate reload on SIGHUP; with `PEBBLE_DIR` set, ACME issuance, reuse and automatic renewal against Pebble (Let's Encrypt's test CA) |
 
 The Python tests need `aiortc` (and `playwright` + Chromium for the browser test).

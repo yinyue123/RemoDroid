@@ -334,7 +334,7 @@ Safari-Eigenheiten (H.265-Unterstützung, Hardware-Dekodierung) und Staukontroll
 |---|---|---|
 | `server/` | Steuerserver: Login-Seite + Cookies (Basic Auth für Router), REST-API, Viewer-/Agent-WebSockets, eingebautes TURN-Relay, optionales HTTPS mit automatischen Let's-Encrypt-Zertifikaten (ACME) | C + libev + mbedTLS |
 | `agent/` | Router-Agent: eingebauter ADB-Client (usbfs), Handy-Überwachung, UDP-Relay, WebSocket-Client, CLI | C + libev |
-| `android/native/` | WebRTC-Stack des Handys: ICE- + TURN-Client, DTLS-SRTP, SCTP-Datenkanäle, H.265/H.264-RTP, Staukontrolle | C |
+| `rtc/` | WebRTC-Stack des Handys: ICE- + TURN-Client, DTLS-SRTP, SCTP-Datenkanäle, H.265/H.264-RTP, Staukontrolle | C |
 | `android/java/` | Handy-Server: Bildschirmaufnahme, MediaCodec, Eingabe-Injektion, Zwischenablage, Bildschirmstrom, Dateien, logcat | Java (app_process) |
 | `web/` | iPhone-Client (PWA): Video, Ton, Multi-Touch, Menü mit schwebender Kugel, Foto-Upload, Zwischenablage, alle Einstellungen; `panel.html` (Tabs Devices, Agents, Server) und `wizard.html` (Ersteinrichtung) | HTML/CSS/JS |
 | `worker/` | Dasselbe Panel auf Cloudflare Workers + einem Durable Object, mit Cloudflare TURN | JS |
@@ -386,8 +386,8 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | (in `make test`) | Weiterleitung von Benachrichtigungen: Die `[notify]`-Konfiguration erreicht das Handy, eine erfasste Benachrichtigung erreicht einen Viewer per WebSocket, und der Server schickt sie als JSON an einen Bark-Stub |
 | `python3 tests/python_sdk.py` | Das KI-Steuerungs-SDK, die `rd`-CLI und der Skill-Runner gegen eine Fake-Handy-API: Selektoren, Screenshots im Speicher, Übergabe an die KI (exit 3), Fortsetzen mit `--from-step` |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | Dasselbe mit den statischen MIPS-Router-Binaries unter User-Mode-Emulation |
-| `python android/native/test/rtc_interop.py` | WebRTC-Stack des Handys ↔ aiortc: ICE, DTLS-SRTP, SCTP, dekodierte H.264-Frames, Datenkanäle |
-| `python android/native/test/rtp_depack.py` | H.265- und H.264-Paketierer: bitgenauer Rundlauf durch einen unabhängigen Depaketierer + FFmpeg |
+| `python rtc/test/rtc_interop.py` | WebRTC-Stack des Handys ↔ aiortc: ICE, DTLS-SRTP, SCTP, dekodierte H.264-Frames, Datenkanäle |
+| `python rtc/test/rtp_depack.py` | H.265- und H.264-Paketierer: bitgenauer Rundlauf durch einen unabhängigen Depaketierer + FFmpeg |
 | `python tests/e2e_webrtc.py [--relay]` | Ganzer Weg: Viewer → Server → Agent → Tunnel → Handy-Stack; `--relay` erzwingt das eingebaute TURN |
 | `python tests/e2e_browser.py` | Der echte Web-Client in Headless-Chrome gegen den ganzen Stack: Video, Touch, Menü, Protokoll |
 | `node tests/setup.mjs build/host` | Ersteinrichtungs-Assistent (Setup-Token, Speichern, Neustart auf dem neuen Port), Login, Kopplungscodes mit dem `enroll` des echten Agents, Router-Einstellungen über das Panel, Umbenennen, Entfernen |

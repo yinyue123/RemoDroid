@@ -299,7 +299,7 @@ python3 skills/settings-search/run.py --query wifi
 |---|---|---|
 | `server/` | 制御サーバー：ログインページ + Cookie（ルーターは Basic 認証）、REST API、ビューアー/エージェントの WebSocket、内蔵 TURN リレー、任意の HTTPS と Let's Encrypt（ACME）証明書の自動取得 | C + libev + mbedTLS |
 | `agent/` | ルーターエージェント：内蔵 ADB クライアント（usbfs）、スマートフォンのプロセス監視、UDP リレー、WebSocket クライアント、CLI | C + libev |
-| `android/native/` | スマートフォンの WebRTC スタック：ICE + TURN クライアント、DTLS-SRTP、SCTP データチャネル、H.265/H.264 RTP、輻輳制御 | C |
+| `rtc/` | スマートフォンの WebRTC スタック：ICE + TURN クライアント、DTLS-SRTP、SCTP データチャネル、H.265/H.264 RTP、輻輳制御 | C |
 | `android/java/` | スマートフォンサーバー：画面キャプチャ、MediaCodec、入力注入、クリップボード、画面の電源制御、ファイル、logcat | Java (app_process) |
 | `web/` | iPhone クライアント（PWA）：動画、音声、マルチタッチ、フローティングボールメニュー、写真アップロード、クリップボード、全設定。`panel.html`（デバイス、エージェント、サーバーの各タブ）と `wizard.html`（初回設定） | HTML/CSS/JS |
 | `worker/` | Cloudflare Workers + Durable Object 上の同じパネル。Cloudflare TURN を使用 | JS |
@@ -351,8 +351,8 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | （`make test` に含む） | 通知転送：`[notify]` 設定がスマートフォンに届き、取得した通知が WebSocket でビューアーに届き、サーバーが模擬 Bark エンドポイントに JSON でプッシュ |
 | `python3 tests/python_sdk.py` | 模擬スマートフォン API に対する AI 操作 SDK、`rd` CLI、スキルランナー：セレクター、メモリ内スクリーンショット、AI への引き継ぎ（終了コード 3）、`--from-step` による再開 |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | ユーザーモードエミュレーションで静的 MIPS ルーターバイナリーに対し同じテストを実施 |
-| `python android/native/test/rtc_interop.py` | スマートフォンの WebRTC スタック ↔ aiortc：ICE、DTLS-SRTP、SCTP、H.264 デコードフレーム、データチャネル |
-| `python android/native/test/rtp_depack.py` | H.265 と H.264 のパケット化：独立した逆パケット化処理 + FFmpeg を通す往復でビット単位の一致を確認 |
+| `python rtc/test/rtc_interop.py` | スマートフォンの WebRTC スタック ↔ aiortc：ICE、DTLS-SRTP、SCTP、H.264 デコードフレーム、データチャネル |
+| `python rtc/test/rtp_depack.py` | H.265 と H.264 のパケット化：独立した逆パケット化処理 + FFmpeg を通す往復でビット単位の一致を確認 |
 | `python tests/e2e_webrtc.py [--relay]` | 全経路：ビューアー → サーバー → エージェント → トンネル → スマートフォンのスタック。`--relay` で内蔵 TURN を強制 |
 | `python tests/e2e_browser.py` | ヘッドレス Chrome の実 Web クライアントで全スタックを検証：動画、タッチ、メニュー、プロトコル |
 | `node tests/setup.mjs build/host` | 初回ウィザード（設定トークン、保存、新ポートでの再起動）、ログイン、実エージェントの `enroll` を使う登録コード、パネル経由のルーター設定、名前変更、削除 |

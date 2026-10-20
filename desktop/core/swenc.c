@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* system headers first: minih264 defines __inline away, which must not reach the compiler's intrinsic
+ * headers (on Windows, windows.h pulls in all of them) */
+#include "desk.h"
+
 #define MINIH264_IMPLEMENTATION
 #define H264E_SVC_API 0
 #define H264E_MAX_THREADS 4
@@ -23,13 +27,12 @@
 #define vtbl2q_u8 vqtbl2_u8
 #endif
 #include "minih264e.h"
+#undef __inline
 #ifdef __clang__
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
-
-#include "desk.h"
 
 /* ---------------- thread pool: run n jobs, wait for all ---------------- */
 

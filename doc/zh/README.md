@@ -333,7 +333,7 @@ Sony SO-51A（Android 12）上验证。尚未在真实硬件上验证的项目�
 |---|---|---|
 | `server/` | 控制服务器：登录页面 + Cookie（路由器使用 Basic 认证）、REST API、查看端/代理 WebSocket、内置 TURN 中继、可选的 HTTPS 与自动获取的 Let's Encrypt（ACME）证书 | C + libev + mbedTLS |
 | `agent/` | 路由器代理：内置 ADB 客户端（usbfs）、手机进程监管、UDP 中继、WebSocket 客户端、命令行接口 | C + libev |
-| `android/native/` | 手机 WebRTC 协议栈：ICE + TURN 客户端、DTLS-SRTP、SCTP 数据通道、H.265/H.264 RTP、拥塞控制 | C |
+| `rtc/` | 手机 WebRTC 协议栈：ICE + TURN 客户端、DTLS-SRTP、SCTP 数据通道、H.265/H.264 RTP、拥塞控制 | C |
 | `android/java/` | 手机服务：屏幕捕获、MediaCodec、输入注入、剪贴板、屏幕电源控制、文件、logcat | Java（app_process） |
 | `web/` | iPhone 客户端（PWA）：视频、声音、多点触控、悬浮球菜单、上传照片、剪贴板、全部设置；`panel.html`（设备、代理、服务器标签页）和 `wizard.html`（首次运行设置） | HTML/CSS/JS |
 | `worker/` | 运行在 Cloudflare Workers + Durable Object 上的相同面板，使用 Cloudflare TURN | JS |
@@ -385,8 +385,8 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | （包含在 `make test` 中） | 通知转发：`[notify]` 配置传到手机，捕获的通知通过 WebSocket 到达查看端，服务器将其作为 JSON 推送到模拟 Bark 端点 |
 | `python3 tests/python_sdk.py` | 使用模拟手机 API 测试 AI 控制 SDK、`rd` 命令行接口和技能运行器：选择器、内存中的截图、交接给 AI（退出码 3）、使用 `--from-step` 恢复 |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | 在用户态模拟环境中，对静态 MIPS 路由器二进制文件执行相同测试 |
-| `python android/native/test/rtc_interop.py` | 手机 WebRTC 协议栈 ↔ aiortc：ICE、DTLS-SRTP、SCTP、H.264 解码帧、数据通道 |
-| `python android/native/test/rtp_depack.py` | H.265 和 H.264 打包器：通过独立解包器 + FFmpeg 进行往返测试，结果逐位一致 |
+| `python rtc/test/rtc_interop.py` | 手机 WebRTC 协议栈 ↔ aiortc：ICE、DTLS-SRTP、SCTP、H.264 解码帧、数据通道 |
+| `python rtc/test/rtp_depack.py` | H.265 和 H.264 打包器：通过独立解包器 + FFmpeg 进行往返测试，结果逐位一致 |
 | `python tests/e2e_webrtc.py [--relay]` | 完整路径：查看端 → 服务器 → 代理 → 隧道 → 手机协议栈；`--relay` 强制使用内置 TURN |
 | `python tests/e2e_browser.py` | 在无头 Chrome 中使用真实网页客户端测试完整协议栈：视频、触控、菜单、协议 |
 | `node tests/setup.mjs build/host` | 首次运行向导（设置令牌、保存、在新端口上重启）、登录、使用真实代理的 `enroll` 测试注册码、通过面板设置路由器、重命名、移除 |

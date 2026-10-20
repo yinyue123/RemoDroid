@@ -299,7 +299,7 @@ python3 skills/settings-search/run.py --query wifi
 |---|---|---|
 | `server/` | Сервер управления: страница входа + cookies (Basic-аутентификация для роутеров), REST API, WebSocket клиента просмотра/агента, встроенный TURN-ретранслятор, необязательный HTTPS с автоматическими сертификатами Let's Encrypt (ACME) | C + libev + mbedTLS |
 | `agent/` | Агент роутера: встроенный клиент ADB (usbfs), надзор за телефоном, UDP-ретранслятор, клиент WebSocket, интерфейс командной строки | C + libev |
-| `android/native/` | Стек WebRTC телефона: ICE + клиент TURN, DTLS-SRTP, каналы данных SCTP, RTP H.265/H.264, управление перегрузкой | C |
+| `rtc/` | Стек WebRTC телефона: ICE + клиент TURN, DTLS-SRTP, каналы данных SCTP, RTP H.265/H.264, управление перегрузкой | C |
 | `android/java/` | Сервер телефона: захват экрана, MediaCodec, инъекция ввода, буфер обмена, питание экрана, файлы, logcat | Java (app_process) |
 | `web/` | Клиент iPhone (PWA): видео, звук, мультитач, меню плавающего шарика, загрузка фото, буфер обмена, все настройки; `panel.html` (вкладки Устройства, Агенты, Сервер) и `wizard.html` (первоначальная настройка) | HTML/CSS/JS |
 | `worker/` | Та же панель в Cloudflare Workers + Durable Object с TURN от Cloudflare | JS |
@@ -351,8 +351,8 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | (в `make test`) | Передача уведомлений: конфигурация `[notify]` доходит до телефона, перехваченное уведомление достигает клиента просмотра по WebSocket, а сервер отправляет его в JSON на имитированную конечную точку Bark |
 | `python3 tests/python_sdk.py` | SDK управления через ИИ, CLI `rd` и исполнитель навыков с имитацией API телефона: селекторы, снимки экрана в памяти, передача управления ИИ (код выхода 3), продолжение с `--from-step` |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | То же для статических бинарных файлов роутера MIPS под эмуляцией пользовательского режима |
-| `python android/native/test/rtc_interop.py` | Стек WebRTC телефона ↔ aiortc: ICE, DTLS-SRTP, SCTP, декодированные кадры H.264, каналы данных |
-| `python android/native/test/rtp_depack.py` | Пакетизаторы H.265 и H.264: побитово точный цикл через независимый депакетизатор + FFmpeg |
+| `python rtc/test/rtc_interop.py` | Стек WebRTC телефона ↔ aiortc: ICE, DTLS-SRTP, SCTP, декодированные кадры H.264, каналы данных |
+| `python rtc/test/rtp_depack.py` | Пакетизаторы H.265 и H.264: побитово точный цикл через независимый депакетизатор + FFmpeg |
 | `python tests/e2e_webrtc.py [--relay]` | Полный путь: клиент просмотра → сервер → агент → туннель → стек телефона; `--relay` принудительно включает встроенный TURN |
 | `python tests/e2e_browser.py` | Настоящий веб-клиент в Chrome без интерфейса с полным стеком: видео, касания, меню, протокол |
 | `node tests/setup.mjs build/host` | Мастер первого запуска (токен настройки, сохранение, перезапуск на новом порту), вход, коды регистрации с `enroll` настоящего агента, настройки роутера через панель, переименование, удаление |

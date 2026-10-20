@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
+#include <fcntl.h>
 #include <strings.h>
 #include <sys/time.h>
 #else
@@ -207,9 +208,14 @@ int httpc_request(httpc_t *h, const char *method, const char *url, const char *c
         }
         DWORD tv = 20000;
 #else
-        fd = socket(p->ai_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        fd = socket(p->ai_family, SOCK_STREAM, 0);
         if (fd < 0)
             continue;
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
+#ifdef SO_NOSIGPIPE
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one); /* macOS: no MSG_NOSIGNAL */
+#endif
         struct timeval tv = { 20, 0 };
 #endif
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);

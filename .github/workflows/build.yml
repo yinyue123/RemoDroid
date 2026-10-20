@@ -136,6 +136,19 @@ jobs:
         run: make -j"$(nproc)" OPT=-O2 all desktop desktop-app desktop-icons desktop-test
       - name: Unit tests (keymap, input, video sizes, colour, encoder)
         run: build/host/desktop/desk_test web/app.js
+      - name: Smoke test (starts, finds the screen, stops; a backtrace if it hangs)
+        run: |
+          sudo apt-get install -y --no-install-recommends gdb >/dev/null
+          printf '[desktop]\nnotify = false\n' > smoke.ini
+          Xvfb :9 -screen 0 1280x720x24 >/dev/null 2>&1 &
+          sleep 1
+          DISPLAY=:9 build/host/desktop/remodroid-desktopd -c smoke.ini -v > smoke.log 2>&1 &
+          pid=$!
+          sleep 6
+          cat smoke.log
+          grep -q "remodroid-desktop .* on" smoke.log || sudo gdb -q -batch -p $pid -ex "thread apply all bt 20" || true
+          kill $pid || true
+          grep -q "remodroid-desktop .* on" smoke.log
       - name: End to end (Xvfb + server + agent + Chrome viewer)
         if: matrix.arch == 'x86_64'
         run: |

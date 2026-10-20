@@ -299,7 +299,7 @@ python3 skills/settings-search/run.py --query wifi
 |---|---|---|
 | `server/` | 제어 서버: 로그인 페이지 + 쿠키(공유기용 Basic 인증), REST API, 뷰어/에이전트 WebSocket, 내장 TURN 릴레이, 자동 Let's Encrypt(ACME) 인증서를 사용하는 선택적 HTTPS | C + libev + mbedTLS |
 | `agent/` | 공유기 에이전트: 내장 ADB 클라이언트(usbfs), 휴대전화 프로세스 관리, UDP 릴레이, WebSocket 클라이언트, CLI | C + libev |
-| `android/native/` | 휴대전화 WebRTC 스택: ICE + TURN 클라이언트, DTLS-SRTP, SCTP 데이터 채널, H.265/H.264 RTP, 혼잡 제어 | C |
+| `rtc/` | 휴대전화 WebRTC 스택: ICE + TURN 클라이언트, DTLS-SRTP, SCTP 데이터 채널, H.265/H.264 RTP, 혼잡 제어 | C |
 | `android/java/` | 휴대전화 서버: 화면 캡처, MediaCodec, 입력 주입, 클립보드, 화면 전원, 파일, logcat | Java (app_process) |
 | `web/` | iPhone 클라이언트(PWA): 영상, 소리, 멀티터치, 플로팅 볼 메뉴, 사진 업로드, 클립보드, 모든 설정. `panel.html`(기기, 에이전트, 서버 탭)과 `wizard.html`(최초 실행 설정) | HTML/CSS/JS |
 | `worker/` | Cloudflare Workers + Durable Object에서 실행되는 같은 패널, Cloudflare TURN 사용 | JS |
@@ -351,8 +351,8 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | (`make test`에 포함) | 알림 전달: `[notify]` 설정이 휴대전화에 도달하고, 캡처된 알림이 WebSocket으로 뷰어에 도달하며, 서버가 모의 Bark 엔드포인트에 JSON으로 전송 |
 | `python3 tests/python_sdk.py` | 모의 휴대전화 API를 대상으로 AI 제어 SDK, `rd` CLI, 스킬 실행기 검증: 선택자, 메모리 내 스크린샷, AI에 제어권 전달(종료 코드 3), `--from-step`으로 재개 |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | 사용자 모드 에뮬레이션에서 정적 MIPS 공유기 바이너리에 동일한 테스트 수행 |
-| `python android/native/test/rtc_interop.py` | 휴대전화 WebRTC 스택 ↔ aiortc: ICE, DTLS-SRTP, SCTP, H.264 디코딩 프레임, 데이터 채널 |
-| `python android/native/test/rtp_depack.py` | H.265 및 H.264 패킷화: 독립적인 역패킷화 도구 + FFmpeg를 거치는 비트 단위 일치 왕복 검증 |
+| `python rtc/test/rtc_interop.py` | 휴대전화 WebRTC 스택 ↔ aiortc: ICE, DTLS-SRTP, SCTP, H.264 디코딩 프레임, 데이터 채널 |
+| `python rtc/test/rtp_depack.py` | H.265 및 H.264 패킷화: 독립적인 역패킷화 도구 + FFmpeg를 거치는 비트 단위 일치 왕복 검증 |
 | `python tests/e2e_webrtc.py [--relay]` | 전체 경로: 뷰어 → 서버 → 에이전트 → 터널 → 휴대전화 스택. `--relay`는 내장 TURN 강제 사용 |
 | `python tests/e2e_browser.py` | 헤드리스 Chrome에서 실제 웹 클라이언트로 전체 스택 검증: 영상, 터치, 메뉴, 프로토콜 |
 | `node tests/setup.mjs build/host` | 최초 실행 마법사(설정 토큰, 저장, 새 포트에서 재시작), 로그인, 실제 에이전트의 `enroll`을 사용하는 등록 코드, 패널을 통한 공유기 설정, 이름 변경, 제거 |

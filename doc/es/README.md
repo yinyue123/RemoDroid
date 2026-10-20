@@ -335,7 +335,7 @@ particularidades de Safari (soporte de H.265, decodificación por hardware) y el
 |---|---|---|
 | `server/` | Servidor de control: página de inicio de sesión + cookies (Basic auth para routers), API REST, WebSockets de visor/agente, relé TURN integrado, HTTPS opcional con certificados automáticos de Let's Encrypt (ACME) | C + libev + mbedTLS |
 | `agent/` | Agente del router: cliente ADB integrado (usbfs), supervisor del móvil, relé UDP, cliente WebSocket, CLI | C + libev |
-| `android/native/` | Pila WebRTC del móvil: cliente ICE + TURN, DTLS-SRTP, canales de datos SCTP, RTP H.265/H.264, control de congestión | C |
+| `rtc/` | Pila WebRTC del móvil: cliente ICE + TURN, DTLS-SRTP, canales de datos SCTP, RTP H.265/H.264, control de congestión | C |
 | `android/java/` | Servidor del móvil: captura de pantalla, MediaCodec, inyección de entrada, portapapeles, encendido de pantalla, archivos, logcat | Java (app_process) |
 | `web/` | Cliente del iPhone (PWA): vídeo, sonido, multitáctil, menú de bola flotante, subida de fotos, portapapeles, todos los ajustes; `panel.html` (pestañas Devices, Agents, Server) y `wizard.html` (configuración inicial) | HTML/CSS/JS |
 | `worker/` | El mismo panel en Cloudflare Workers + un Durable Object, con Cloudflare TURN | JS |
@@ -387,8 +387,8 @@ ANDROID_JAR=.../platforms/android-34/android.jar D8=.../build-tools/34.0.0/d8 ND
 | (en `make test`) | Reenvío de notificaciones: la configuración `[notify]` llega al móvil, una notificación capturada llega a un visor por WebSocket y el servidor la envía como JSON a un endpoint Bark de prueba |
 | `python3 tests/python_sdk.py` | El SDK de control por IA, la CLI `rd` y el ejecutor de skills contra una API de móvil falsa: selectores, capturas en memoria, traspaso a la IA (exit 3), reanudación con `--from-step` |
 | `QEMU=qemu-mipsel node tests/run.mjs build/mipsel` | Lo mismo, con los binarios estáticos MIPS del router bajo emulación en modo usuario |
-| `python android/native/test/rtc_interop.py` | Pila WebRTC del móvil ↔ aiortc: ICE, DTLS-SRTP, SCTP, fotogramas H.264 decodificados, canales de datos |
-| `python android/native/test/rtp_depack.py` | Empaquetadores H.265 y H.264: ida y vuelta exacta al bit con un desempaquetador independiente + FFmpeg |
+| `python rtc/test/rtc_interop.py` | Pila WebRTC del móvil ↔ aiortc: ICE, DTLS-SRTP, SCTP, fotogramas H.264 decodificados, canales de datos |
+| `python rtc/test/rtp_depack.py` | Empaquetadores H.265 y H.264: ida y vuelta exacta al bit con un desempaquetador independiente + FFmpeg |
 | `python tests/e2e_webrtc.py [--relay]` | Ruta completa: visor → servidor → agente → túnel → pila del móvil; `--relay` fuerza el TURN integrado |
 | `python tests/e2e_browser.py` | El cliente web real en Chrome sin interfaz contra toda la pila: vídeo, tacto, menú, protocolo |
 | `node tests/setup.mjs build/host` | Asistente inicial (token de configuración, guardado, reinicio en el nuevo puerto), inicio de sesión, códigos de vinculación con el `enroll` del agente real, ajustes del router desde el panel, renombrar, eliminar |
