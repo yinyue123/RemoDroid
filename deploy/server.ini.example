@@ -60,6 +60,10 @@ bark_url =                         ; e.g. https://api.day.app/<your-device-key> 
 ; Per-router Bark URL, overriding [notify] bark_url. One line per device id:
 ; <device id> = https://api.day.app/<key>
 
+[bark_paused]
+; Routers whose Bark push is paused (the Bark switch in the viewer's menu writes this):
+; <device id> = true
+
 [turn]
 ; Built-in STUN + TURN relay (no coturn needed); the setup wizard fills this in.
 listen =                           ; e.g. 0.0.0.0:3478 (UDP); empty = off

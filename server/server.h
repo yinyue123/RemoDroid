@@ -197,6 +197,8 @@ int turn_start(void);
 
 /* notify.c: push phone notifications to Bark (WebSocket delivery is in hub.c) */
 void notify_on_event(device_t *d, const char *kind, cJSON *info);
+int  notify_bark_state(device_t *d); /* -1 no Bark URL, 0 paused, 1 on */
+void notify_bark_masked(device_t *d, char *out, size_t n); /* the router's own URL, key hidden */
 
 /* api.c */
 void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expires_ms, const char *sess_id);

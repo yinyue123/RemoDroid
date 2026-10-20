@@ -188,7 +188,7 @@ async function renderAgent(id) {
     item({ html: '<span class="txt"><b>ID</b></span>', val: d.id }),
   ].filter(Boolean));
   const name = group('', [item({ act: 'rename', html: '<span class="txt"><b>Name</b></span>', val: d.name })]);
-  main.innerHTML = status + name + '<div id="cfg"></div>' +
+  main.innerHTML = status + name + notifyGroup(d) + '<div id="cfg"></div>' +
     group('Actions', [
       item({ act: 'open', html: '<span class="txt"><b style="color:var(--accent)">Open the phone</b></span>' }),
       d.online ? item({ act: 'restart', html: '<span class="txt"><b>Restart the phone server</b><small>When the picture or input is stuck</small></span>', noChev: true }) : '',
@@ -199,6 +199,11 @@ async function renderAgent(id) {
     `<h2 class="gtitle"></h2><div class="group"><button class="item danger" type="button" data-act="remove">Remove this agent</button></div>
     <p class="gfoot">Removing disconnects the agent; it must enroll again with a new code to come back.</p>`;
   main.querySelectorAll('[data-act]').forEach(b => b.onclick = () => agentAction(d, b.dataset.act));
+  const bark = $('#barkOn');
+  if (bark) bark.onchange = async () => {
+    try { await api('PATCH', `/api/v1/devices/${encodeURIComponent(id)}`, { bark: bark.checked }); toast(bark.checked ? 'Bark push on' : 'Bark push paused'); await loadDevices(); }
+    catch (e) { bark.checked = !bark.checked; toast(e.message); }
+  };
   const box = $('#cfg');
   if (!d.online) { box.innerHTML = group('Settings', [item({ html: '<span class="txt"><small>The agent is offline. Its settings can be changed once it reconnects.</small></span>' })]); return; }
   if (agentCfgFor !== id) {
@@ -208,6 +213,17 @@ async function renderAgent(id) {
     if (route().id !== id) return;
   }
   renderAgentSettings(d, box);
+}
+/* Phone notifications pushed to Bark (an iPhone app) by remodroid-server; kept in server.ini, so it
+ * works while the agent is offline. The Worker has no Bark push and sends no "notify". */
+function notifyGroup(d) {
+  const n = d.notify;
+  if (!n) return '';
+  const val = n.bark_url || (n.bark_default ? 'Server default' : 'Not set');
+  return group('Notifications', [
+    item({ act: 'barkurl', html: '<span class="txt"><b>Bark URL</b></span>', val }),
+    typeof d.bark === 'boolean' ? item({ html: '<span class="txt"><b>Push to Bark</b></span>', right: `<input class="sw" type="checkbox" id="barkOn" aria-label="Push to Bark" ${d.bark ? 'checked' : ''}>` }) : '',
+  ].filter(Boolean), 'New phone notifications are sent to the <a href="https://github.com/Finb/Bark" target="_blank" rel="noopener">Bark</a> app on your iPhone. The phone also needs notification forwarding on ([notify] enabled in agent.ini).');
 }
 function renderAgentSettings(d, box) {
   const cur = agentCfg;
@@ -240,6 +256,13 @@ async function agentAction(d, what) {
     if (what === 'rename') {
       sheet({ title: 'Name', fields: [{ k: 'name', label: 'Name', value: d.name, hint: 'How this agent and its phone show up in the lists.' }],
         save: async v => { if (!v.name) throw new Error('Enter a name'); await api('PATCH', `/api/v1/devices/${encodeURIComponent(id)}`, { name: v.name }); await loadDevices(); show(); } });
+      return;
+    }
+    if (what === 'barkurl') {
+      const n = d.notify || {};
+      sheet({ title: 'Bark URL', fields: [{ k: 'bark_url', label: 'Bark URL', type: 'url', value: '', placeholder: n.bark_url || 'https://api.day.app/your-key',
+        hint: `Copy it from the Bark app on your iPhone. ${n.bark_url ? 'Saving it empty removes this router\'s URL' : 'Leave it empty'}${n.bark_default ? ' to use the server\'s default ([notify] bark_url).' : '; nothing is pushed without one.'} The key stays on the server and is never shown again in full.` }],
+        save: async v => { await api('PATCH', `/api/v1/devices/${encodeURIComponent(id)}`, { bark_url: v.bark_url.trim() }); toast(v.bark_url.trim() ? 'Bark URL saved' : 'Bark URL removed'); await loadDevices(); show(); } });
       return;
     }
     if (what === 'restart') { await cmd(id, 'server.restart'); toast('Phone server restarting'); }

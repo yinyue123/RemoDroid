@@ -80,6 +80,14 @@ cJSON *hub_device_json(device_t *d)
         if (d->vs->viewer)
             cJSON_AddStringToObject(s, "viewer", d->vs->viewer->user);
     }
+    int bark = notify_bark_state(d);
+    if (bark >= 0) /* absent when Bark isn't set up; the viewer hides its switch */
+        cJSON_AddBoolToObject(j, "bark", bark);
+    char masked[160];
+    notify_bark_masked(d, masked, sizeof masked);
+    cJSON *n = cJSON_AddObjectToObject(j, "notify"); /* the panel's Notifications group */
+    cJSON_AddStringToObject(n, "bark_url", masked);
+    cJSON_AddBoolToObject(n, "bark_default", *rd_conf_get(S.conf, "notify", "bark_url", "") != 0);
     return j;
 }
 

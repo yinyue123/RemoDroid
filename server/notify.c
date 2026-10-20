@@ -54,15 +54,45 @@ static char *bark_body(const char *title, const char *body)
     return s;
 }
 
+static const char *bark_url(device_t *d)
+{
+    const char *url = rd_conf_get(S.conf, "device_notify", d->id, NULL);
+    if (!url)
+        url = rd_conf_get(S.conf, "notify", "bark_url", NULL);
+    return url && *url ? url : NULL;
+}
+
+/* -1: no Bark URL for this router; 0: paused from the viewer's menu ([bark_paused]); 1: on */
+int notify_bark_state(device_t *d)
+{
+    if (!bark_url(d))
+        return -1;
+    return !rd_conf_bool(S.conf, "bark_paused", d->id, 0);
+}
+
+/* For the panel: the router's own Bark URL with its key hidden ("https://api.day.app/…Ab12"),
+ * or "" when it uses the server's [notify] bark_url (or none). The full key never leaves server.ini. */
+void notify_bark_masked(device_t *d, char *out, size_t n)
+{
+    const char *url = rd_conf_get(S.conf, "device_notify", d->id, "");
+    const char *host = strstr(url, "://");
+    const char *path = host ? strchr(host + 3, '/') : NULL;
+    size_t len = strlen(url);
+    if (!*url)
+        *out = 0;
+    else if (!path || len - (size_t)(path - url) <= 5)
+        snprintf(out, n, "%.*s/…", path ? (int)(path - url) : (int)len, url);
+    else
+        snprintf(out, n, "%.*s/…%s", (int)(path - url), url, url + len - 4);
+}
+
 void notify_on_event(device_t *d, const char *kind, cJSON *info)
 {
     if (!kind || strcmp(kind, "notification"))
         return;
-    const char *url = rd_conf_get(S.conf, "device_notify", d->id, NULL);
-    if (!url)
-        url = rd_conf_get(S.conf, "notify", "bark_url", NULL);
-    if (!url || !*url)
+    if (notify_bark_state(d) != 1)
         return; /* WebSocket push only */
+    const char *url = bark_url(d);
     const char *pkg = msg_str(info, "pkg", "app");
     const char *title = msg_str(info, "title", NULL);
     const char *text = msg_str(info, "text", "");

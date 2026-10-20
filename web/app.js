@@ -689,6 +689,10 @@ function syncMenuStates() {
   snd.classList.toggle('on', audible); snd.classList.toggle('muted', !audible);
   snd.querySelector('span').textContent = audible ? 'Sound on' : 'Sound off';
   $('#menuLock').querySelector('span').textContent = st.locked ? 'Wake' : 'Lock';
+  const bark = $('#menuBark'), barkOn = st.device && st.device.bark;
+  bark.hidden = !st.device || typeof st.device.bark !== 'boolean'; /* only when the server has a Bark URL */
+  bark.classList.toggle('on', !!barkOn); bark.classList.toggle('muted', !barkOn);
+  bark.querySelector('span').textContent = barkOn ? 'Bark on' : 'Bark off';
   $('#menuFull').classList.toggle('on', standalone() || !!(document.fullscreenElement || document.webkitFullscreenElement));
 }
 const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
@@ -710,6 +714,19 @@ function toggleSound() {
     if (on && !r.on) toast(st.device && st.device.phone && st.device.phone.sdk < 31 ? 'Phone sound needs Android 12 or newer' : 'The phone isn\'t sending sound (Settings → Phone → Sound)');
     else toast(on ? 'Sound plays here — the phone is quiet' : 'Sound back on the phone');
   }).catch(() => toast(on ? 'Sound on' : 'Sound off'));
+  syncMenuStates();
+}
+/* Bark: the server's push of phone notifications to an iPhone. Paused per router, for every viewer;
+ * notifications still reach this page. */
+async function toggleBark() {
+  if (!st.device) return;
+  const on = !st.device.bark;
+  try {
+    const r = await api('PATCH', `/devices/${encodeURIComponent(st.device.id)}`, { bark: on });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).msg || `HTTP ${r.status}`);
+    st.device.bark = on;
+    toast(on ? 'Bark notifications on' : 'Bark notifications paused');
+  } catch (e) { toast(`Couldn't switch Bark: ${e.message}`); }
   syncMenuStates();
 }
 function toggleFullscreen() {
@@ -745,6 +762,7 @@ menu.addEventListener('click', e => {
       toast(on ? 'Phone screen turned on' : 'Phone screen turned off — stream continues'); }).catch(e => toast(e.message));
   } else if (a === 'stats') { S.stats = !S.stats; save(); tickStats(); syncMenuStates(); }
   else if (a === 'sound') { toggleSound(); }
+  else if (a === 'bark') { toggleBark(); }
   else if (a === 'lock') {
     closeMenu();
     if (st.locked) cmd('phone.wake', {}, 'Phone woken').then(ok => { if (ok) { st.locked = false; syncMenuStates(); } });
@@ -1153,6 +1171,7 @@ function renderTab(id) {
   body.scrollTop = 0;
 }
 function deviceChanged() {
+  if (!menu.hidden) syncMenuStates();
   if (openId === 'settings' && ['phone', 'conn'].includes(currentTab)) { if (statusRefresh) statusRefresh(); }
   tickStats();
 }

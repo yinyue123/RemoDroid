@@ -161,21 +161,39 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
 
     if (!*suffix && is_method(r, "GET")) {
         http_json(c, 200, hub_device_json(d), NULL);
-    } else if (!*suffix && is_method(r, "PATCH")) { /* rename */
+    } else if (!*suffix && is_method(r, "PATCH")) { /* rename, Bark URL, pause Bark */
         cJSON *body = cJSON_ParseWithLength((const char *)r->body, r->body_len);
-        const char *name = msg_str(body, "name", "");
-        if (!*name || strlen(name) > 60 || strpbrk(name, "\r\n=;[]")) {
+        const char *name = msg_str(body, "name", NULL);
+        const char *url = msg_str(body, "bark_url", NULL); /* "" = use the server's [notify] bark_url */
+        cJSON *bark = cJSON_GetObjectItemCaseSensitive(body, "bark");
+        if (!name && !url && !cJSON_IsBool(bark)) {
+            http_error(c, 400, "bad_request", "expected name, bark_url or bark");
+        } else if (name && (!*name || strlen(name) > 60 || strpbrk(name, "\r\n=;[]"))) {
             http_error(c, 400, "bad_request", "a name of 1-60 characters, without = ; [ ]");
-        } else if (server_conf_set("device_names", d->id, name) < 0) {
+        } else if (url && *url && ((strncmp(url, "https://", 8) && strncmp(url, "http://", 7)) || strlen(url) > 500 || strpbrk(url, " \t\r\n;[]"))) {
+            http_error(c, 400, "bad_request", "a Bark URL starts with https:// (e.g. https://api.day.app/<key>)");
+        } else if (cJSON_IsBool(bark) && !url && notify_bark_state(d) < 0) {
+            http_error(c, 409, "no_bark", "no Bark URL is set for this router");
+        } else if ((name && server_conf_set("device_names", d->id, name) < 0) ||
+                   (url && server_conf_set("device_notify", d->id, *url ? url : NULL) < 0) ||
+                   (cJSON_IsBool(bark) && server_conf_set("bark_paused", d->id, cJSON_IsTrue(bark) ? NULL : "true") < 0)) {
             http_error(c, 500, "io_error", "could not write the configuration file");
         } else {
-            hub_rename_device(d, name);
+            if (url)
+                LOGI("%s: Bark URL for %s %s", user, d->id, *url ? "set" : "cleared"); /* never the key itself */
+            if (cJSON_IsBool(bark))
+                LOGI("%s: Bark push %s for %s", user, cJSON_IsTrue(bark) ? "resumed" : "paused", d->id);
+            if (name)
+                hub_rename_device(d, name);
+            else
+                hub_device_changed(d);
             http_json(c, 200, hub_device_json(d), NULL);
         }
         cJSON_Delete(body);
     } else if (!*suffix && is_method(r, "DELETE")) { /* forget the router; it must enroll again */
         LOGI("%s: removed router %s", user, d->id);
-        if (server_conf_set("devices", d->id, NULL) < 0 || server_conf_set("device_names", d->id, NULL) < 0) {
+        if (server_conf_set("devices", d->id, NULL) < 0 || server_conf_set("device_names", d->id, NULL) < 0 ||
+            server_conf_set("device_notify", d->id, NULL) < 0 || server_conf_set("bark_paused", d->id, NULL) < 0) {
             http_error(c, 500, "io_error", "could not write the configuration file");
             return;
         }

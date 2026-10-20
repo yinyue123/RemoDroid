@@ -408,6 +408,31 @@ interval_seconds = 2
   const bj = JSON.parse(bark.body);
   ok(bark.url === '/key' && /json/.test(bark.ctype) && bj.title === 'Alice' && bj.body === 'ping \u4f60\u597d' && bj.group === 'RemoDroid',
     'the server pushes it to Bark as JSON (title, body, group)');
+  const barkPatch = on => fetch(base + '/api/v1/devices/router1', { method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ bark: on }) });
+  ok((await (await fetch(base + '/api/v1/devices/router1', { headers: { Cookie: cookie } })).json()).bark === true, 'the device says Bark is on');
+  r = await barkPatch(false);
+  const paused = await viewer.wait(m => m.t === 'device.update' && m.d.patch.bark === false, 5000, 'bark paused update');
+  ok(r.status === 200 && (await r.json()).bark === false && paused && /\[bark_paused\]\nrouter1 = true/.test(fs.readFileSync(path.join(dir, 'server.ini'), 'utf8')),
+    'the menu switch pauses Bark: saved in server.ini, every viewer told');
+  phone.tunnel.send(tunBuild(T.CTRL, 0, 0, null, 0, Buffer.from(JSON.stringify({ t: 'event', d: { kind: 'notification', info: { ...notif, title: 'Bob' } } }))));
+  await viewer.wait(m => m.t === 'device.event' && m.d.kind === 'notification' && m.d.info.title === 'Bob', 5000, 'paused notification event');
+  await sleep(500);
+  ok(barkReqs.length === 1, 'while paused, notifications still reach viewers but not Bark');
+  r = await barkPatch(true);
+  ok(r.status === 200 && (await r.json()).bark === true && !/router1 = true/.test(fs.readFileSync(path.join(dir, 'server.ini'), 'utf8')), 'switching it back on clears the pause');
+  phone.tunnel.send(tunBuild(T.CTRL, 0, 0, null, 0, Buffer.from(JSON.stringify({ t: 'event', d: { kind: 'notification', info: { ...notif, title: 'Carol' } } }))));
+  ok(JSON.parse((await until(() => barkReqs[1], 5000, 'bark resumed')).body).title === 'Carol', 'and Bark pushes resume');
+  const devPatch = body => fetch(base + '/api/v1/devices/router1', { method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  r = await devPatch({ bark_url: 'ftp://nope' });
+  ok(r.status === 400, 'a Bark URL must be http(s)');
+  r = await devPatch({ bark_url: `http://127.0.0.1:${barkPort}/routerKey1234` });
+  const bj2 = await r.json();
+  ok(r.status === 200 && bj2.notify.bark_url === `http://127.0.0.1:${barkPort}/…1234` && bj2.notify.bark_default === true && !JSON.stringify(bj2).includes('routerKey'),
+    'the panel sets a per-router Bark URL and only ever sees it masked');
+  phone.tunnel.send(tunBuild(T.CTRL, 0, 0, null, 0, Buffer.from(JSON.stringify({ t: 'event', d: { kind: 'notification', info: { ...notif, title: 'Dan' } } }))));
+  ok((await until(() => barkReqs[2], 5000, 'bark per-router')).url === '/routerKey1234', 'the router\'s own URL wins over [notify] bark_url');
+  r = await devPatch({ bark_url: '' });
+  ok(r.status === 200 && (await r.json()).notify.bark_url === '' && !/routerKey/.test(fs.readFileSync(path.join(dir, 'server.ini'), 'utf8')), 'clearing it falls back to the server default');
 
   console.log('session: signaling, UDP relay');
   viewer.send({ t: 'session.request', id: 1, d: { device: 'router1', quality: { mode: 'auto', codec: 'auto' } } });
