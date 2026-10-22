@@ -29,7 +29,7 @@ endif
 
 ifeq ($(DESK_OS),macos)
 APP := $(DESK_OUT)/RemoDroid.app
-VERSION ?= 0.4
+VERSION ?= 0.5
 
 $(DESK_OUT)/remodroid.icns: $(DESK_OUT)/icongen
 	$(DESK_OUT)/icongen $@

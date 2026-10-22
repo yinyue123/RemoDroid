@@ -18,8 +18,22 @@ const DEFAULTS = {
   audio: true, sound: true, device: '', swapCmd: 'auto'
 };
 const S = Object.assign({}, DEFAULTS);
+/* The gamepad's settings (layout, edited positions, see-through, swipe speed, zoom) also live in a cookie,
+ * so they come back when the browser clears this page's storage. */
+const PAD_KEYS = ['padLayout', 'padCustom', 'padAlpha', 'lookSpeed', 'view'], PAD_COOKIE = 'rd_pad';
+try {
+  const c = document.cookie.split('; ').find(x => x.startsWith(PAD_COOKIE + '='));
+  if (c) Object.assign(S, JSON.parse(decodeURIComponent(c.slice(PAD_COOKIE.length + 1))));
+} catch (e) {}
 try { Object.assign(S, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+const save = () => {
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+  const pad = {};
+  for (const k of PAD_KEYS) if (S[k] !== undefined) pad[k] = S[k];
+  const v = encodeURIComponent(JSON.stringify(pad));
+  if (v.length < 3800) /* a cookie holds 4 KB */
+    document.cookie = `${PAD_COOKIE}=${v}; Max-Age=34560000; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
+};
 { const want = new URLSearchParams(location.search).get('device'); if (want) { S.device = want; save(); history.replaceState(null, '', '/'); } }
 let ballPos = null;
 try { ballPos = JSON.parse(localStorage.getItem(KEY + '-ball') || 'null'); } catch (e) {}
@@ -577,6 +591,10 @@ function queueMove(x, y, buttons) {
 const touchPts = new Map();
 let tstate = null; /* one gesture: { x, y, sx, sy, mode: null|'drag'|'scroll'|'done', timer, cx, cy } */
 function deskTouch(type, e) {
+  if (!gpad.hidden && S.lookSpeed !== 0) { /* the gamepad's swipe to look (not while its layout is edited) */
+    if (EDIT.on) e.preventDefault(); else padLook(type, e);
+    return;
+  }
   e.preventDefault();
   const [x, y] = norm(e);
   if (type === 'down') {
@@ -1236,11 +1254,12 @@ const PAD_N = 4, PAD_REST = '0,0,0,0,0,0,0';
 const PAD = { touch: { buttons: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 }, real: [], sent: [], raf: 0, poll: 0 };
 const gpad = $('#gpad');
 const padOk = () => !!(st.ready && st.ready.caps && st.ready.caps.gamepad);
+const big = (a, b) => Math.abs(a) >= Math.abs(b) ? a : b;
 function padMerge(i) {
-  const t = i === 0 ? PAD.touch : null, r = PAD.real[i];
+  const t = i === 0 ? Object.assign({}, PAD.touch, { rx: big(PAD.touch.rx, Math.round(LOOK.x * 32767)),
+    ry: big(PAD.touch.ry, Math.round(LOOK.y * 32767)) }) : null, r = PAD.real[i];
   if (!t && !r) return null;
   if (!t || !r) return t || r;
-  const big = (a, b) => Math.abs(a) >= Math.abs(b) ? a : b;
   return { buttons: (t.buttons | r.buttons) >>> 0, lx: big(t.lx, r.lx), ly: big(t.ly, r.ly), rx: big(t.rx, r.rx), ry: big(t.ry, r.ry),
     lt: Math.max(t.lt, r.lt), rt: Math.max(t.rt, r.rt) };
 }
@@ -1258,6 +1277,39 @@ function padFlush() {
     sendInput(new Uint8Array(b), (PAD.sent[i] || PAD_REST).split(',')[0] !== String(q.buttons) ? `pad ${i + 1} ${q.buttons.toString(16)}` : null);
     PAD.sent[i] = key;
   }
+}
+/* Swipe to look (PUBG): while the gamepad is up, a finger on the picture (not on a control) turns the
+ * camera. Its speed tilts pad 1's right stick, which springs back when the finger stops; even a slow
+ * swipe tilts it past the dead zone games ignore. ⚙ → Swipe to look sets the speed, or off. */
+const LOOK = { id: null, px: 0, py: 0, dx: 0, dy: 0, x: 0, y: 0, raf: 0, t: 0 };
+function padLook(type, e) {
+  e.preventDefault();
+  if (type === 'down') {
+    if (LOOK.id !== null) return;
+    try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    Object.assign(LOOK, { id: e.pointerId, px: e.clientX, py: e.clientY, dx: 0, dy: 0 });
+    if (!LOOK.raf) LOOK.raf = requestAnimationFrame(lookTick);
+    return;
+  }
+  if (e.pointerId !== LOOK.id) return;
+  if (type === 'move') {
+    LOOK.dx += e.clientX - LOOK.px; LOOK.dy += e.clientY - LOOK.py;
+    LOOK.px = e.clientX; LOOK.py = e.clientY;
+  } else { LOOK.id = null; unmute(); }
+}
+function lookTick(t) {
+  const frames = LOOK.t ? clamp((t - LOOK.t) / 16.7, .5, 3) : 1;
+  LOOK.t = t;
+  const k = (S.lookSpeed || 1) / 20 / frames; /* 20 px a frame at 1× is the stick all the way */
+  const tilt = d => { const a = Math.min(1, Math.abs(d * k)); return a < .02 ? 0 : Math.sign(d) * (.25 + .75 * a); };
+  const tx = LOOK.id === null ? 0 : tilt(LOOK.dx), ty = LOOK.id === null ? 0 : tilt(LOOK.dy);
+  LOOK.dx = LOOK.dy = 0;
+  LOOK.x = LOOK.x * .4 + tx * .6; LOOK.y = LOOK.y * .4 + ty * .6; /* smooth the finger's jitter */
+  if (Math.abs(LOOK.x) < .02) LOOK.x = 0;
+  if (Math.abs(LOOK.y) < .02) LOOK.y = 0;
+  padFlush();
+  if (LOOK.id !== null || LOOK.x || LOOK.y) LOOK.raf = requestAnimationFrame(lookTick);
+  else LOOK.raf = LOOK.t = 0;
 }
 const padSoon = () => { if (!PAD.raf) PAD.raf = requestAnimationFrame(padFlush); }; /* stick moves: once a frame */
 function padBit(bit, on) {
@@ -1363,17 +1415,21 @@ function padDpad(style) {
 function renderGpad() {
   padRest();
   gpad.textContent = '';
-  for (const [kind, a, label, cls, style] of PAD_LAYOUTS[padLayout()][1]) {
-    if (kind === 'btn') gpad.append(padButton(a, label, cls, style));
-    else if (kind === 'stick') gpad.append(padStick(a, cls, style));
-    else if (kind === 'dpad') gpad.append(padDpad(style));
+  const own = ((S.padCustom || {})[padLayout()]) || {};
+  PAD_LAYOUTS[padLayout()][1].forEach(([kind, a, label, cls, style], i) => {
+    let node;
+    if (kind === 'btn') node = padButton(a, label, cls, style);
+    else if (kind === 'stick') node = padStick(a, cls, style);
+    else if (kind === 'dpad') node = padDpad(style);
     else { /* A, B, X, Y in a diamond, Xbox colours */
-      const f = el('div', { class: 'face', style });
+      node = el('div', { class: 'face', style });
       for (const [bit, t, pos] of [[3, 'Y', 'left:50%;top:17%'], [2, 'X', 'left:17%;top:50%'], [1, 'B', 'left:83%;top:50%'], [0, 'A', 'left:50%;top:83%']])
-        f.append(padButton(bit, t, '', `${pos};color:${XB[bit]}`));
-      gpad.append(f);
+        node.append(padButton(bit, t, '', `${pos};color:${XB[bit]}`));
     }
-  }
+    node.dataset.i = i;
+    if (own[i]) padPlace(node, own[i]);
+    gpad.append(node);
+  });
   const x = el('div', { class: 'gc sm x', text: '×', 'aria-label': 'Hide the gamepad' });
   const cfg = el('div', { class: 'gc sm cfg', text: '⚙', 'aria-label': 'Picture and buttons' });
   for (const b of [x, cfg]) b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); });
@@ -1382,6 +1438,64 @@ function renderGpad() {
   gpad.append(cfg, x);
   padAlpha();
 }
+/* ---- ⚙ → Edit layout: drag a control where the thumb wants it, make it smaller or bigger ----
+ * Saved per layout as each control's centre (% of the screen) and size: S.padCustom[layout][index]. */
+function padPlace(node, c) {
+  Object.assign(node.style, { left: c.x + '%', top: c.y + '%', right: 'auto', bottom: 'auto', translate: '-50% -50%', scale: String(c.s || 1) });
+}
+const EDIT = { on: false, sel: null, own: null, drag: null };
+function padEdit(on) {
+  EDIT.on = on; EDIT.sel = null;
+  gpad.classList.toggle('edit', on);
+  document.body.classList.toggle('gpad-edit', on); /* the ball stays out of the way meanwhile */
+  gpad.querySelectorAll('.gset,.gedit').forEach(e => e.remove());
+  if (!on) return;
+  EDIT.own = Object.assign({}, ((S.padCustom || {})[padLayout()]) || {});
+  const size = el('span', { class: 'val', text: '—' });
+  const step = d => {
+    if (!EDIT.sel) { toast('Tap a control first'); return; }
+    const i = EDIT.sel.dataset.i, c = EDIT.own[i] || padCentre(EDIT.sel);
+    c.s = clamp(Math.round(((c.s || 1) + d) * 10) / 10, .5, 2);
+    EDIT.own[i] = c; padPlace(EDIT.sel, c); size.textContent = Math.round(c.s * 100) + '%';
+  };
+  const bar = el('div', { class: 'gedit' },
+    el('span', { class: 'hint', text: 'Drag to move · tap to pick' }),
+    el('button', { type: 'button', class: 'btn', text: '−', 'aria-label': 'Smaller', onclick: () => step(-.1) }), size,
+    el('button', { type: 'button', class: 'btn', text: '+', 'aria-label': 'Bigger', onclick: () => step(.1) }),
+    el('button', { type: 'button', class: 'btn', text: 'Reset', onclick: () => {
+      S.padCustom = Object.assign({}, S.padCustom, { [padLayout()]: undefined }); save(); renderGpad(); padEdit(true); } }),
+    el('button', { type: 'button', class: 'btn primary', text: 'Done', onclick: () => {
+      S.padCustom = Object.assign({}, S.padCustom, { [padLayout()]: EDIT.own }); save(); padEdit(false); } }));
+  bar.addEventListener('pointerdown', e => e.stopPropagation());
+  EDIT.size = size;
+  gpad.append(bar);
+}
+/* a control's centre and size as it stands, in % of the gamepad area */
+function padCentre(node) {
+  const g = gpad.getBoundingClientRect(), r = node.getBoundingClientRect();
+  return { x: +((r.left + r.width / 2 - g.left) / g.width * 100).toFixed(2), y: +((r.top + r.height / 2 - g.top) / g.height * 100).toFixed(2),
+    s: parseFloat(node.style.scale) || 1 };
+}
+/* while editing, controls are picked and dragged instead of pressed (the capture phase runs first) */
+gpad.addEventListener('pointerdown', e => {
+  if (!EDIT.on) return;
+  const node = e.target.closest('[data-i]');
+  if (!node || !gpad.contains(node)) return;
+  e.preventDefault(); e.stopPropagation();
+  gpad.querySelectorAll('.picked').forEach(n => n.classList.remove('picked'));
+  node.classList.add('picked'); EDIT.sel = node;
+  const c = EDIT.own[node.dataset.i] || padCentre(node), g = gpad.getBoundingClientRect();
+  EDIT.size.textContent = Math.round((c.s || 1) * 100) + '%';
+  EDIT.drag = { id: e.pointerId, node, c, sx: e.clientX, sy: e.clientY, x0: c.x, y0: c.y, gw: g.width, gh: g.height };
+}, true);
+window.addEventListener('pointermove', e => {
+  const d = EDIT.drag;
+  if (!d || e.pointerId !== d.id) return;
+  d.c.x = +clamp(d.x0 + (e.clientX - d.sx) / d.gw * 100, 2, 98).toFixed(2);
+  d.c.y = +clamp(d.y0 + (e.clientY - d.sy) / d.gh * 100, 2, 98).toFixed(2);
+  EDIT.own[d.node.dataset.i] = d.c; padPlace(d.node, d.c);
+}, true);
+for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, e => { if (EDIT.drag && e.pointerId === EDIT.drag.id) EDIT.drag = null; }, true);
 /* ⚙: the picture's zoom and position, and how see-through the buttons are */
 const padAlpha = () => gpad.style.setProperty('--ga', S.padAlpha || .5);
 function padSettings() {
@@ -1400,6 +1514,8 @@ function padSettings() {
   const px = slider('Left · right', 0, 1, .01, v.x, pct, x => setView(Object.assign(viewOf(), { x })));
   const py = slider('Up · down', 0, 1, .01, v.y, pct, y => setView(Object.assign(viewOf(), { y })));
   const alpha = slider('Buttons', .2, 1, .05, S.padAlpha || .5, pct, a => { S.padAlpha = a; save(); padAlpha(); });
+  const look = slider('Swipe to look', 0, 3, .25, S.lookSpeed === 0 ? 0 : S.lookSpeed || 1, n => n ? n + '×' : 'off',
+    n => { S.lookSpeed = n; save(); });
   const redo = () => { box.replaceWith(padSettings()); };
   const pick = el('div', { class: 'btns seg', role: 'group', 'aria-label': 'Layout' },
     ...Object.entries(PAD_LAYOUTS).map(([k, [name]]) => el('button', {
@@ -1410,12 +1526,14 @@ function padSettings() {
       el('button', { type: 'button', class: 'btn', text: 'Fill screen', onclick: () => { setView({ z: clamp(+(st.fill || 1).toFixed(2), 1, 3), x: .5, y: .5 }); redo(); } }),
       el('button', { type: 'button', class: 'btn', text: 'Reset', onclick: () => { setView({ z: 1, x: .5, y: .5 }); redo(); } }),
       el('button', { type: 'button', class: 'btn primary', text: 'Done', onclick: () => box.remove() })),
-    ...alpha);
+    ...look, ...alpha,
+    el('div', { class: 'btns' }, el('button', { type: 'button', class: 'btn', text: 'Edit layout · move and resize the controls', onclick: () => padEdit(true) })));
   return box;
 }
 function padRest() { /* fingers off: nothing on the touch pad is held */
   for (const f of padFingers.values()) f.up();
   padFingers.clear();
+  LOOK.id = null; LOOK.x = LOOK.y = LOOK.dx = LOOK.dy = 0;
   PAD.touch = { buttons: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
   gpad.querySelectorAll('.down').forEach(e => e.classList.remove('down'));
   gpad.querySelectorAll('.stick i').forEach(k => { k.style.transform = ''; });
@@ -1428,7 +1546,7 @@ function showGpad() {
   if (innerHeight > innerWidth) toast('Turn the phone sideways for the gamepad');
   syncMenuStates();
 }
-function hideGpad() { gpad.hidden = true; document.body.classList.remove('gpad-on'); padRest(); padFlush(); syncMenuStates(); }
+function hideGpad() { if (EDIT.on) padEdit(false); gpad.hidden = true; document.body.classList.remove('gpad-on'); padRest(); padFlush(); syncMenuStates(); }
 /* real controllers: read every frame while one is connected (Safari lists a pad after its first press) */
 function padPoll() {
   PAD.poll = 0;

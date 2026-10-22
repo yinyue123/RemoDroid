@@ -296,8 +296,11 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   switches monitors.
 - **Games on a computer** (Linux, e.g. a Steam Deck in Desktop Mode): **Gamepad** puts touch controls over the
   picture, laid out like Steam Link's (sticks, D-pad, A/B/X/Y, bumpers, triggers); hold the phone sideways.
-  Its **⚙** picks a layout (Steam Link, Simple, Shooter, Racing), zooms the picture (**Fill screen** crops the
-  borders away; the sliders move it) and sets how see-through the buttons are.
+  Drag a finger across the picture (anywhere off the buttons) to turn the camera, as in PUBG: the swipe's
+  speed tilts the right stick, up, down and sideways. **⚙ → Edit layout** moves any control and makes it
+  smaller or bigger; each layout keeps its own arrangement. Its **⚙** picks a layout (Steam Link, Simple, Shooter, Racing), zooms the picture
+  (**Fill screen** crops the borders away; the sliders move it), sets the swipe speed (or turns it off, so taps
+  on the picture click again) and how see-through the buttons are.
   Controllers paired with the iPhone or iPad (Joy-Con, DualSense, Xbox) work too; Safari exposes them only on an
   HTTPS page. Each becomes a virtual Xbox 360 pad on the computer, which needs a writable `/dev/uinput`: SteamOS
   has it, elsewhere install Steam's udev rules (`steam-devices`).

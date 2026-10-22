@@ -453,6 +453,66 @@ notify = false
                 await tp.get_by_role("button", name="Done").tap()
                 vb = await tp.locator("#video").bounding_box()
                 res["zoom_fills"] = bool(vb and vb["x"] <= 0 and vb["y"] <= 0 and vb["x"] + vb["width"] >= 843 and vb["y"] + vb["height"] >= 389)
+                # swipe to look: a finger dragged right and down across the picture tilts the right stick
+                # (ABS_RX, ABS_RY) while it moves, and the stick springs back when it stops
+                try:
+                    fd = os.open(pad_node() or "/nonexistent", os.O_RDONLY | os.O_NONBLOCK)
+                except OSError:
+                    fd = None
+                await touch("touchStart", [{"x": 380, "y": 150}])
+                for k in range(1, 10):
+                    await touch("touchMove", [{"x": 380 + k * 12, "y": 150 + k * 8}])
+                    await asyncio.sleep(0.016)
+                await tp.wait_for_timeout(300)
+                await touch("touchEnd", [])
+                if fd is not None:
+                    data, end = b"", time.time() + 4
+                    while True:
+                        try:
+                            data += os.read(fd, 24 * 256)
+                        except BlockingIOError:
+                            pass
+                        evs = [struct.unpack("llHHi", data[o:o + 24])[2:] for o in range(0, len(data) - 23, 24)]
+                        rxs = [v for t, c, v in evs if t == 3 and c == 3]
+                        rys = [v for t, c, v in evs if t == 3 and c == 4]
+                        res["look"] = {"turned": max(rxs or [0]) > 8000, "tilted": max(rys or [0]) > 4000,
+                                       "back": rxs[-1:] == [0] and rys[-1:] == [0]}
+                        if all(res["look"].values()) or time.time() > end:
+                            break
+                        await tp.wait_for_timeout(100)
+                    os.close(fd)
+                else:
+                    res["look"] = "not readable here"
+                # ⚙ → Edit layout: drag the left stick 100 px to the right; Done keeps it there next time
+                await tp.locator("#gpad .cfg").tap()
+                await tp.get_by_role("button", name=re.compile("Edit layout")).tap()
+                st0 = await tp.locator("#gpad .stick:not(.r)").bounding_box()
+                sx, sy = st0["x"] + st0["width"] / 2, st0["y"] + st0["height"] / 2
+                await touch("touchStart", [{"x": sx, "y": sy}])
+                for k in range(1, 6):
+                    await touch("touchMove", [{"x": sx + k * 20, "y": sy}])
+                    await asyncio.sleep(0.016)
+                await touch("touchEnd", [])
+                await tp.wait_for_timeout(300)
+                await tp.get_by_role("button", name="Done").tap()
+                st1 = await tp.locator("#gpad .stick:not(.r)").bounding_box()
+                res["edit_moved"] = abs(st1["x"] - st0["x"] - 100) < 3
+                await tp.locator("#gpad .x").tap()
+                await tp.locator("#ball").tap()
+                await tp.locator('#menu button[data-act="gamepad"]').tap()
+                st2 = await tp.locator("#gpad .stick:not(.r)").bounding_box()
+                res["edit_kept"] = abs(st2["x"] - st1["x"]) < 2
+                # the cookie brings the gamepad settings back when the page's storage is cleared
+                await tp.evaluate("localStorage.clear()")
+                await tp.reload()
+                await tp.wait_for_function("() => document.querySelector('#disc').hidden && document.querySelector('#video').videoWidth > 0",
+                                           timeout=30000)
+                await tp.locator("#ball").tap()
+                await tp.locator('#menu button[data-act="gamepad"]').tap()
+                st3 = await tp.locator("#gpad .stick:not(.r)").bounding_box()
+                res["cookie_kept"] = abs(st3["x"] - st1["x"]) < 2
+                # closed, the gamepad leaves the zoom on, and a tap clicks where the zoomed picture shows
+                await tp.locator("#gpad .x").tap()
                 probe.drain()
                 await touch("touchStart", [{"x": 422, "y": 195}])
                 await touch("touchEnd", [])
@@ -492,7 +552,10 @@ notify = false
               and res.get("fkb_fits") and res.get("fkb") == ["h", "I", "1", "BackSpace", "c+ctrl"]
               and (not pads or res.get("pad") == {"device": True, "b": True, "stick_right": True, "stick_back": True}
                    or (not os.environ.get("CI") and res.get("pad") == {"device": True, "events": "not readable here"}))
-              and (not pads or (res.get("zoom_fills") and res.get("zoom_tap_ok")))
+              and (not pads or (res.get("zoom_fills") and res.get("zoom_tap_ok")
+                                and res.get("edit_moved") and res.get("edit_kept") and res.get("cookie_kept")
+                                and (res.get("look") == {"turned": True, "tilted": True, "back": True}
+                                     or (not os.environ.get("CI") and res.get("look") == "not readable here"))))
               and res.get("mac_ctrl_c") == {"state": 4, "ctrl": True, "super": False}
               and res.get("mac_cmd_c") == {"state": 4, "ctrl": True, "super": False}
               and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))

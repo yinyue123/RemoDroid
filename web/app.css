@@ -118,12 +118,25 @@ body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, 
 .gpad .face{opacity:1}
 .gset{position:absolute;left:50%;top:calc(var(--u)*17);transform:translateX(-50%);width:min(420px,86vw);max-height:calc(100% - var(--u)*19);overflow:auto;
   pointer-events:auto;padding:10px 12px;border-radius:16px;background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
-  box-shadow:0 10px 30px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text);touch-action:auto}
+  box-shadow:0 10px 30px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text);touch-action:manipulation}
 .gset .row{display:grid;grid-template-columns:7.5em 1fr 3.2em;align-items:center;gap:8px;color:var(--muted)}
 .gset .row .val{color:var(--text);font-family:var(--mono);text-align:right}
 .gset .btns{display:flex;gap:6px;margin:2px 0}
 .gset .btns .btn{flex:1 1 0;min-height:34px;padding:0 8px;font-size:13px}
+/* ⚙ → Edit layout */
+.gpad.edit .gc,.gpad.edit .face{outline:1px dashed rgba(255,255,255,.7);outline-offset:3px;cursor:move}
+.gpad.edit .face .gc{outline:0}
+.gpad.edit .picked{outline:2px solid var(--accent)!important}
+.gpad.edit .cfg,.gpad.edit .x{display:none}
+.gpad.edit .gc{opacity:.85}
+.gedit{position:absolute;left:50%;top:calc(var(--u)*3);transform:translateX(-50%);display:flex;align-items:center;gap:6px;pointer-events:auto;
+  padding:6px 8px;border-radius:14px;background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 8px 24px rgba(0,0,0,.45);
+  font-size:13px;color:var(--text);white-space:nowrap;touch-action:manipulation}
+.gedit .hint{color:var(--muted);margin:0 4px}
+.gedit .btn{min-height:32px;padding:0 10px;font-size:13px}
+.gedit .val{min-width:3.2em;text-align:center;font-family:var(--mono)}
 /* while the gamepad is up, the floating ball waits at the top centre, clear of every layout */
+body.gpad-edit #ball{display:none}
 body.gpad-on #ball{left:calc(50% - 29px)!important;top:calc(env(safe-area-inset-top,0px) + 4px)!important;transform:scale(.8)}
 .menu{position:fixed;z-index:31;width:min(320px,calc(100vw - 24px));padding:10px;border-radius:24px;background:var(--glass);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);
