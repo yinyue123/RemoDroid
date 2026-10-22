@@ -143,8 +143,17 @@ $(DESK_OUT)/desk_test$(DESK_EXE): desktop/test/desk_test.c $(filter-out $(DESK_O
 desktop: $(DESK_LIB) $(DESK_OUT)/remodroid-desktopd$(DESK_EXE)
 desktop-test: $(DESK_OUT)/desk_test$(DESK_EXE)
 
+# Linux: the VA-API encoder on this machine's GPU (desktop/test/vatest.c), run by hand where there is one
+VATEST_SRC := desktop/test/vatest.c desktop/linux/video_vaapi.c desktop/linux/capture_x11.c desktop/core/yuv.c
+$(DESK_OUT)/vatest: $(VATEST_SRC) desktop/linux/vaenc.h
+	@mkdir -p $(@D)
+	$(CC) $(OPT) $(ARCHFLAGS) -std=gnu11 -D_GNU_SOURCE -DVATEST_SCREEN -Idesktop -Idesktop/core -Idesktop/linux -Icommon \
+	    -Ithird_party/libev -Ithird_party/cjson -Ithird_party/inih $(DESK_WARN) -o $@ $(VATEST_SRC) \
+	    -lX11 -lXext -lXdamage -lXfixes -ldl -lpthread
+desktop-vatest: $(DESK_OUT)/vatest
+
 -include $(patsubst %.o,%.d,$(filter $(DESK_OUT)/obj/desktop/% $(DESK_OUT)/obj/rtc/% $(DESK_OUT)/obj/common/%,$(DESK_OBJ)))
 
-.PHONY: desktop desktop-test
+.PHONY: desktop desktop-test desktop-vatest
 
 include desktop/app/app.mk

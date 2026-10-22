@@ -47,7 +47,8 @@ Contents
 - Wayland capture and input on Linux. v1 needs an X11 session.
 - Unattended access to the login screen, the Windows UAC secure desktop, or a Mac before login. That needs a
   Windows service or a macOS LaunchDaemon.
-- Sound, a remote cursor shape, viewing several monitors at once, and hardware encoding on Linux.
+- Sound, a remote cursor shape, and viewing several monitors at once. (Hardware encoding on Linux came
+  later: VA-API, §5.5.)
 - An installer with code signing or notarization (§13.4 says what is needed).
 
 ---
@@ -269,7 +270,18 @@ The software path is BGRA → I420 (`yuv.c`, scalar code written to auto-vectori
 profiling calls for it), then **minih264e** (H.264 Constrained Baseline, CC0, about 11k lines in one header,
 SSE2/NEON). This matches the existing SDP: `42e02a` Baseline is offered, and a Baseline stream also decodes
 on the High payload type. HEVC is offered only when a fused hardware source supports it (VideoToolbox on
-Apple Silicon and T2 Macs, Media Foundation where the GPU has an HEVC encoder).
+Apple Silicon and T2 Macs, Media Foundation where the GPU has an HEVC encoder, VA-API where the GPU has
+an HEVC encode entry point).
+
+**VA-API on Linux** (`desktop/linux/video_vaapi.c`): libva and libva-drm are loaded with `dlopen` from the
+first `/dev/dri/renderD*` that initializes, so machines without them fall back to software. XShm capture
+→ `yuv.c` NV12 at the encode size (cut to multiples of 16) → a VA surface (`vaDeriveImage`, else
+`vaPutImage`) → `EncSlice` with one reference, P frames only, CBR, an IDR on request, up to 60 fps. The
+parameter sets (H.264 SPS/PPS with POC type 2 and `max_dec_frame_buffering` 1; HEVC VPS/SPS/PPS with
+the driver's block sizes from `VAConfigAttribEncHEVCBlockSizes`) and every slice header are written here
+and handed over as packed headers: Mesa's radeonsi writes none itself. `make desktop-vatest` checks a GPU
+by hand (synthetic frames, or the X screen through `dsk_hwvideo_*`); on a Steam Deck both codecs encode a
+1280x800 frame in about 3 ms.
 
 Encoder choice (`[video] encoder = auto|hardware|software`): `auto` tries hardware first and falls back to
 software if hardware fails to open or fails 3 times in a session. Behaviour copied from the phone: keyframes
@@ -287,7 +299,7 @@ All system APIs, and nothing third-party. Minimum versions: **Windows 10 1809+**
 |---|---|---|---|
 | Capture | DXGI Desktop Duplication (D3D11), dirty-rect aware | ScreenCaptureKit `SCStream`, NV12 (`420v`) output | XShm `XShmGetImage` (+ XDamage to skip unchanged frames) |
 | Colour conversion | `yuv.c` on the CPU (BGRA→NV12, scaled); an `ID3D11VideoProcessor` GPU path is a later optimisation | none needed (SCK delivers NV12, scaled) | `yuv.c` |
-| Encode | Media Foundation H.264/HEVC MFT, hardware async first, then the Microsoft software MFT, then minih264 | VideoToolbox `VTCompressionSession` (H.264, HEVC), real-time, no B-frames | minih264 (VA-API through `dlopen` later) |
+| Encode | Media Foundation H.264/HEVC MFT, hardware async first, then the Microsoft software MFT, then minih264 | VideoToolbox `VTCompressionSession` (H.264, HEVC), real-time, no B-frames | VA-API H.264/HEVC through `dlopen` (`video_vaapi.c`: AMD and Intel GPUs, a Steam Deck), then minih264 |
 | Mouse | `SendInput` absolute with `MOUSEEVENTF_VIRTUALDESK` | `CGEventCreateMouseEvent` / `CGEventPost` (with drag events, click count for double-clicks) | `XTestFakeMotionEvent` / `ButtonEvent` |
 | Keys | `SendInput` with scan codes (`KEYEVENTF_SCANCODE`, `EXTENDEDKEY`) | `CGEventCreateKeyboardEvent` with `kVK_*` | `XTestFakeKeyEvent` with keycode = evdev + 8 |
 | Text | `KEYEVENTF_UNICODE` | `CGEventKeyboardSetUnicodeString` | temporary keysym remap of a spare keycode (the xdotool method) |
@@ -661,7 +673,7 @@ Each milestone builds in CI and leaves Android working.
 | **M4** macOS | SCK + VideoToolbox (H.264/HEVC), CGEvent, NSPasteboard, menu bar app + pairing window + permissions, .app | |
 | **M5** Linux app and polish | GTK pairing window + SNI tray, notifications, autostart, .deb/.rpm; multi-monitor picker; files on desktops; touch-viewer zoom/pan; panel "Computer" enrollment; README/download grids; `arch.md` section | |
 | **M6** Sound | The computer's sound: WASAPI loopback, ScreenCaptureKit audio (so macOS 13+), the PulseAudio/PipeWire monitor via `dlopen`; `desktop/core/audio.c` downmixes, resamples to 48 kHz and encodes Opus (vendored libopus) onto the same track as the phone's (`rtc_audio`); `desktop.audio` setting, the viewer's Sound switch; Xvfb e2e plays a tone into a null sink | Done |
-| **M7** Later | Wayland (xdg-desktop-portal ScreenCast + PipeWire via `dlopen`, uinput), VA-API, remote cursor shape, unattended mode (Windows service using `WTSGetActiveConsoleSessionId`, macOS LaunchDaemon), signed installers | |
+| **M7** Later | Wayland (xdg-desktop-portal ScreenCast + PipeWire via `dlopen`, uinput), VA-API (done), remote cursor shape, unattended mode (Windows service using `WTSGetActiveConsoleSessionId`, macOS LaunchDaemon), signed installers | |
 
 ---
 

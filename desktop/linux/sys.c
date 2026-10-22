@@ -252,19 +252,6 @@ int dsk_lock(void)
     return run(b, 1) == 0 ? 0 : -1;
 }
 
-/* no hardware video on Linux yet (VA-API later) */
-dsk_hwvideo_t *dsk_hwvideo_open(const dsk_video_cfg_t *c, dsk_au_cb cb, void *ud, char *err, size_t cap)
-{
-    snprintf(err, cap, "no hardware encoder support on Linux yet");
-    return NULL;
-}
-int dsk_hwvideo_step(dsk_hwvideo_t *v, int timeout_ms) { return -1; }
-void dsk_hwvideo_keyframe(dsk_hwvideo_t *v) {}
-void dsk_hwvideo_bitrate(dsk_hwvideo_t *v, int kbps) {}
-void dsk_hwvideo_close(dsk_hwvideo_t *v) {}
-int dsk_hwvideo_has_h265(void) { return 0; }
-const char *dsk_hwvideo_name(dsk_hwvideo_t *v) { return "none"; }
-
 /* keep the X screensaver from blanking while the viewer only watches */
 void dsk_session(int active)
 {

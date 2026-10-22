@@ -260,6 +260,8 @@ by pasting the line the panel shows under **Agents → Add → Computer**. It ru
 whenever someone connects, and its icon turns red while it is being viewed (**Disconnect viewer** is one click
 away). The viewer hears what the computer plays (the **Sound** switch, or `desktop.audio = false` to never
 send it), and **Show log** in the icon's menu opens a live log window. Windows 10 1809+ and macOS 13+; Linux needs an X11 session (on GNOME: "GNOME on Xorg").
+The picture is encoded on the GPU where there is one (Media Foundation, VideoToolbox, and VA-API on Linux with an
+AMD or Intel GPU, a Steam Deck included: H.265 or H.264 at up to 60 fps); otherwise in software (H.264, 30 fps).
 
 <!-- downloads:desktop -->
 #### Download RemoDroid for your computer (v0.4.2)
