@@ -331,6 +331,9 @@ notify = false
             # two fingers = scroll
             await asyncio.sleep(1.5)
             tctx = await browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+            # the viewer runs on the computer itself here: it would take the agent's virtual pad for a
+            # controller paired with it and feed its state back into pad 1
+            await tctx.add_init_script("Navigator.prototype.getGamepads = () => [];")
             # the gamepad messages the page sends (shown when the gamepad check fails)
             await tctx.add_init_script("""window.__padLog = []; const send = RTCDataChannel.prototype.send;
                 RTCDataChannel.prototype.send = function (d) {
