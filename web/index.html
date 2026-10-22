@@ -32,6 +32,10 @@
 
 <button id="ball" type="button" aria-label="Open RemoDroid menu" aria-haspopup="menu" aria-expanded="false"></button>
 
+<div class="fkb" id="fkb" role="group" aria-label="On-screen keyboard" hidden>
+  <header><span class="grip" aria-hidden="true">⠿⠿</span><span class="ttl">keyboard</span><button type="button" id="fkbMore" aria-label="Shortcuts and text">⋯</button><button type="button" id="fkbHide" aria-label="Hide keyboard">⌄</button></header>
+  <div class="rows" id="fkbRows"></div>
+</div>
 <div class="menu" id="menu" role="menu" hidden>
   <button type="button" role="menuitem" data-act="back"><svg viewBox="0 0 24 24"><path d="M16 5L7 12l9 7z"/></svg>Back</button>
   <button type="button" role="menuitem" data-act="home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>Home</button>

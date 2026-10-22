@@ -883,6 +883,8 @@ function syncMenuStates() {
   sb.classList.toggle('on', st.panel === 'off');
   sb.querySelector('span').textContent = dk ? (st.panel === 'off' ? 'Display on' : 'Display off') : st.panel === 'off' ? 'Screen on' : 'Screen off';
   $('#menuStats').classList.toggle('on', S.stats);
+  if (!dk && !fkb.el.hidden) hideFkb(); /* the floating keyboard is for computers */
+  menu.querySelector('[data-act="keys"]').classList.toggle('on', dk && !fkb.el.hidden);
   const snd = $('#menuSound'), audible = S.sound && !video.muted;
   snd.classList.toggle('on', audible); snd.classList.toggle('muted', !audible);
   snd.querySelector('span').textContent = audible ? 'Sound on' : 'Sound off';
@@ -952,7 +954,8 @@ document.addEventListener('webkitfullscreenchange', () => { layout(); syncMenuSt
 menu.addEventListener('click', e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const a = b.dataset.act;
-  if (['photo', 'clip', 'settings', 'keys'].includes(a)) { closeMenu(); openSheet(a); }
+  if (a === 'keys' && desk()) { closeMenu(); fkb.el.hidden ? showFkb() : hideFkb(); }
+  else if (['photo', 'clip', 'settings', 'keys'].includes(a)) { closeMenu(); openSheet(a); }
   else if (['back', 'home', 'recents'].includes(a)) { sendCtrl('nav', { button: a }).catch(() => toast('Not connected')); closeMenu(); }
   else if (a === 'screen') {
     const on = st.panel === 'off', what = desk() ? 'Display' : 'Phone screen';
@@ -1078,6 +1081,121 @@ $('#kbSend').addEventListener('click', () => {
   sendCtrl('text', { text: v }, true).then(() => { $('#kbText').value = ''; toast('Text sent'); }).catch(e => toast(e.message));
 });
 $('#kbText').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#kbSend').click(); } });
+
+/* ---- computers: the floating on-screen keyboard, for an iPad or iPhone without a physical keyboard ----
+ * Keys fire on pointer-down and all go over the ordered ctrl channel, so "ab⌫" never arrives out of
+ * order: characters as "text" (typed through the computer's own layout), the rest as "key" (Android
+ * key codes, desktop/core/keymap.c). Shift and Ctrl are one-shot: Ctrl then c is Ctrl+C. ⌫ and the
+ * arrows repeat while held. Drag it by its grip; the spot is remembered per browser. */
+const FKB = { abc: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'], sym1: ['1234567890', '-/:;()$&@"', '.,?!\''], sym2: ['[]{}#%^*+=', '_\\|~<>`"\':', '.,?!\''] };
+const AK = { esc: 111, tab: 61, enter: 66, bksp: 67, up: 19, down: 20, left: 21, right: 22, ctrl: 113, shift: 59 };
+/* the key a character sits on, for Ctrl+character */
+function charKey(ch) {
+  const c = ch.toLowerCase();
+  if (c >= 'a' && c <= 'z') return 29 + c.charCodeAt(0) - 97;
+  if (c >= '0' && c <= '9') return 7 + c.charCodeAt(0) - 48;
+  return { '-': 69, '=': 70, '[': 71, ']': 72, '\\': 73, ';': 74, '\'': 75, '`': 68, ',': 55, '.': 56, '/': 76, ' ': 62 }[c] || 0;
+}
+const fkb = { el: $('#fkb'), layer: 'abc', shift: false, ctrl: false, pos: null, drag: null };
+try { fkb.pos = JSON.parse(localStorage.getItem(KEY + '-kb') || 'null'); } catch (e) {}
+function fkbSend(t, d) {
+  if (!st.connected) { toast('Not connected'); return; }
+  sendCtrl(t, d).catch(() => {});
+}
+function fkbUnlatch() { if (fkb.shift || fkb.ctrl) { fkb.shift = fkb.ctrl = false; renderFkb(); } }
+function fkbKey(code) { /* a key, with the latched modifiers held around it */
+  const mods = [fkb.ctrl && AK.ctrl, fkb.shift && AK.shift].filter(Boolean);
+  for (const m of mods) fkbSend('key', { action: 'down', code: m });
+  fkbSend('key', { action: 'press', code });
+  for (const m of mods.reverse()) fkbSend('key', { action: 'up', code: m });
+  fkbUnlatch();
+}
+function fkbChar(ch) {
+  if (fkb.ctrl && charKey(ch)) { fkbKey(charKey(ch)); return; }
+  fkbSend('text', { text: fkb.shift && fkb.layer === 'abc' ? ch.toUpperCase() : ch });
+  fkbUnlatch();
+}
+/* a soft click per key, since Safari gives no haptics */
+let clickAc = null, clickNoise = null;
+function keyClick() {
+  try {
+    clickAc = clickAc || new (window.AudioContext || window.webkitAudioContext)();
+    if (clickAc.state === 'suspended') clickAc.resume();
+    if (!clickNoise) {
+      clickNoise = clickAc.createBuffer(1, Math.round(clickAc.sampleRate * .05), clickAc.sampleRate);
+      const ch = clickNoise.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    }
+    const t = clickAc.currentTime, src = clickAc.createBufferSource(), bp = clickAc.createBiquadFilter(), g = clickAc.createGain();
+    src.buffer = clickNoise; bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = .8;
+    g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.12, t + .002); g.gain.exponentialRampToValueAtTime(.0001, t + .03);
+    src.connect(bp).connect(g).connect(clickAc.destination);
+    src.start(t); src.stop(t + .045);
+  } catch (_) {}
+}
+function fkbBtn(label, act, o = {}) {
+  const b = el('button', { type: 'button', class: 'k' + (o.on ? ' on' : ''), text: label, 'aria-label': o.title || label });
+  if (o.grow) b.style.flexGrow = o.grow;
+  let rep = 0;
+  const stop = () => { b.classList.remove('down'); clearTimeout(rep); clearInterval(rep); rep = 0; };
+  b.addEventListener('pointerdown', e => {
+    e.preventDefault(); /* no focus steal, no double-tap zoom, no selection */
+    b.classList.add('down'); keyClick(); act();
+    if (o.repeat) rep = setTimeout(() => { rep = setInterval(act, 70); }, 420);
+  });
+  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(t, stop);
+  b.addEventListener('click', e => { if (e.detail === 0) act(); }); /* Enter / Space on a focused key */
+  return b;
+}
+function renderFkb() {
+  const rows = FKB[fkb.layer], abc = fkb.layer === 'abc', caps = s => fkb.shift && abc ? s.toUpperCase() : s;
+  const chars = s => [...s].map(ch => fkbBtn(caps(ch), () => fkbChar(ch)));
+  const kr = (cls, ...keys) => el('div', { class: 'kr' + (cls ? ' ' + cls : '') }, ...keys);
+  $('#fkbRows').replaceChildren(
+    kr('', fkbBtn('esc', () => fkbKey(AK.esc)), fkbBtn('tab', () => fkbKey(AK.tab)), fkbBtn('.', () => fkbChar('.')),
+      fkbBtn('←', () => fkbKey(AK.left), { repeat: 1, title: 'Left' }), fkbBtn('↓', () => fkbKey(AK.down), { repeat: 1, title: 'Down' }),
+      fkbBtn('↑', () => fkbKey(AK.up), { repeat: 1, title: 'Up' }), fkbBtn('→', () => fkbKey(AK.right), { repeat: 1, title: 'Right' }),
+      fkbBtn('⌄', hideFkb, { title: 'Hide keyboard' })),
+    kr('', ...chars(rows[0])),
+    kr(abc ? 'inset' : '', ...chars(rows[1])),
+    kr('', abc ? fkbBtn('⇧', () => { fkb.shift = !fkb.shift; renderFkb(); }, { grow: 1.4, on: fkb.shift, title: 'Shift' })
+      : fkbBtn(fkb.layer === 'sym1' ? '#+=' : '123', () => { fkb.layer = fkb.layer === 'sym1' ? 'sym2' : 'sym1'; renderFkb(); }, { grow: 1.4 }),
+      ...chars(rows[2]), fkbBtn('⌫', () => fkbKey(AK.bksp), { grow: 1.4, repeat: 1, title: 'Backspace' })),
+    kr('', fkbBtn(abc ? '?123' : 'abc', () => { fkb.layer = abc ? 'sym1' : 'abc'; renderFkb(); }, { grow: 1.4 }),
+      fkbBtn('ctrl', () => { fkb.ctrl = !fkb.ctrl; renderFkb(); }, { on: fkb.ctrl, title: 'Ctrl, for the next key' }),
+      fkbBtn('␣', () => fkbChar(' '), { grow: 4, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
+      fkbBtn('↵', () => fkbKey(AK.enter), { grow: 1.4, title: 'Enter' })));
+}
+function placeFkb(x, y) {
+  const r = fkb.el.getBoundingClientRect();
+  fkb.pos = { x: clamp(x, B.l, Math.max(B.l, innerWidth - B.r - r.width)), y: clamp(y, B.t, Math.max(B.t, innerHeight - B.b - r.height)) };
+  fkb.el.style.transform = `translate(${fkb.pos.x}px,${fkb.pos.y}px)`;
+}
+function showFkb() {
+  renderFkb();
+  fkb.el.hidden = false;
+  const r = fkb.el.getBoundingClientRect();
+  if (fkb.pos) placeFkb(fkb.pos.x, fkb.pos.y);
+  else placeFkb((innerWidth - r.width) / 2, innerHeight - B.b - r.height - 12); /* bottom centre */
+  syncMenuStates();
+}
+function hideFkb() { fkb.el.hidden = true; fkb.shift = fkb.ctrl = false; syncMenuStates(); }
+const fkbHead = fkb.el.querySelector('header');
+fkbHead.addEventListener('pointerdown', e => {
+  if (e.target.closest('button')) return;
+  e.preventDefault();
+  try { fkbHead.setPointerCapture(e.pointerId); } catch (_) {}
+  fkb.drag = { dx: e.clientX - fkb.pos.x, dy: e.clientY - fkb.pos.y };
+});
+fkbHead.addEventListener('pointermove', e => { if (fkb.drag) placeFkb(e.clientX - fkb.drag.dx, e.clientY - fkb.drag.dy); });
+for (const t of ['pointerup', 'pointercancel']) fkbHead.addEventListener(t, () => {
+  if (!fkb.drag) return;
+  fkb.drag = null;
+  try { localStorage.setItem(KEY + '-kb', JSON.stringify(fkb.pos)); } catch (e) {}
+});
+$('#fkbHide').addEventListener('click', hideFkb);
+$('#fkbMore').addEventListener('click', () => openSheet('keys'));
+window.addEventListener('resize', () => { if (!fkb.el.hidden) placeFkb(fkb.pos.x, fkb.pos.y); });
 
 /* ================= photo upload (A.6 file.push + A.8 chunks) ================= */
 let xferId = 1;

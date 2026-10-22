@@ -291,7 +291,8 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   full screen, sound, photo upload, clipboard and settings.
 - **On a computer** the mouse and keyboard go straight through (keys are physical, so the computer's own layout
   applies; ⌘ and Ctrl swap when only one side is a Mac). From an iPhone: tap to click, long-press to right-click,
-  drag with one finger, scroll with two. The **Keyboard** sheet sends text and shortcuts, and **Next screen**
+  drag with one finger, scroll with two. **Keyboard** opens a floating on-screen keyboard for an iPad or iPhone
+  (drag it by its grip; tap **ctrl** then **c** for Ctrl+C), its **⋯** sends text and shortcuts, and **Next screen**
   switches monitors.
 - **Sound** comes from the phone (Android 12+) and its own speaker goes quiet while you're connected. Tap the
   picture once to unmute it in Safari; the menu's **Sound** switch hands it back to the phone.

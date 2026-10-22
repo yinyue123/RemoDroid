@@ -72,6 +72,21 @@ html.lc #video,html.lc #screen{opacity:.4;outline:3px solid #ff0;outline-offset:
 #ball[aria-expanded="true"]{opacity:1}
 body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, a way back to the list */
 
+/* ---------- floating keyboard (computers: iPad, iPhone) ---------- */
+.fkb{position:fixed;z-index:29;left:0;top:0;width:min(560px,calc(100vw - 16px));border-radius:14px;overflow:hidden;background:var(--surface);
+  border:1px solid var(--line);box-shadow:0 12px 36px rgba(0,0,0,.5);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.fkb>header{display:flex;align-items:center;gap:6px;padding:3px 6px 3px 12px;background:var(--surface-2);border-bottom:1px solid var(--line);cursor:grab;touch-action:none}
+.fkb>header .grip{font-size:12px;letter-spacing:2px;color:var(--muted)}
+.fkb>header .ttl{flex:1;text-align:center;font-size:12px;color:var(--muted)}
+.fkb>header button{min-width:34px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:15px}
+.fkb .rows{display:flex;flex-direction:column;gap:5px;padding:6px}
+.fkb .kr{display:flex;gap:5px}
+.fkb .kr.inset{padding:0 4.5%}
+.fkb .k{flex:1 1 0;min-width:0;height:38px;padding:0;border:1px solid var(--line);border-radius:7px;background:var(--surface-3);color:var(--text);
+  font:14px var(--mono);touch-action:manipulation;transition:background .06s,transform .06s}
+.fkb .k.on{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.fkb .k.down{background:var(--line);transform:scale(1.08)}
+@media (max-height:500px){.fkb .k{height:31px}} /* iPhone in landscape */
 .menu{position:fixed;z-index:31;width:min(320px,calc(100vw - 24px));padding:10px;border-radius:24px;background:var(--glass);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);
   display:grid;grid-template-columns:repeat(4,1fr);gap:2px;animation:pop .16s ease-out}

@@ -15,7 +15,7 @@ wheel scrolls; physical keys arrive as the expected keycodes; text from the
 Keyboard sheet is typed; the clipboard syncs both ways; an upload lands in
 ~/Downloads/RemoDroid; the computer's sound (a tone into a PulseAudio null sink)
 arrives as the Opus track, when pulseaudio is installed; and from a touch screen, tap / long press / two-finger
-drag become click / right click / scroll.
+drag become click / right click / scroll, and the floating keyboard types.
 
   python tests/e2e_desktop.py --bin build/host [--chrome PATH] [--verbose]
 """
@@ -24,6 +24,7 @@ import asyncio
 import json
 import os
 import queue
+import re
 import shutil
 import socket
 import subprocess
@@ -247,10 +248,11 @@ notify = false
             res["enter_ok"] = bool(ev)
             # nothing left held down
             await page.wait_for_timeout(300)
-            # text from the Keyboard sheet, including a character no key types
+            # text from the Keyboard sheet (⋯ on the floating keyboard), including a character no key types
             probe.drain()
             await page.locator("#ball").click()
             await page.locator('#menu button[data-act="keys"]').click()
+            await page.click("#fkbMore")
             await page.fill("#kbText", "Hi é")
             await page.click("#kbSend")
             want = ["H", "i", "space", "eacute"]
@@ -349,6 +351,23 @@ notify = false
             await touch("touchEnd", [])
             ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] in (4, 5))
             res["touch_scroll"] = ev and ev["b"]
+            # the floating keyboard (Keyboard in the menu on a computer), tapped: h ⇧ i ?123 1 abc ⌫ ctrl c
+            await tp.locator("#ball").tap()
+            await tp.locator('#menu button[data-act="keys"]').tap()
+            await tp.wait_for_selector("#fkb:not([hidden])")
+            box = await tp.locator("#fkb").bounding_box()
+            res["fkb_fits"] = bool(box and box["x"] >= 0 and box["x"] + box["width"] <= 390 and box["y"] + box["height"] <= 844)
+            probe.drain()
+            got = []
+            for label in ("h", "⇧", "I", "?123", "1", "abc", "⌫", "ctrl", "c"):
+                await tp.locator("#fkb .k", has_text=re.compile("^" + re.escape(label) + "$")).first.tap()
+                await tp.wait_for_timeout(120)
+            end = time.time() + 8
+            while len(got) < 5 and time.time() < end:
+                ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keysym"] not in ("Shift_L", "Control_L"), 1)
+                if ev:
+                    got.append(ev["keysym"] + ("+ctrl" if ev["state"] & 4 else ""))
+            res["fkb"] = got
             await tctx.close()
             # a Mac viewer: Ctrl+C stays Ctrl+C (a terminal's interrupt), ⌘C becomes Ctrl+C (copy)
             await asyncio.sleep(1.5)
@@ -377,6 +396,7 @@ notify = false
               and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("ctrl_c_ok") and res.get("clip_to_viewer")
               and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok")
               and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
+              and res.get("fkb_fits") and res.get("fkb") == ["h", "I", "1", "BackSpace", "c+ctrl"]
               and res.get("mac_ctrl_c") == {"state": 4, "ctrl": True, "super": False}
               and res.get("mac_cmd_c") == {"state": 4, "ctrl": True, "super": False}
               and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))
