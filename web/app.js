@@ -1300,11 +1300,11 @@ function padLook(type, e) {
 function lookTick(t) {
   const frames = LOOK.t ? clamp((t - LOOK.t) / 16.7, .5, 3) : 1;
   LOOK.t = t;
-  const k = (S.lookSpeed || 1) / 20 / frames; /* 20 px a frame at 1× is the stick all the way */
-  const tilt = d => { const a = Math.min(1, Math.abs(d * k)); return a < .02 ? 0 : Math.sign(d) * (.25 + .75 * a); };
+  const k = (S.lookSpeed || 1) / 8 / frames; /* 8 px a frame at 1× is the stick all the way */
+  const tilt = d => { const a = Math.min(1, Math.abs(d * k)); return a < .02 ? 0 : Math.sign(d) * (.3 + .7 * a); };
   const tx = LOOK.id === null ? 0 : tilt(LOOK.dx), ty = LOOK.id === null ? 0 : tilt(LOOK.dy);
   LOOK.dx = LOOK.dy = 0;
-  LOOK.x = LOOK.x * .4 + tx * .6; LOOK.y = LOOK.y * .4 + ty * .6; /* smooth the finger's jitter */
+  LOOK.x = LOOK.x * .25 + tx * .75; LOOK.y = LOOK.y * .25 + ty * .75; /* smooth the finger's jitter */
   if (Math.abs(LOOK.x) < .02) LOOK.x = 0;
   if (Math.abs(LOOK.y) < .02) LOOK.y = 0;
   padFlush();
@@ -1514,7 +1514,7 @@ function padSettings() {
   const px = slider('Left · right', 0, 1, .01, v.x, pct, x => setView(Object.assign(viewOf(), { x })));
   const py = slider('Up · down', 0, 1, .01, v.y, pct, y => setView(Object.assign(viewOf(), { y })));
   const alpha = slider('Buttons', .2, 1, .05, S.padAlpha || .5, pct, a => { S.padAlpha = a; save(); padAlpha(); });
-  const look = slider('Swipe to look', 0, 3, .25, S.lookSpeed === 0 ? 0 : S.lookSpeed || 1, n => n ? n + '×' : 'off',
+  const look = slider('Swipe to look', 0, 5, .25, S.lookSpeed === 0 ? 0 : S.lookSpeed || 1, n => n ? n + '×' : 'off',
     n => { S.lookSpeed = n; save(); });
   const redo = () => { box.replaceWith(padSettings()); };
   const pick = el('div', { class: 'btns seg', role: 'group', 'aria-label': 'Layout' },
