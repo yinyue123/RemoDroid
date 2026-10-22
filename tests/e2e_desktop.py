@@ -413,16 +413,21 @@ notify = false
                         await asyncio.sleep(0.03)
                     await tp.wait_for_timeout(300)
                     await touch("touchEnd", [])
-                    await tp.wait_for_timeout(400)
-                    try:
-                        data = os.read(fd, 24 * 256)
-                    except BlockingIOError:
-                        data = b""
+                    # read until the stick is back in the middle (a busy CI runner can take a while)
+                    data, end = b"", time.time() + 4
+                    while True:
+                        try:
+                            data += os.read(fd, 24 * 256)
+                        except BlockingIOError:
+                            pass
+                        evs = [struct.unpack("llHHi", data[o:o + 24])[2:] for o in range(0, len(data) - 23, 24)]
+                        xs = [v for t, c, v in evs if t == 3 and c == 0]
+                        res["pad"] = {"device": True, "b": any(e == (1, 0x131, 1) for e in evs),
+                                      "stick_right": max(xs or [0]) > 20000, "stick_back": xs[-1:] == [0]}
+                        if all(res["pad"].values()) or time.time() > end:
+                            break
+                        await tp.wait_for_timeout(100)
                     os.close(fd)
-                    evs = [struct.unpack("llHHi", data[o:o + 24])[2:] for o in range(0, len(data) - 23, 24)]
-                    res["pad"] = {"device": True, "b": any(e == (1, 0x131, 1) for e in evs),
-                                  "stick_right": max([v for t, c, v in evs if t == 3 and c == 0] or [0]) > 20000,
-                                  "stick_back": [v for t, c, v in evs if t == 3 and c == 0][-1:] == [0]}
                 else:
                     res["pad"] = {"device": bool(node), "events": "not readable here"}
             else:

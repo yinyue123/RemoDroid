@@ -1256,7 +1256,7 @@ function padButton(bit, label, cls, style) {
     try { b.setPointerCapture(e.pointerId); } catch (_) {}
     b.classList.add('down'); padBit(bit, true);
   });
-  for (const t of ['pointerup', 'pointercancel']) b.addEventListener(t, off);
+  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(t, off);
   return b;
 }
 /* a stick centres where the thumb lands, so it never jumps; the knob follows up to the rim */
@@ -1286,7 +1286,7 @@ function padStick(side, cls, style) {
     id = null; knob.style.transform = ''; s.classList.remove('down');
     set(0, 0); padFlush();
   };
-  for (const t of ['pointerup', 'pointercancel']) s.addEventListener(t, up);
+  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) s.addEventListener(t, up);
   return s;
 }
 /* the D-pad: one touch area, so a thumb can roll between directions (and diagonals) */
@@ -1308,7 +1308,7 @@ function padDpad(style) {
     id = null; Object.values(parts).forEach(p => p.classList.remove('down'));
     PAD.touch.buttons = (PAD.touch.buttons & ~0xF000) >>> 0; padFlush();
   };
-  for (const t of ['pointerup', 'pointercancel']) d.addEventListener(t, up);
+  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) d.addEventListener(t, up);
   return d;
 }
 function renderGpad() {
