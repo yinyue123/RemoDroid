@@ -1,0 +1,10 @@
+#!/bin/sh
+# The AppImage's entry point (packaging/desktop/package.sh):
+#   ./RemoDroid-VERSION-linux-ARCH.AppImage                                    the tray app
+#   ./RemoDroid-VERSION-linux-ARCH.AppImage desktopd pair --panel … --code …   remodroid-desktopd (no UI)
+HERE=${APPDIR:-$(dirname "$(readlink -f "$0")")}
+if [ "${1:-}" = desktopd ]; then
+    shift
+    exec "$HERE/usr/bin/remodroid-desktopd" "$@"
+fi
+exec "$HERE/usr/bin/remodroid-desktop" "$@"

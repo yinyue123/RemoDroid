@@ -1,6 +1,6 @@
 #!/bin/sh
 # Packages the desktop agents for download.
-#   packaging/desktop/package.sh VERSION linux ARCH DIR    .deb, .rpm, .tar.gz from a Linux build dir
+#   packaging/desktop/package.sh VERSION linux ARCH DIR    .deb, .rpm, .tar.gz, .AppImage from a Linux build dir
 #   packaging/desktop/package.sh VERSION windows ARCH DIR  RemoDroid-VERSION-windows-ARCH.zip
 #   packaging/desktop/package.sh VERSION macos - DIR        RemoDroid-VERSION-macos.zip (RemoDroid.app)
 # Output: build/packages/.
@@ -31,6 +31,19 @@ linux)
     cp -r "$DIR/icons" "build/$T/share/icons"
     cp packaging/desktop/remodroid-desktopd.service "build/$T/"
     tar -C build -czf "$OUT/$T.tar.gz" "$T"
+    # AppImage: the same files in one runnable file for any distribution with GTK 3 and X11.
+    # Needs appimagetool on PATH and APPIMAGE_RUNTIME, a directory with runtime-x86_64 and
+    # runtime-aarch64 from AppImage/type2-runtime.
+    A=build/RemoDroid-$VERSION-$ARCH.AppDir
+    rm -rf "$A" && mkdir -p "$A/usr/lib/remodroid" "$A/usr/bin" "$A/usr/share/applications"
+    cp "$DIR/libremodroid.so" "$A/usr/lib/remodroid/"
+    cp "$DIR/remodroid-desktop" "$DIR/remodroid-desktopd" "$A/usr/bin/"
+    cp -r "$DIR/icons" "$A/usr/share/icons"
+    cp packaging/desktop/remodroid-desktop.desktop "$A/usr/share/applications/"
+    cp packaging/desktop/remodroid-desktop.desktop "$DIR/icons/256x256/apps/remodroid.png" "$A/"
+    install -m 0755 packaging/desktop/AppRun "$A/AppRun"
+    ARCH=$ARCH appimagetool --no-appstream --runtime-file "$APPIMAGE_RUNTIME/runtime-$ARCH" \
+        "$A" "$OUT/RemoDroid-$VERSION-linux-$ARCH.AppImage"
     ;;
 windows)
     T=RemoDroid-$VERSION-windows-$ARCH

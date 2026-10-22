@@ -277,7 +277,9 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
 
 - **Windows**: unzip and run `RemoDroid.exe`. **macOS**: move `RemoDroid.app` to Applications, open it
   (the first time: right-click → Open), and allow **Screen Recording** and **Accessibility** when asked.
-  **Linux**: install the `.deb` / `.rpm` and start *RemoDroid* from the app menu.
+  **Linux**: install the `.deb` / `.rpm` and start *RemoDroid* from the app menu. On other distributions take the
+  `.AppImage`: `chmod +x` it and run it (`./RemoDroid-*.AppImage desktopd …` is the headless agent). It uses the
+  system's GTK 3 and X11 libraries, which every desktop already has.
 - No screen or no tray? Run the same line in a terminal (`remodroid-desktopd pair --panel … --code …`), then run
   `remodroid-desktopd` (a systemd user unit comes with the Linux packages).
 - Settings are in `desktop.ini` (`%APPDATA%\RemoDroid`, `~/Library/Application Support/RemoDroid`,

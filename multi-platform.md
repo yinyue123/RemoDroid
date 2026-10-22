@@ -596,7 +596,7 @@ against the distribution's X11/GTK development packages.
 |---|---|
 | Windows | `RemoDroid-<ver>-windows-x86_64.zip` / `-arm64.zip` (exe + dll). An installer can follow (§13.4) |
 | macOS | `RemoDroid-<ver>-macos.zip` (`RemoDroid.app`, universal2, dylib in `Contents/Frameworks`, ad-hoc signed) |
-| Linux | `.deb`, `.rpm` (nfpm, as today, with dependencies on the GTK/X11 runtime packages), `.tar.gz`; a `.desktop` file, icon, systemd user unit for `remodroid-desktopd` |
+| Linux | `.deb`, `.rpm` (nfpm, as today, with dependencies on the GTK/X11 runtime packages), `.tar.gz`, `.AppImage` (appimagetool; the system GTK/X11 libraries, not bundled); a `.desktop` file, icon, systemd user unit for `remodroid-desktopd` |
 
 `doc/downloads.py` gains a Desktop grid next to the router and server grids, and the README grids are
 regenerated after each release (as for the router packages).

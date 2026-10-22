@@ -61,15 +61,21 @@ static void set_login(int on)
 {
     char *p = autostart_path();
     if (on) {
-        char exe[4096];
-        ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
-        exe[n > 0 ? n : 0] = 0;
+        /* in an AppImage /proc/self/exe is inside its mount, gone after logout; $APPIMAGE is the file itself */
+        char exe[4096] = "";
+        const char *ai = getenv("APPIMAGE");
+        if (ai && *ai) {
+            g_strlcpy(exe, ai, sizeof exe);
+        } else {
+            ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+            exe[n > 0 ? n : 0] = 0;
+        }
         char *dir = g_path_get_dirname(p);
         g_mkdir_with_parents(dir, 0700);
         g_free(dir);
         char *body = g_strdup_printf("[Desktop Entry]\nType=Application\nName=RemoDroid\nComment=Remote control of this "
                                      "computer\nExec=\"%s\" --background\nIcon=remodroid\nX-GNOME-Autostart-enabled=true\n",
-                                     n > 0 ? exe : "remodroid-desktop");
+                                     exe[0] ? exe : "remodroid-desktop");
         g_file_set_contents(p, body, -1, NULL);
         g_free(body);
     } else {

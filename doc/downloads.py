@@ -77,7 +77,8 @@ def desktop_grid(names, ver):
         return '<br>'.join(bs) or '—'
     linux = lambda deb, rpm, tar: cell((f'remodroid-desktop_{ver}-1_{deb}.deb', 'deb', f'desktop .deb {tar}'),
                                        (f'remodroid-desktop-{ver}-1.{rpm}.rpm', 'rpm', f'desktop .rpm {tar}'),
-                                       (f'remodroid-desktop-{ver}-linux-{tar}.tar.gz', 'tar', f'desktop .tar.gz {tar}'))
+                                       (f'remodroid-desktop-{ver}-linux-{tar}.tar.gz', 'tar', f'desktop .tar.gz {tar}'),
+                                       (f'RemoDroid-{ver}-linux-{tar}.AppImage', 'appimage', f'desktop .AppImage {tar}'))
     mac = cell((f'RemoDroid-{ver}-macos.zip', 'zip', 'macOS .zip (Apple silicon and Intel)'))
     return '\n'.join([
         '| Computer | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Apple silicon, Snapdragon…</sub> |', '|:--|:-:|:-:|',
