@@ -1248,52 +1248,54 @@ const PAD_UI = [
   ['btn', 16, '◉', 'sm', 'right:2.5%;top:5%'], ['btn', 9, '☰', 'sm', 'right:2.5%;top:20%'], ['btn', 5, 'RB', 'sq', 'right:2.5%;top:38%'],
   ['btn', 11, 'RS', 'sm', 'right:2.5%;bottom:5%'], ['btn', 7, 'RT', 'sq', 'right:15%;top:5%'], ['stick', 'r', '', 'r', 'right:33%;bottom:5%'],
   ['face', 0, '', '', 'right:12%;bottom:6%']];
+/* Each finger on a control is followed by its pointer id at the window, so a thumb that slides off a
+ * stick or button still moves and lets go of it, with or without pointer capture. */
+const padFingers = new Map(); /* pointerId → { move(e), up() } */
+function padGrab(e, el, move, up) {
+  e.preventDefault(); e.stopPropagation();
+  try { el.setPointerCapture(e.pointerId); } catch (_) {}
+  padFingers.set(e.pointerId, { move, up });
+}
+window.addEventListener('pointermove', e => { const f = padFingers.get(e.pointerId); if (f && f.move) f.move(e); }, true);
+for (const t of ['pointerup', 'pointercancel'])
+  window.addEventListener(t, e => { const f = padFingers.get(e.pointerId); if (f) { padFingers.delete(e.pointerId); f.up(); } }, true);
 function padButton(bit, label, cls, style) {
   const b = el('div', { class: 'gc ' + cls, text: label, style });
-  const off = () => { b.classList.remove('down'); padBit(bit, false); };
   b.addEventListener('pointerdown', e => {
-    e.preventDefault(); e.stopPropagation();
-    try { b.setPointerCapture(e.pointerId); } catch (_) {}
+    padGrab(e, b, null, () => { b.classList.remove('down'); padBit(bit, false); });
     b.classList.add('down'); padBit(bit, true);
   });
-  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(t, off);
   return b;
 }
 /* a stick centres where the thumb lands, so it never jumps; the knob follows up to the rim */
 function padStick(side, cls, style) {
   const s = el('div', { class: 'gc stick ' + cls, style }), knob = el('i');
   s.append(knob);
-  let id = null, ox = 0, oy = 0;
+  let held = false;
   const set = (x, y) => { PAD.touch[side + 'x'] = Math.round(x * 32767); PAD.touch[side + 'y'] = Math.round(y * 32767); };
   s.addEventListener('pointerdown', e => {
-    e.preventDefault(); e.stopPropagation();
-    if (id !== null) return;
-    try { s.setPointerCapture(e.pointerId); } catch (_) {}
-    id = e.pointerId; ox = e.clientX; oy = e.clientY;
+    if (held) { e.preventDefault(); e.stopPropagation(); return; }
+    held = true;
+    const ox = e.clientX, oy = e.clientY;
+    padGrab(e, s, m => {
+      const R = s.offsetWidth / 2;
+      let x = (m.clientX - ox) / R, y = (m.clientY - oy) / R;
+      const r = Math.hypot(x, y);
+      if (r > 1) { x /= r; y /= r; }
+      knob.style.transform = `translate(${x * R * .6}px,${y * R * .6}px)`;
+      set(x, y); padSoon();
+    }, () => {
+      held = false; knob.style.transform = ''; s.classList.remove('down');
+      set(0, 0); padFlush();
+    });
     s.classList.add('down');
   });
-  s.addEventListener('pointermove', e => {
-    if (e.pointerId !== id) return;
-    const R = s.offsetWidth / 2;
-    let x = (e.clientX - ox) / R, y = (e.clientY - oy) / R;
-    const m = Math.hypot(x, y);
-    if (m > 1) { x /= m; y /= m; }
-    knob.style.transform = `translate(${x * R * .6}px,${y * R * .6}px)`;
-    set(x, y); padSoon();
-  });
-  const up = e => {
-    if (e.pointerId !== id) return;
-    id = null; knob.style.transform = ''; s.classList.remove('down');
-    set(0, 0); padFlush();
-  };
-  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) s.addEventListener(t, up);
   return s;
 }
 /* the D-pad: one touch area, so a thumb can roll between directions (and diagonals) */
 function padDpad(style) {
   const d = el('div', { class: 'gc dpad', style }), parts = {};
   for (const [k, t] of [['u', '▲'], ['d', '▼'], ['l', '◀'], ['r', '▶']]) d.append(parts[k] = el('span', { class: k, text: t }));
-  let id = null;
   const aim = e => {
     const r = d.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
     const on = { u: y < -.12, d: y > .12, l: x < -.12, r: x > .12 };
@@ -1301,14 +1303,13 @@ function padDpad(style) {
     [['u', 12], ['d', 13], ['l', 14], ['r', 15]].forEach(([k, bit]) => { parts[k].classList.toggle('down', on[k]); if (on[k]) b |= 1 << bit; });
     PAD.touch.buttons = b >>> 0; padFlush();
   };
-  d.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); try { d.setPointerCapture(e.pointerId); } catch (_) {} id = e.pointerId; aim(e); });
-  d.addEventListener('pointermove', e => { if (e.pointerId === id) aim(e); });
-  const up = e => {
-    if (e.pointerId !== id) return;
-    id = null; Object.values(parts).forEach(p => p.classList.remove('down'));
-    PAD.touch.buttons = (PAD.touch.buttons & ~0xF000) >>> 0; padFlush();
-  };
-  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) d.addEventListener(t, up);
+  d.addEventListener('pointerdown', e => {
+    padGrab(e, d, aim, () => {
+      Object.values(parts).forEach(p => p.classList.remove('down'));
+      PAD.touch.buttons = (PAD.touch.buttons & ~0xF000) >>> 0; padFlush();
+    });
+    aim(e);
+  });
   return d;
 }
 function renderGpad() {
@@ -1331,6 +1332,8 @@ function renderGpad() {
   gpad.append(x);
 }
 function padRest() { /* fingers off: nothing on the touch pad is held */
+  for (const f of padFingers.values()) f.up();
+  padFingers.clear();
   PAD.touch = { buttons: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
   gpad.querySelectorAll('.down').forEach(e => e.classList.remove('down'));
   gpad.querySelectorAll('.stick i').forEach(k => { k.style.transform = ''; });
