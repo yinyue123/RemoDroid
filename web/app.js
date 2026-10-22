@@ -782,7 +782,7 @@ async function tickStats() {
       `rtt <b>${l.rtt ?? p.rtt_ms ?? '—'}</b> ms · jb <b>${l.jbMs ?? '—'}</b> ms · lost <b>${l.lost ?? 0}</b><br>` +
       `${codecLabel()} · ${l.size || '—'} · ${S.mode} <span class="dim">${p.target_kbps ? '→ ' + (p.target_kbps / 1000).toFixed(1) + ' Mbps' : ''}</span><br>` +
       `<span class="dim">webrtc</span> <span class="rtc">${l.route ? l.route.mode : '—'}</span>${l.route ? ` ${l.route.proto} <span class="dim">${l.route.local}→${l.route.remote}</span>` : ''}<br>` +
-      `<span class="dim">decoder</span> ${dec} ${l.decMs ? l.decMs + ' ms' : ''} · <span class="dim">usb</span> ${p.path || '—'}${st.hasAudio ? ` · <span class="dim">sound</span> ${p.audio ? (video.muted ? 'muted' : 'on') : 'off'}` : ''}<br>` +
+      `<span class="dim">decoder</span> ${dec} ${l.decMs ? l.decMs + ' ms' : ''}${desk() ? '' : ` · <span class="dim">usb</span> ${p.path || '—'}`}${st.hasAudio ? ` · <span class="dim">sound</span> ${p.audio ? (video.muted ? 'muted' : 'on') : 'off'}` : ''}<br>` +
       `<span class="dim">panel</span> ${st.panel} · <span class="dim">input</span> ${st.inputs}<span class="hex">${st.lastHex}</span>`;
   }
   $('#chipText').textContent = st.device ? `${st.device.name}${l.rtt != null ? ' · ' + l.rtt + ' ms' : ''}` : (DEMO ? 'demo' : 'no device');
