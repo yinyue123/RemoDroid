@@ -95,6 +95,7 @@ body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, 
   border:2px solid rgba(255,255,255,.82);border-radius:50%;background:rgba(0,0,0,.2);color:#fff;font:700 calc(var(--u)*4.4)/1 var(--sans);
   text-shadow:0 1px 2px rgba(0,0,0,.7);box-shadow:0 0 0 1px rgba(0,0,0,.25);transition:background .05s}
 .gpad .gc.sm{width:calc(var(--u)*10);height:calc(var(--u)*10);font-size:calc(var(--u)*4)}
+.gpad .gc.lg{width:calc(var(--u)*19);height:calc(var(--u)*19);font-size:calc(var(--u)*6)}
 .gpad .gc.sq{border-radius:calc(var(--u)*3)}
 .gpad .gc.down,.gpad .dpad span.down{background:rgba(255,255,255,.42)}
 .gpad .stick{width:calc(var(--u)*36);height:calc(var(--u)*36);background:rgba(0,0,0,.12)}
@@ -109,7 +110,21 @@ body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, 
 .gpad .dpad .r{right:0;top:33.3%;border-radius:0 calc(var(--u)*2) calc(var(--u)*2) 0}
 .gpad .face{position:absolute;width:calc(var(--u)*38);height:calc(var(--u)*38);pointer-events:none}
 .gpad .face .gc{transform:translate(-50%,-50%)}
-.gpad .x{left:50%;top:calc(var(--u)*5);transform:translateX(-50%)}
+.gpad .x{left:calc(50% + var(--u)*13);top:calc(var(--u)*5);transform:translateX(-50%)}
+.gpad .cfg{left:calc(50% - var(--u)*13);top:calc(var(--u)*5);transform:translateX(-50%)}
+/* see-through buttons (⚙ → Buttons); a pressed one shows fully */
+.gpad .gc{opacity:var(--ga,.5)}
+.gpad .gc.down,.gpad .dpad:has(span.down){opacity:1}
+.gpad .face{opacity:1}
+.gset{position:absolute;left:50%;top:calc(var(--u)*17);transform:translateX(-50%);width:min(420px,86vw);max-height:calc(100% - var(--u)*19);overflow:auto;
+  pointer-events:auto;padding:10px 12px;border-radius:16px;background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  box-shadow:0 10px 30px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--text);touch-action:auto}
+.gset .row{display:grid;grid-template-columns:7.5em 1fr 3.2em;align-items:center;gap:8px;color:var(--muted)}
+.gset .row .val{color:var(--text);font-family:var(--mono);text-align:right}
+.gset .btns{display:flex;gap:6px;margin:2px 0}
+.gset .btns .btn{flex:1 1 0;min-height:34px;padding:0 8px;font-size:13px}
+/* while the gamepad is up, the floating ball waits at the top centre, clear of every layout */
+body.gpad-on #ball{left:calc(50% - 29px)!important;top:calc(env(safe-area-inset-top,0px) + 4px)!important;transform:scale(.8)}
 .menu{position:fixed;z-index:31;width:min(320px,calc(100vw - 24px));padding:10px;border-radius:24px;background:var(--glass);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);
   display:grid;grid-template-columns:repeat(4,1fr);gap:2px;animation:pop .16s ease-out}

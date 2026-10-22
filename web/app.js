@@ -279,28 +279,41 @@ async function onSignal(d) {
   const pc = st.pc;
   if (!pc) return;
   if (d.type === 'offer') {
-    await pc.setRemoteDescription({ type: 'offer', sdp: d.sdp });
-    preferCodecs(pc);
-    const ans = await pc.createAnswer();
-    await pc.setLocalDescription(ans);
-    wsSend({ t: 'signal', d: { type: 'answer', sdp: pc.localDescription.sdp } });
+    try {
+      await pc.setRemoteDescription({ type: 'offer', sdp: d.sdp });
+      preferCodecs(pc, d.sdp);
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+      wsSend({ t: 'signal', d: { type: 'answer', sdp: pc.localDescription.sdp } });
+    } catch (e) { /* say so instead of "Connecting…" forever */
+      logProto('·', 'note', 'answer failed: ' + e.message);
+      setOverlay('Can\'t connect', `This browser couldn't answer the ${noun()}'s offer: ${e.message}`, true);
+    }
   } else if (d.type === 'candidate') {
     try { await pc.addIceCandidate(d.candidate ? { candidate: d.candidate, sdpMid: d.sdpMid || '0', sdpMLineIndex: d.sdpMLineIndex || 0 } : null); }
     catch (e) { logProto('·', 'note', 'candidate rejected: ' + e.message); }
   }
 }
-/* Keep H.265 only if this iPhone decodes it in hardware (§5.6), or honor a manual choice. */
-function preferCodecs(pc) {
+/* Keep H.265 only if this iPhone decodes it in hardware (§5.6), or honor a manual choice, among the
+ * codecs the offer has: asking for one it lacks (H.265 from a computer without a hardware encoder)
+ * leaves no video codec, and Safari then can't answer at all. */
+function preferCodecs(pc, sdp) {
   const tr = pc.getTransceivers().find(t => t.receiver.track && t.receiver.track.kind === 'video');
   if (!tr || !tr.setCodecPreferences || !RTCRtpReceiver.getCapabilities) return;
   try {
     const caps = RTCRtpReceiver.getCapabilities('video').codecs;
-    const want = S.codec === 'h264' ? ['video/H264'] : S.codec === 'h265' ? ['video/H265'] :
-      (st.hw.h265 === false ? ['video/H264'] : ['video/H265', 'video/H264']);
+    const offered = m => new RegExp('a=rtpmap:\\d+ ' + m.slice(6) + '/', 'i').test(sdp || '');
+    let want = (S.codec === 'h264' ? ['video/H264'] : S.codec === 'h265' ? ['video/H265'] :
+      (st.hw.h265 === false ? ['video/H264'] : ['video/H265', 'video/H264'])).filter(offered);
+    if (!want.length) {
+      want = ['video/H265', 'video/H264'].filter(offered);
+      if (S.codec !== 'auto') toast(`The ${noun()} doesn't send ${S.codec === 'h265' ? 'H.265' : 'H.264'}; using ${want[0] === 'video/H265' ? 'H.265' : 'H.264'}`);
+    }
     const pick = [];
     for (const w of want) pick.push(...caps.filter(c => c.mimeType === w));
+    if (!pick.length) return;
     pick.push(...caps.filter(c => c.mimeType === 'video/rtx'));
-    if (pick.length) tr.setCodecPreferences(pick);
+    tr.setCodecPreferences(pick);
   } catch (e) { logProto('·', 'note', 'setCodecPreferences: ' + e.message); }
 }
 function closePeer() {
@@ -412,6 +425,12 @@ function fitStage(ins) {
 }
 /* In the Home Screen app the picture fills the whole screen, under the status bar and the home
  * indicator, like a full-screen app. In Safari it stays inside the safe area, clear of the toolbars. */
+/* the picture's zoom, per device: z 1..3, and the point of the picture (x, y 0..1) kept in the middle */
+const viewOf = () => Object.assign({ z: 1, x: .5, y: .5 }, (S.view || {})[(st.device && st.device.id) || '-']);
+function setView(v) {
+  S.view = Object.assign({}, S.view, { [(st.device && st.device.id) || '-']: v });
+  save(); layout();
+}
 function layout() {
   const safe = bounds();
   fitStage(safe);
@@ -420,10 +439,14 @@ function layout() {
   let w, h;
   if (DEMO) { w = cv.width; h = cv.height; }
   else { w = video.videoWidth || st.screen.w || 9; h = video.videoHeight || st.screen.h || 20; }
-  const sc = Math.min(W / w, H / h), cw = Math.floor(w * sc), ch = Math.floor(h * sc);
+  const sc = Math.min(W / w, H / h), v = viewOf();
+  /* zoomed (Gamepad → ⚙): bigger than the screen, the picture slides so v.x, v.y sits in the middle */
+  const cw = Math.floor(w * sc * v.z), ch = Math.floor(h * sc * v.z);
+  const at = (room, size, f) => size <= room ? (room - size) / 2 : clamp(room / 2 - f * size, room - size, 0);
+  st.fill = Math.max(W / (w * sc), H / (h * sc)); /* the zoom that just fills the screen */
   for (const e of [video, cv]) {
     e.style.width = cw + 'px'; e.style.height = ch + 'px';
-    e.style.left = Math.floor(ins.l + (W - cw) / 2) + 'px'; e.style.top = Math.floor(ins.t + (H - ch) / 2) + 'px';
+    e.style.left = Math.floor(ins.l + at(W, cw, v.x)) + 'px'; e.style.top = Math.floor(ins.t + at(H, ch, v.y)) + 'px';
   }
   if (S.lc) layoutCheck(true);
 }
@@ -1241,13 +1264,38 @@ function padBit(bit, on) {
   PAD.touch.buttons = on ? (PAD.touch.buttons | 1 << bit) >>> 0 : (PAD.touch.buttons & ~(1 << bit)) >>> 0;
   padFlush();
 }
-/* the layout: Steam Link's, for a phone held sideways (left: view, LB, LS, LT, D-pad, stick) */
-const PAD_UI = [
-  ['btn', 8, '⧉', 'sm', 'left:2.5%;top:5%'], ['btn', 4, 'LB', 'sq', 'left:2.5%;top:38%'], ['btn', 10, 'LS', 'sm', 'left:2.5%;bottom:5%'],
-  ['btn', 6, 'LT', 'sq', 'left:15%;top:5%'], ['dpad', 0, '', '', 'left:13%;top:22%'], ['stick', 'l', '', '', 'left:12%;bottom:5%'],
-  ['btn', 16, '◉', 'sm', 'right:2.5%;top:5%'], ['btn', 9, '☰', 'sm', 'right:2.5%;top:20%'], ['btn', 5, 'RB', 'sq', 'right:2.5%;top:38%'],
-  ['btn', 11, 'RS', 'sm', 'right:2.5%;bottom:5%'], ['btn', 7, 'RT', 'sq', 'right:15%;top:5%'], ['stick', 'r', '', 'r', 'right:33%;bottom:5%'],
-  ['face', 0, '', '', 'right:12%;bottom:6%']];
+/* the layouts (⚙ → Layout), for a phone held sideways: [kind, button bit / stick side, label, class, place];
+ * 'face' is A, B, X, Y in a diamond. Steam Link's is the default. */
+const XB = { 0: '#5CD08D', 1: '#F0605A', 2: '#5AA9F0', 3: '#F5C542' }; /* A B X Y */
+const fb = (bit, label, cls, place) => ['btn', bit, label, cls, `${place};color:${XB[bit]}`];
+const PAD_LAYOUTS = {
+  steam: ['Steam Link', [
+    ['btn', 8, '⧉', 'sm', 'left:2.5%;top:5%'], ['btn', 4, 'LB', 'sq', 'left:2.5%;top:38%'], ['btn', 10, 'LS', 'sm', 'left:2.5%;bottom:5%'],
+    ['btn', 6, 'LT', 'sq', 'left:15%;top:5%'], ['dpad', 0, '', '', 'left:13%;top:22%'], ['stick', 'l', '', '', 'left:12%;bottom:5%'],
+    ['btn', 16, '◉', 'sm', 'right:2.5%;top:5%'], ['btn', 9, '☰', 'sm', 'right:2.5%;top:20%'], ['btn', 5, 'RB', 'sq', 'right:2.5%;top:38%'],
+    ['btn', 11, 'RS', 'sm', 'right:2.5%;bottom:5%'], ['btn', 7, 'RT', 'sq', 'right:15%;top:5%'], ['stick', 'r', '', 'r', 'right:33%;bottom:5%'],
+    ['face', 0, '', '', 'right:12%;bottom:6%']]],
+  simple: ['Simple', [
+    ['btn', 8, '⧉', 'sm', 'left:2.5%;top:5%'], ['btn', 9, '☰', 'sm', 'right:2.5%;top:5%'],
+    ['btn', 4, 'LB', 'sq', 'left:2.5%;top:36%'], ['btn', 5, 'RB', 'sq', 'right:2.5%;top:36%'],
+    ['stick', 'l', '', '', 'left:9%;bottom:6%'], ['face', 0, '', '', 'right:9%;bottom:6%']]],
+  shooter: ['Shooter', [
+    ['btn', 8, '⧉', 'sm', 'left:2.5%;top:5%'], ['btn', 9, '☰', 'sm', 'right:2.5%;top:5%'],
+    ['btn', 6, 'LT', 'sq', 'left:15%;top:5%'], ['btn', 4, 'LB', 'sq', 'left:2.5%;top:36%'], ['btn', 10, 'LS', 'sm', 'left:2.5%;bottom:5%'],
+    ['stick', 'l', '', '', 'left:10%;bottom:5%'], ['btn', 5, 'RB', 'sq', 'right:15%;top:5%'],
+    ['btn', 7, 'RT', 'lg', 'right:4%;top:28%'], ['btn', 11, 'RS', 'sm', 'right:19%;top:31%'],
+    ['stick', 'r', '', 'r', 'right:25%;bottom:5%'],
+    fb(3, 'Y', '', 'right:13%;bottom:24%'), fb(2, 'X', '', 'right:13%;bottom:4%'),
+    fb(1, 'B', '', 'right:3%;bottom:24%'), fb(0, 'A', '', 'right:3%;bottom:4%')]],
+  racing: ['Racing', [
+    ['btn', 8, '⧉', 'sm', 'left:2.5%;top:5%'], ['btn', 9, '☰', 'sm', 'right:2.5%;top:5%'],
+    ['btn', 4, 'LB', 'sq', 'left:2.5%;top:30%'], ['btn', 5, 'RB', 'sq', 'left:15%;top:30%'],
+    ['stick', 'l', '', '', 'left:8%;bottom:5%'],
+    ['btn', 6, 'LT', 'lg', 'right:24%;bottom:6%'], ['btn', 7, 'RT', 'lg', 'right:4%;bottom:6%'],
+    fb(3, 'Y', '', 'right:16%;top:22%'), fb(2, 'X', '', 'right:28%;top:22%'),
+    fb(1, 'B', '', 'right:4%;top:22%'), fb(0, 'A', '', 'right:16%;top:44%')]],
+};
+const padLayout = () => PAD_LAYOUTS[S.padLayout] ? S.padLayout : 'steam';
 /* Each finger on a control is followed by its pointer id at the window, so a thumb that slides off a
  * stick or button still moves and lets go of it, with or without pointer capture. */
 const padFingers = new Map(); /* pointerId → { move(e), up() } */
@@ -1313,23 +1361,57 @@ function padDpad(style) {
   return d;
 }
 function renderGpad() {
+  padRest();
   gpad.textContent = '';
-  for (const [kind, a, label, cls, style] of PAD_UI) {
+  for (const [kind, a, label, cls, style] of PAD_LAYOUTS[padLayout()][1]) {
     if (kind === 'btn') gpad.append(padButton(a, label, cls, style));
     else if (kind === 'stick') gpad.append(padStick(a, cls, style));
     else if (kind === 'dpad') gpad.append(padDpad(style));
     else { /* A, B, X, Y in a diamond, Xbox colours */
       const f = el('div', { class: 'face', style });
-      for (const [bit, t, c, pos] of [[3, 'Y', '#F5C542', 'left:50%;top:17%'], [2, 'X', '#5AA9F0', 'left:17%;top:50%'],
-        [1, 'B', '#F0605A', 'left:83%;top:50%'], [0, 'A', '#5CD08D', 'left:50%;top:83%']])
-        f.append(padButton(bit, t, '', `${pos};color:${c}`));
+      for (const [bit, t, pos] of [[3, 'Y', 'left:50%;top:17%'], [2, 'X', 'left:17%;top:50%'], [1, 'B', 'left:83%;top:50%'], [0, 'A', 'left:50%;top:83%']])
+        f.append(padButton(bit, t, '', `${pos};color:${XB[bit]}`));
       gpad.append(f);
     }
   }
   const x = el('div', { class: 'gc sm x', text: '×', 'aria-label': 'Hide the gamepad' });
-  x.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); });
+  const cfg = el('div', { class: 'gc sm cfg', text: '⚙', 'aria-label': 'Picture and buttons' });
+  for (const b of [x, cfg]) b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); });
   x.addEventListener('click', hideGpad);
-  gpad.append(x);
+  cfg.addEventListener('click', () => { const p = gpad.querySelector('.gset'); p ? p.remove() : gpad.append(padSettings()); });
+  gpad.append(cfg, x);
+  padAlpha();
+}
+/* ⚙: the picture's zoom and position, and how see-through the buttons are */
+const padAlpha = () => gpad.style.setProperty('--ga', S.padAlpha || .5);
+function padSettings() {
+  const box = el('div', { class: 'gset' });
+  box.addEventListener('pointerdown', e => e.stopPropagation());
+  const v = viewOf();
+  const slider = (label, min, max, step, val, fmt, on) => {
+    const out = el('span', { class: 'val', text: fmt(val) });
+    const r = el('input', { type: 'range', min, max, step, 'aria-label': label });
+    r.value = val;
+    r.addEventListener('input', () => { out.textContent = fmt(+r.value); on(+r.value); });
+    return [el('div', { class: 'row' }, el('span', { text: label }), r, out)];
+  };
+  const pct = n => Math.round(n * 100) + '%';
+  const zoom = slider('Zoom', 1, 3, .05, v.z, pct, z => setView(Object.assign(viewOf(), { z })));
+  const px = slider('Left · right', 0, 1, .01, v.x, pct, x => setView(Object.assign(viewOf(), { x })));
+  const py = slider('Up · down', 0, 1, .01, v.y, pct, y => setView(Object.assign(viewOf(), { y })));
+  const alpha = slider('Buttons', .2, 1, .05, S.padAlpha || .5, pct, a => { S.padAlpha = a; save(); padAlpha(); });
+  const redo = () => { box.replaceWith(padSettings()); };
+  const pick = el('div', { class: 'btns seg', role: 'group', 'aria-label': 'Layout' },
+    ...Object.entries(PAD_LAYOUTS).map(([k, [name]]) => el('button', {
+      type: 'button', class: 'btn' + (k === padLayout() ? ' primary' : ''), text: name, 'aria-pressed': String(k === padLayout()),
+      onclick: () => { S.padLayout = k; save(); renderGpad(); gpad.append(padSettings()); } })));
+  box.append(pick, ...zoom, ...px, ...py,
+    el('div', { class: 'btns' },
+      el('button', { type: 'button', class: 'btn', text: 'Fill screen', onclick: () => { setView({ z: clamp(+(st.fill || 1).toFixed(2), 1, 3), x: .5, y: .5 }); redo(); } }),
+      el('button', { type: 'button', class: 'btn', text: 'Reset', onclick: () => { setView({ z: 1, x: .5, y: .5 }); redo(); } }),
+      el('button', { type: 'button', class: 'btn primary', text: 'Done', onclick: () => box.remove() })),
+    ...alpha);
+  return box;
 }
 function padRest() { /* fingers off: nothing on the touch pad is held */
   for (const f of padFingers.values()) f.up();
@@ -1342,10 +1424,11 @@ function showGpad() {
   if (!padOk()) { toast((st.ready && st.ready.caps && st.ready.caps.gamepad_problem) || 'This computer can\'t take a gamepad'); return; }
   renderGpad();
   gpad.hidden = false;
+  document.body.classList.add('gpad-on'); /* the ball moves to the top, between ⚙ and × */
   if (innerHeight > innerWidth) toast('Turn the phone sideways for the gamepad');
   syncMenuStates();
 }
-function hideGpad() { gpad.hidden = true; padRest(); padFlush(); syncMenuStates(); }
+function hideGpad() { gpad.hidden = true; document.body.classList.remove('gpad-on'); padRest(); padFlush(); syncMenuStates(); }
 /* real controllers: read every frame while one is connected (Safari lists a pad after its first press) */
 function padPoll() {
   PAD.poll = 0;

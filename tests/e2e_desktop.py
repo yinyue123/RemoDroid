@@ -447,6 +447,18 @@ notify = false
                         res["pad_pointers"] = await tp.evaluate("(window.__ptrLog || []).slice(-8)")
                 else:
                     res["pad"] = {"device": bool(node), "events": "not readable here"}
+                # ⚙ → Fill screen: the picture covers the sideways phone, and a tap still lands where it shows
+                await tp.locator("#gpad .cfg").tap()
+                await tp.get_by_role("button", name="Fill screen").tap()
+                await tp.get_by_role("button", name="Done").tap()
+                vb = await tp.locator("#video").bounding_box()
+                res["zoom_fills"] = bool(vb and vb["x"] <= 0 and vb["y"] <= 0 and vb["x"] + vb["width"] >= 843 and vb["y"] + vb["height"] >= 389)
+                probe.drain()
+                await touch("touchStart", [{"x": 422, "y": 195}])
+                await touch("touchEnd", [])
+                ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == 1 and e["down"] == 1)
+                want = (round((422 - vb["x"]) / vb["width"] * 1280), round((195 - vb["y"]) / vb["height"] * 720))
+                res["zoom_tap_ok"] = bool(ev and abs(ev["x"] - want[0]) <= 6 and abs(ev["y"] - want[1]) <= 6)
             else:
                 res["pad"] = "skipped (no /dev/uinput)"
             await tctx.close()
@@ -480,6 +492,7 @@ notify = false
               and res.get("fkb_fits") and res.get("fkb") == ["h", "I", "1", "BackSpace", "c+ctrl"]
               and (not pads or res.get("pad") == {"device": True, "b": True, "stick_right": True, "stick_back": True}
                    or (not os.environ.get("CI") and res.get("pad") == {"device": True, "events": "not readable here"}))
+              and (not pads or (res.get("zoom_fills") and res.get("zoom_tap_ok")))
               and res.get("mac_ctrl_c") == {"state": 4, "ctrl": True, "super": False}
               and res.get("mac_cmd_c") == {"state": 4, "ctrl": True, "super": False}
               and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))
