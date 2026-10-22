@@ -336,7 +336,11 @@ notify = false
                 RTCDataChannel.prototype.send = function (d) {
                   if (d instanceof Uint8Array && d[0] === 6) { const v = new DataView(d.buffer, d.byteOffset);
                     window.__padLog.push([performance.now() | 0, v.getUint32(2), v.getInt16(6), v.getInt16(8), this.readyState]); }
-                  return send.call(this, d); };""")
+                  return send.call(this, d); };
+                window.__ptrLog = [];
+                for (const t of ['pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture', 'touchend', 'touchcancel'])
+                  window.addEventListener(t, e => window.__ptrLog.push([performance.now() | 0, t, e.pointerId, e.pointerType,
+                    e.clientX | 0, e.target && e.target.className]), true);""")
             tp = await tctx.new_page()
             tp.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
             await tp.goto(f"http://127.0.0.1:{http_port}/")
@@ -437,6 +441,7 @@ notify = false
                     if not all(res["pad"].values()):  # what arrived, for the log
                         res["pad_events"] = [e for e in evs if e[0] != 0][-16:]
                         res["pad_sent"] = await tp.evaluate("window.__padLog || null")
+                        res["pad_pointers"] = await tp.evaluate("(window.__ptrLog || []).slice(-8)")
                 else:
                     res["pad"] = {"device": bool(node), "events": "not readable here"}
             else:
