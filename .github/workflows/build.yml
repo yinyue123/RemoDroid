@@ -161,6 +161,12 @@ jobs:
           python3 -m pip install --quiet playwright
           python3 -m playwright install --with-deps chromium-headless-shell
           sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils >/dev/null  # the sound check
+          # the gamepad check: the agent creates a virtual Xbox pad (uinput) and the test reads its events
+          sudo modprobe uinput
+          printf '%s\n' 'KERNEL=="uinput", MODE="0666"' \
+            'SUBSYSTEM=="input", ATTRS{name}=="Microsoft X-Box 360 pad", MODE="0666"' | sudo tee /etc/udev/rules.d/99-e2e-pad.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo chmod 666 /dev/uinput
           python3 tests/e2e_desktop.py --bin build/host
       - uses: actions/upload-artifact@v5
         with:

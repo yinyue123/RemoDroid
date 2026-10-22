@@ -294,6 +294,11 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   drag with one finger, scroll with two. **Keyboard** opens a floating on-screen keyboard for an iPad or iPhone
   (drag it by its grip; tap **ctrl** then **c** for Ctrl+C), its **⋯** sends text and shortcuts, and **Next screen**
   switches monitors.
+- **Games on a computer** (Linux, e.g. a Steam Deck in Desktop Mode): **Gamepad** puts touch controls over the
+  picture, laid out like Steam Link's (sticks, D-pad, A/B/X/Y, bumpers, triggers); hold the phone sideways.
+  Controllers paired with the iPhone or iPad (Joy-Con, DualSense, Xbox) work too; Safari exposes them only on an
+  HTTPS page. Each becomes a virtual Xbox 360 pad on the computer, which needs a writable `/dev/uinput`: SteamOS
+  has it, elsewhere install Steam's udev rules (`steam-devices`).
 - **Sound** comes from the phone (Android 12+) and its own speaker goes quiet while you're connected. Tap the
   picture once to unmute it in Safari; the menu's **Sound** switch hands it back to the phone.
 - **Update** the server or router later with one command. It updates whichever parts are installed to the latest

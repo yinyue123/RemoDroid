@@ -87,6 +87,29 @@ body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, 
 .fkb .k.on{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 .fkb .k.down{background:var(--line);transform:scale(1.08)}
 @media (max-height:500px){.fkb .k{height:31px}} /* iPhone in landscape */
+/* ---------- on-screen gamepad (computers: games, from a phone held sideways) ---------- */
+.gpad{position:fixed;z-index:28;top:env(safe-area-inset-top,0px);right:env(safe-area-inset-right,0px);bottom:env(safe-area-inset-bottom,0px);
+  left:env(safe-area-inset-left,0px);pointer-events:none;--u:min(1vmin,5px); /* sized for a phone; capped on an iPad */
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.gpad .gc{position:absolute;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;width:calc(var(--u)*13);height:calc(var(--u)*13);
+  border:2px solid rgba(255,255,255,.82);border-radius:50%;background:rgba(0,0,0,.2);color:#fff;font:700 calc(var(--u)*4.4)/1 var(--sans);
+  text-shadow:0 1px 2px rgba(0,0,0,.7);box-shadow:0 0 0 1px rgba(0,0,0,.25);transition:background .05s}
+.gpad .gc.sm{width:calc(var(--u)*10);height:calc(var(--u)*10);font-size:calc(var(--u)*4)}
+.gpad .gc.sq{border-radius:calc(var(--u)*3)}
+.gpad .gc.down,.gpad .dpad span.down{background:rgba(255,255,255,.42)}
+.gpad .stick{width:calc(var(--u)*36);height:calc(var(--u)*36);background:rgba(0,0,0,.12)}
+.gpad .stick.r{width:calc(var(--u)*28);height:calc(var(--u)*28)}
+.gpad .stick i{position:absolute;left:50%;top:50%;width:40%;height:40%;margin:-20% 0 0 -20%;border-radius:50%;border:2px solid #fff;background:rgba(255,255,255,.35);pointer-events:none}
+.gpad .dpad{width:calc(var(--u)*30);height:calc(var(--u)*30);border:0;border-radius:0;background:none;box-shadow:none}
+.gpad .dpad span{position:absolute;width:33.4%;height:33.4%;border:2px solid rgba(255,255,255,.82);background:rgba(0,0,0,.2);pointer-events:none;
+  display:flex;align-items:center;justify-content:center;font-size:calc(var(--u)*3.6)}
+.gpad .dpad .u{left:33.3%;top:0;border-radius:calc(var(--u)*2) calc(var(--u)*2) 0 0}
+.gpad .dpad .d{left:33.3%;bottom:0;border-radius:0 0 calc(var(--u)*2) calc(var(--u)*2)}
+.gpad .dpad .l{left:0;top:33.3%;border-radius:calc(var(--u)*2) 0 0 calc(var(--u)*2)}
+.gpad .dpad .r{right:0;top:33.3%;border-radius:0 calc(var(--u)*2) calc(var(--u)*2) 0}
+.gpad .face{position:absolute;width:calc(var(--u)*38);height:calc(var(--u)*38);pointer-events:none}
+.gpad .face .gc{transform:translate(-50%,-50%)}
+.gpad .x{left:50%;top:calc(var(--u)*5);transform:translateX(-50%)}
 .menu{position:fixed;z-index:31;width:min(320px,calc(100vw - 24px));padding:10px;border-radius:24px;background:var(--glass);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);
   display:grid;grid-template-columns:repeat(4,1fr);gap:2px;animation:pop .16s ease-out}

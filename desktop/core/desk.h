@@ -86,6 +86,21 @@ void dsk_mouse_scroll(double dx, double dy);                       /* notches; d
 void dsk_key(int hid, int down);                                   /* USB HID usage (keyboard page) */
 void dsk_text(const char *utf8);
 
+/* ---- gamepads: virtual Xbox 360 pads the computer's games see (agent thread); optional ---- */
+/* Buttons in the W3C standard-gamepad order: bit 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 View/Back,
+ * 9 Menu/Start, 10 left stick, 11 right stick, 12 up, 13 down, 14 left, 15 right, 16 Guide. Sticks
+ * -32767..32767 with y down positive; triggers 0..255. */
+typedef struct {
+    uint32_t buttons;
+    int16_t lx, ly, rx, ry;
+    uint8_t lt, rt;
+} dsk_pad_t;
+#define DSK_MAX_PADS 4
+int  dsk_pad_supported(char *why, size_t cap); /* 1, or 0 with the reason */
+int  dsk_pad_open(int index);                  /* 0, or -1 */
+void dsk_pad_update(int index, const dsk_pad_t *p);
+void dsk_pad_close(int index);
+
 /* ---- clipboard (agent thread) ---- */
 unsigned long dsk_clip_seq(void);  /* changes whenever the clipboard does */
 char         *dsk_clip_get(void);  /* UTF-8 text or NULL; caller frees */
@@ -142,6 +157,7 @@ void session_tick(void);      /* 1 s: stats, clipboard */
 /* input.c */
 void input_handle(const uint8_t *d, size_t n);
 void input_release_all(void);
+void input_pads_close(void); /* the session ended: unplug the virtual gamepads */
 int  input_events(void);
 
 /* files.c (port of android/java/…/Files.java) */

@@ -243,7 +243,8 @@ the same, so the viewer's HUD, quality sheet, keyboard sheet and file sheet keep
 | new: `screen.select {index}` | switches the captured monitor |
 
 When a session ends, or when the input channel sends reset (0x05), `input.c` releases every key and mouse
-button it is holding. A dropped connection can't leave Ctrl stuck down.
+button it is holding, and centres the virtual gamepads (unplugged at the session's end). A dropped connection
+can't leave Ctrl stuck down.
 
 ### 5.5 Video pipeline (`desktop/core/video.c`)
 
@@ -434,7 +435,22 @@ existing ones:
 0x05 reset (5 bytes)  release every held key and button (viewer lost focus, tab hidden)
   0  u8   0x05
   1  u32  ts
+
+0x06 gamepad (20 bytes)  one virtual pad's whole state; sent when it changes
+  0  u8   0x06
+  1  u8   index       0..3 (pad 1..4)
+  2  u32  buttons     W3C standard-gamepad bits: 0 A · 1 B · 2 X · 3 Y · 4 LB · 5 RB · 6 LT · 7 RT ·
+                      8 View · 9 Menu · 10 LS · 11 RS · 12 up · 13 down · 14 left · 15 right · 16 Guide
+  6  i16  lx, ly, rx, ry   sticks, -32767..32767, y down
+  14 u8   lt, rt      triggers 0..255 (0 with bit 6/7 set = fully pulled)
+  16 u32  ts
 ```
+
+A pad is plugged in on its first 0x06 and unplugged when the session ends; 0x05 centres it. Backends:
+Linux creates a uinput device that is a wired Xbox 360 pad to Steam, SDL and games (`pad_uinput.c`,
+`045e:028e`, the xpad driver's buttons and axes), which needs a writable `/dev/uinput` (Steam's
+`steam-devices` udev rules; SteamOS has them). Windows would need the ViGEmBus driver, and macOS has no
+API for a virtual controller, so both report `caps.gamepad: false` with `caps.gamepad_problem`.
 
 On a desktop, 0x01 touch with pointer 0 maps to left-button down/move/up, which keeps old viewers usable.
 0x02 scroll keeps its units: 1/256 of a "notch" of 100 CSS pixels.

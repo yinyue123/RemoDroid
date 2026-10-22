@@ -32,6 +32,7 @@
 
 <button id="ball" type="button" aria-label="Open RemoDroid menu" aria-haspopup="menu" aria-expanded="false"></button>
 
+<div class="gpad" id="gpad" role="group" aria-label="On-screen gamepad" hidden></div>
 <div class="fkb" id="fkb" role="group" aria-label="On-screen keyboard" hidden>
   <header><span class="grip" aria-hidden="true">⠿⠿</span><span class="ttl">keyboard</span><button type="button" id="fkbMore" aria-label="Shortcuts and text">⋯</button><button type="button" id="fkbHide" aria-label="Hide keyboard">⌄</button></header>
   <div class="rows" id="fkbRows"></div>
@@ -41,6 +42,7 @@
   <button type="button" role="menuitem" data-act="home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>Home</button>
   <button type="button" role="menuitem" data-act="recents"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>Recents</button>
   <button type="button" role="menuitem" data-act="keys"><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/></svg>Keyboard</button>
+  <button type="button" role="menuitem" data-act="gamepad" id="menuPad" hidden><svg viewBox="0 0 24 24"><path d="M7.2 8.5h9.6a4.3 4.3 0 0 1 4.2 5l-.7 3.6a2.2 2.2 0 0 1-3.8 1.1L15 16.5H9l-1.5 1.7a2.2 2.2 0 0 1-3.8-1.1L3 13.5a4.3 4.3 0 0 1 4.2-5z"/><path d="M7.5 11.2v3.4M5.8 12.9h3.4"/><path d="M15.6 12h.01M17.6 14h.01"/></svg><span>Gamepad</span></button>
   <button type="button" role="menuitem" data-act="photo"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2.5"/><circle cx="12" cy="12.5" r="3.6"/><path d="M8.5 5l1.4-2h4.2l1.4 2"/></svg><span>Photo</span></button>
   <button type="button" role="menuitem" data-act="clip"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2.2"/><path d="M9 4.5V3h6v1.5"/><path d="M8.5 10h7M8.5 13.5h7M8.5 17h4"/></svg>Clipboard</button>
   <button type="button" role="menuitem" data-act="sound" id="menuSound"><svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="on-only" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/><path class="off-only" d="M16 9.5l5 5M21 9.5l-5 5"/></svg><span>Sound</span></button>

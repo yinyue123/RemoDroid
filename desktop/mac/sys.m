@@ -135,6 +135,16 @@ int dsk_screen_power(int on)
     return run("/usr/bin/pmset", argv) == 0 ? 0 : -1;
 }
 
+/* gamepads: macOS has no API for a virtual game controller */
+int dsk_pad_supported(char *why, size_t cap)
+{
+    snprintf(why, cap, "gamepads aren't supported on macOS");
+    return 0;
+}
+int dsk_pad_open(int index) { return -1; }
+void dsk_pad_update(int index, const dsk_pad_t *p) {}
+void dsk_pad_close(int index) {}
+
 static IOPMAssertionID awake;
 
 void dsk_session(int active)

@@ -174,6 +174,7 @@ void session_ended(const char *reason)
     video_stop();
     audio_stop();
     input_release_all();
+    input_pads_close();
     files_cancel_all();
     dsk_session(0);
     cJSON_Delete(S.quality);
@@ -223,6 +224,10 @@ void session_channel_open(const char *label)
     cJSON_AddBoolToObject(caps, "audio", S.audio_ok && audio_available());
     cJSON_AddBoolToObject(caps, "keyboard", 1);
     cJSON_AddBoolToObject(caps, "mouse", 1);
+    char why[160] = "";
+    cJSON_AddBoolToObject(caps, "gamepad", dsk_pad_supported(why, sizeof why));
+    if (*why)
+        cJSON_AddStringToObject(caps, "gamepad_problem", why);
     cJSON_AddBoolToObject(caps, "view_only", D.view_only);
     cJSON_AddStringToObject(d, "home", rd_home_dir());
     char up[1024];

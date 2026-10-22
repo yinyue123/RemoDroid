@@ -138,6 +138,36 @@ static void key(uint8_t action, uint16_t hid, uint16_t mods)
     input_handle(m, sizeof m);
 }
 
+static void gamepad(uint8_t index, uint32_t buttons, int16_t lx, int16_t ly, uint8_t lt)
+{
+    uint8_t m[20] = { 6, index };
+    rd_put_be32(m + 2, buttons);
+    rd_put_be16(m + 6, (uint16_t)lx);
+    rd_put_be16(m + 8, (uint16_t)ly);
+    m[14] = lt;
+    input_handle(m, sizeof m);
+}
+
+static void test_gamepad(void)
+{
+    D.view_only = 0;
+    STUB.n = 0;
+    gamepad(0, 0x00001, -32767, 100, 0); /* A, stick left: the pad plugs in on its first state */
+    CHECK(has("pad 0 open") && has("pad 0 00001 -32767 100 0 0 0 0"), "first state: %s", STUB.n ? STUB.ev[STUB.n - 1] : "-");
+    STUB.n = 0;
+    gamepad(0, 0x10000, 0, 0, 200); /* Guide, left trigger */
+    CHECK(!has("pad 0 open") && has("pad 0 10000 0 0 0 0 200 0"), "second state");
+    STUB.n = 0;
+    gamepad(4, 1, 0, 0, 0); /* only four pads */
+    CHECK(STUB.n == 0, "pad 5 ignored");
+    uint8_t reset[5] = { 5 };
+    input_handle(reset, sizeof reset);
+    CHECK(has("pad 0 00000 0 0 0 0 0 0"), "reset centres the pad");
+    STUB.n = 0;
+    input_pads_close();
+    CHECK(has("pad 0 close") && STUB.n == 1, "session end unplugs it");
+}
+
 static void test_input(void)
 {
     desk_refresh_screens(); /* the stub: 1000x500 points at 100,50 */
@@ -318,6 +348,8 @@ int main(int argc, char **argv)
     test_pair_line();
     printf("input\n");
     test_input();
+    printf("gamepads\n");
+    test_gamepad();
     printf("video sizes, colour\n");
     test_fit();
     test_yuv();

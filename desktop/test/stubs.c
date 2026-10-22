@@ -58,6 +58,13 @@ unsigned long dsk_clip_seq(void) { return 0; }
 char *dsk_clip_get(void) { return NULL; }
 int dsk_clip_set(const char *utf8) { return 0; }
 int dsk_screen_power(int on) { return 0; }
+int dsk_pad_supported(char *why, size_t cap) { return 1; }
+int dsk_pad_open(int index) { rec("pad %d open", index); return 0; }
+void dsk_pad_update(int index, const dsk_pad_t *p)
+{
+    rec("pad %d %05x %d %d %d %d %d %d", index, (unsigned)p->buttons, p->lx, p->ly, p->rx, p->ry, p->lt, p->rt);
+}
+void dsk_pad_close(int index) { rec("pad %d close", index); }
 int dsk_lock(void) { return 0; }
 void dsk_notify(const char *title, const char *text) {}
 const char *dsk_config_dir(void) { return "."; }

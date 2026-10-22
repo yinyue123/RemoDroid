@@ -162,3 +162,13 @@ void dsk_session(int active)
 }
 
 int dsk_lock(void) { return LockWorkStation() ? 0 : -1; }
+
+/* gamepads: a virtual Xbox pad on Windows needs the ViGEmBus driver; not yet */
+int dsk_pad_supported(char *why, size_t cap)
+{
+    snprintf(why, cap, "gamepads aren't supported on Windows yet");
+    return 0;
+}
+int dsk_pad_open(int index) { return -1; }
+void dsk_pad_update(int index, const dsk_pad_t *p) {}
+void dsk_pad_close(int index) {}

@@ -15,7 +15,8 @@ wheel scrolls; physical keys arrive as the expected keycodes; text from the
 Keyboard sheet is typed; the clipboard syncs both ways; an upload lands in
 ~/Downloads/RemoDroid; the computer's sound (a tone into a PulseAudio null sink)
 arrives as the Opus track, when pulseaudio is installed; and from a touch screen, tap / long press / two-finger
-drag become click / right click / scroll, and the floating keyboard types.
+drag become click / right click / scroll, the floating keyboard types, and the
+on-screen gamepad drives a virtual Xbox 360 pad (when /dev/uinput is writable).
 
   python tests/e2e_desktop.py --bin build/host [--chrome PATH] [--verbose]
 """
@@ -59,6 +60,16 @@ def tone_wav(path, seconds=90, hz=440):
         one = b"".join(struct.pack("<hh", v, v) for v in
                        (int(12000 * math.sin(2 * math.pi * hz * i / 48000)) for i in range(48000)))
         w.writeframes(one * seconds)
+
+
+def pad_node():
+    """The event node of the agent's virtual Xbox 360 pad, from /proc/bus/input/devices."""
+    for block in open("/proc/bus/input/devices").read().split("\n\n"):
+        if 'Name="Microsoft X-Box 360 pad"' in block and "Vendor=045e Product=028e" in block:
+            for word in block.replace("Handlers=", "").split():
+                if word.startswith("event"):
+                    return "/dev/input/" + word
+    return None
 
 
 def free_display():
@@ -137,6 +148,7 @@ notify = false
     # sound: a PulseAudio with a null sink as the default output, playing a tone the agent records
     # from its monitor (@DEFAULT_MONITOR@)
     sound = bool(shutil.which("pulseaudio") and shutil.which("paplay"))
+    pads = os.access("/dev/uinput", os.W_OK)
     if sound:
         env["XDG_RUNTIME_DIR"] = f"{d}/run"
         os.makedirs(env["XDG_RUNTIME_DIR"], mode=0o700)
@@ -368,6 +380,53 @@ notify = false
                 if ev:
                     got.append(ev["keysym"] + ("+ctrl" if ev["state"] & 4 else ""))
             res["fkb"] = got
+            # the on-screen gamepad, sideways: A plugs in a virtual Xbox 360 pad; B and the left stick
+            # arrive as its evdev events (BTN_B, ABS_X)
+            if pads:
+                await tp.locator("#fkbHide").tap()
+                await tp.set_viewport_size({"width": 844, "height": 390})
+                await tp.locator("#ball").tap()
+                await tp.locator('#menu button[data-act="gamepad"]').tap()
+                await tp.wait_for_selector("#gpad:not([hidden])")
+                face = lambda t: tp.locator("#gpad .gc", has_text=re.compile("^" + t + "$"))
+                await face("A").tap()
+                node = None
+                for _ in range(50):
+                    node = pad_node()
+                    if node:
+                        break
+                    await tp.wait_for_timeout(100)
+                evs, fd = [], None
+                if node:
+                    await tp.wait_for_timeout(300)
+                    try:
+                        fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+                    except OSError:  # a sandbox without input device nodes
+                        pass
+                if fd is not None:
+                    await face("B").tap()
+                    sb = await tp.locator("#gpad .stick:not(.r)").bounding_box()
+                    cx, cy = sb["x"] + sb["width"] / 2, sb["y"] + sb["height"] / 2
+                    await touch("touchStart", [{"x": cx, "y": cy}])
+                    for k in range(1, 6):
+                        await touch("touchMove", [{"x": cx + k * sb["width"] / 8, "y": cy}])
+                        await asyncio.sleep(0.03)
+                    await tp.wait_for_timeout(300)
+                    await touch("touchEnd", [])
+                    await tp.wait_for_timeout(400)
+                    try:
+                        data = os.read(fd, 24 * 256)
+                    except BlockingIOError:
+                        data = b""
+                    os.close(fd)
+                    evs = [struct.unpack("llHHi", data[o:o + 24])[2:] for o in range(0, len(data) - 23, 24)]
+                    res["pad"] = {"device": True, "b": any(e == (1, 0x131, 1) for e in evs),
+                                  "stick_right": max([v for t, c, v in evs if t == 3 and c == 0] or [0]) > 20000,
+                                  "stick_back": [v for t, c, v in evs if t == 3 and c == 0][-1:] == [0]}
+                else:
+                    res["pad"] = {"device": bool(node), "events": "not readable here"}
+            else:
+                res["pad"] = "skipped (no /dev/uinput)"
             await tctx.close()
             # a Mac viewer: Ctrl+C stays Ctrl+C (a terminal's interrupt), ⌘C becomes Ctrl+C (copy)
             await asyncio.sleep(1.5)
@@ -397,6 +456,8 @@ notify = false
               and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok")
               and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
               and res.get("fkb_fits") and res.get("fkb") == ["h", "I", "1", "BackSpace", "c+ctrl"]
+              and (not pads or res.get("pad") == {"device": True, "b": True, "stick_right": True, "stick_back": True}
+                   or (not os.environ.get("CI") and res.get("pad") == {"device": True, "events": "not readable here"}))
               and res.get("mac_ctrl_c") == {"state": 4, "ctrl": True, "super": False}
               and res.get("mac_cmd_c") == {"state": 4, "ctrl": True, "super": False}
               and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))

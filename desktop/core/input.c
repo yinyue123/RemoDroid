@@ -4,6 +4,7 @@
  *   0x03 mouse   (12 bytes)  action, button, buttons, x, y
  *   0x04 key     (10 bytes)  action, HID usage, modifier state
  *   0x05 reset   (5 bytes)   release everything
+ *   0x06 gamepad (20 bytes)  index, buttons, lx, ly, rx, ry, lt, rt: one pad's whole state
  * Coordinates are 0..65535 across the video frame, i.e. the captured screen.
  * Everything held down is tracked so a lost viewer can't leave a key stuck. */
 #include <string.h>
@@ -13,6 +14,7 @@
 static uint8_t keys_down[256]; /* by HID usage */
 static uint8_t buttons_down;   /* bit per button */
 static int events;
+static int8_t pad_on[DSK_MAX_PADS]; /* 1 open, -1 couldn't be created (not retried this session) */
 
 int input_events(void) { return events; }
 
@@ -55,6 +57,17 @@ static void key(int hid, int down)
     dsk_key(hid, down);
 }
 
+/* Virtual gamepads appear on a pad's first state and stay plugged in until the session ends. */
+static void pad(int i, const dsk_pad_t *p)
+{
+    if (i < 0 || i >= DSK_MAX_PADS)
+        return;
+    if (!pad_on[i])
+        pad_on[i] = dsk_pad_open(i) == 0 ? 1 : -1;
+    if (pad_on[i] > 0)
+        dsk_pad_update(i, p);
+}
+
 void input_release_all(void)
 {
     for (int b = 0; b < 5; b++)
@@ -63,6 +76,19 @@ void input_release_all(void)
     for (int h = 0; h < 256; h++)
         if (keys_down[h])
             key(h, 0);
+    static const dsk_pad_t rest;
+    for (int i = 0; i < DSK_MAX_PADS; i++)
+        if (pad_on[i] > 0)
+            dsk_pad_update(i, &rest);
+}
+
+void input_pads_close(void)
+{
+    for (int i = 0; i < DSK_MAX_PADS; i++) {
+        if (pad_on[i] > 0)
+            dsk_pad_close(i);
+        pad_on[i] = 0;
+    }
 }
 
 /* The viewer says which modifiers are down: release any we still hold that it lost track of
@@ -117,6 +143,13 @@ void input_handle(const uint8_t *d, size_t n)
         break;
     case 0x05:
         input_release_all();
+        break;
+    case 0x06: /* gamepad: index, buttons, lx, ly, rx, ry, lt, rt, ts */
+        if (n >= 20) {
+            dsk_pad_t p = { rd_get_be32(d + 2), (int16_t)rd_get_be16(d + 6), (int16_t)rd_get_be16(d + 8),
+                            (int16_t)rd_get_be16(d + 10), (int16_t)rd_get_be16(d + 12), d[14], d[15] };
+            pad(d[1], &p);
+        }
         break;
     }
 }

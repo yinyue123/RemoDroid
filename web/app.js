@@ -373,6 +373,7 @@ function onChannel(label, data) {
   case 'session.ready':
     st.ready = d;
     st.screen = d.screen || st.screen;
+    PAD.sent = []; /* a new session starts with no pads plugged in */
     $('#disc').hidden = true; ball.hidden = !!openId;
     toast(`Connected · ${codecLabel()}${d.caps && d.caps.view_only ? ' · view only' : ''}`);
     if (desk()) { renderQuickKeys(); if (document.fullscreenElement) lockKeys(true); }
@@ -678,6 +679,7 @@ function releaseAll() {
   const b = new ArrayBuffer(5), v = new DataView(b);
   v.setUint8(0, 5); v.setUint32(1, Math.floor(now()) >>> 0);
   sendInput(new Uint8Array(b), 'reset');
+  padRest(); PAD.sent = PAD.sent.map(k => k && PAD_REST); /* the computer centred its pads too */
 }
 window.addEventListener('blur', releaseAll);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
@@ -883,8 +885,11 @@ function syncMenuStates() {
   sb.classList.toggle('on', st.panel === 'off');
   sb.querySelector('span').textContent = dk ? (st.panel === 'off' ? 'Display on' : 'Display off') : st.panel === 'off' ? 'Screen on' : 'Screen off';
   $('#menuStats').classList.toggle('on', S.stats);
-  if (!dk && !fkb.el.hidden) hideFkb(); /* the floating keyboard is for computers */
+  if (!dk && !fkb.el.hidden) hideFkb(); /* the floating keyboard and the gamepad are for computers */
+  if (!dk && !gpad.hidden) hideGpad();
   menu.querySelector('[data-act="keys"]').classList.toggle('on', dk && !fkb.el.hidden);
+  $('#menuPad').hidden = !dk;
+  $('#menuPad').classList.toggle('on', !gpad.hidden);
   const snd = $('#menuSound'), audible = S.sound && !video.muted;
   snd.classList.toggle('on', audible); snd.classList.toggle('muted', !audible);
   snd.querySelector('span').textContent = audible ? 'Sound on' : 'Sound off';
@@ -955,6 +960,7 @@ menu.addEventListener('click', e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const a = b.dataset.act;
   if (a === 'keys' && desk()) { closeMenu(); fkb.el.hidden ? showFkb() : hideFkb(); }
+  else if (a === 'gamepad') { closeMenu(); gpad.hidden ? showGpad() : hideGpad(); }
   else if (['photo', 'clip', 'settings', 'keys'].includes(a)) { closeMenu(); openSheet(a); }
   else if (['back', 'home', 'recents'].includes(a)) { sendCtrl('nav', { button: a }).catch(() => toast('Not connected')); closeMenu(); }
   else if (a === 'screen') {
@@ -1196,6 +1202,165 @@ for (const t of ['pointerup', 'pointercancel']) fkbHead.addEventListener(t, () =
 $('#fkbHide').addEventListener('click', hideFkb);
 $('#fkbMore').addEventListener('click', () => openSheet('keys'));
 window.addEventListener('resize', () => { if (!fkb.el.hidden) placeFkb(fkb.pos.x, fkb.pos.y); });
+
+/* ---- computers: the on-screen gamepad, and real controllers (Joy-Con, DualSense, Xbox pads paired
+ * with the iPhone or iPad, through the Gamepad API) ----
+ * Each becomes a virtual Xbox 360 pad on the computer (input 0x06; desktop/linux/pad_uinput.c) that
+ * Steam and games take as their own. The touch pad and the first real controller both drive pad 1;
+ * more controllers are pads 2–4. Buttons are W3C standard-gamepad bits; sticks -32767..32767, y down.
+ * A pad is only plugged in once something on it is pressed or moved. */
+const PAD_N = 4, PAD_REST = '0,0,0,0,0,0,0';
+const PAD = { touch: { buttons: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 }, real: [], sent: [], raf: 0, poll: 0 };
+const gpad = $('#gpad');
+const padOk = () => !!(st.ready && st.ready.caps && st.ready.caps.gamepad);
+function padMerge(i) {
+  const t = i === 0 ? PAD.touch : null, r = PAD.real[i];
+  if (!t && !r) return null;
+  if (!t || !r) return t || r;
+  const big = (a, b) => Math.abs(a) >= Math.abs(b) ? a : b;
+  return { buttons: (t.buttons | r.buttons) >>> 0, lx: big(t.lx, r.lx), ly: big(t.ly, r.ly), rx: big(t.rx, r.rx), ry: big(t.ry, r.ry),
+    lt: Math.max(t.lt, r.lt), rt: Math.max(t.rt, r.rt) };
+}
+function padFlush() {
+  if (PAD.raf) { cancelAnimationFrame(PAD.raf); PAD.raf = 0; }
+  if (!desk() || !st.connected || !padOk()) return;
+  for (let i = 0; i < PAD_N; i++) {
+    const p = padMerge(i), key = p ? [p.buttons, p.lx, p.ly, p.rx, p.ry, p.lt, p.rt].join() : PAD_REST;
+    if (key === (PAD.sent[i] || PAD_REST)) continue;
+    const q = p || { buttons: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
+    const b = new ArrayBuffer(20), v = new DataView(b);
+    v.setUint8(0, 6); v.setUint8(1, i); v.setUint32(2, q.buttons >>> 0);
+    v.setInt16(6, q.lx); v.setInt16(8, q.ly); v.setInt16(10, q.rx); v.setInt16(12, q.ry);
+    v.setUint8(14, q.lt); v.setUint8(15, q.rt); v.setUint32(16, Math.floor(now()) >>> 0);
+    sendInput(new Uint8Array(b), (PAD.sent[i] || PAD_REST).split(',')[0] !== String(q.buttons) ? `pad ${i + 1} ${q.buttons.toString(16)}` : null);
+    PAD.sent[i] = key;
+  }
+}
+const padSoon = () => { if (!PAD.raf) PAD.raf = requestAnimationFrame(padFlush); }; /* stick moves: once a frame */
+function padBit(bit, on) {
+  PAD.touch.buttons = on ? (PAD.touch.buttons | 1 << bit) >>> 0 : (PAD.touch.buttons & ~(1 << bit)) >>> 0;
+  padFlush();
+}
+/* the layout: Steam Link's, for a phone held sideways (left: view, LB, LS, LT, D-pad, stick) */
+const PAD_UI = [
+  ['btn', 8, '⧉', 'sm', 'left:2.5%;top:5%'], ['btn', 4, 'LB', 'sq', 'left:2.5%;top:38%'], ['btn', 10, 'LS', 'sm', 'left:2.5%;bottom:5%'],
+  ['btn', 6, 'LT', 'sq', 'left:15%;top:5%'], ['dpad', 0, '', '', 'left:13%;top:22%'], ['stick', 'l', '', '', 'left:12%;bottom:5%'],
+  ['btn', 16, '◉', 'sm', 'right:2.5%;top:5%'], ['btn', 9, '☰', 'sm', 'right:2.5%;top:20%'], ['btn', 5, 'RB', 'sq', 'right:2.5%;top:38%'],
+  ['btn', 11, 'RS', 'sm', 'right:2.5%;bottom:5%'], ['btn', 7, 'RT', 'sq', 'right:15%;top:5%'], ['stick', 'r', '', 'r', 'right:33%;bottom:5%'],
+  ['face', 0, '', '', 'right:12%;bottom:6%']];
+function padButton(bit, label, cls, style) {
+  const b = el('div', { class: 'gc ' + cls, text: label, style });
+  const off = () => { b.classList.remove('down'); padBit(bit, false); };
+  b.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    try { b.setPointerCapture(e.pointerId); } catch (_) {}
+    b.classList.add('down'); padBit(bit, true);
+  });
+  for (const t of ['pointerup', 'pointercancel']) b.addEventListener(t, off);
+  return b;
+}
+/* a stick centres where the thumb lands, so it never jumps; the knob follows up to the rim */
+function padStick(side, cls, style) {
+  const s = el('div', { class: 'gc stick ' + cls, style }), knob = el('i');
+  s.append(knob);
+  let id = null, ox = 0, oy = 0;
+  const set = (x, y) => { PAD.touch[side + 'x'] = Math.round(x * 32767); PAD.touch[side + 'y'] = Math.round(y * 32767); };
+  s.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (id !== null) return;
+    try { s.setPointerCapture(e.pointerId); } catch (_) {}
+    id = e.pointerId; ox = e.clientX; oy = e.clientY;
+    s.classList.add('down');
+  });
+  s.addEventListener('pointermove', e => {
+    if (e.pointerId !== id) return;
+    const R = s.offsetWidth / 2;
+    let x = (e.clientX - ox) / R, y = (e.clientY - oy) / R;
+    const m = Math.hypot(x, y);
+    if (m > 1) { x /= m; y /= m; }
+    knob.style.transform = `translate(${x * R * .6}px,${y * R * .6}px)`;
+    set(x, y); padSoon();
+  });
+  const up = e => {
+    if (e.pointerId !== id) return;
+    id = null; knob.style.transform = ''; s.classList.remove('down');
+    set(0, 0); padFlush();
+  };
+  for (const t of ['pointerup', 'pointercancel']) s.addEventListener(t, up);
+  return s;
+}
+/* the D-pad: one touch area, so a thumb can roll between directions (and diagonals) */
+function padDpad(style) {
+  const d = el('div', { class: 'gc dpad', style }), parts = {};
+  for (const [k, t] of [['u', '▲'], ['d', '▼'], ['l', '◀'], ['r', '▶']]) d.append(parts[k] = el('span', { class: k, text: t }));
+  let id = null;
+  const aim = e => {
+    const r = d.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
+    const on = { u: y < -.12, d: y > .12, l: x < -.12, r: x > .12 };
+    let b = PAD.touch.buttons & ~0xF000;
+    [['u', 12], ['d', 13], ['l', 14], ['r', 15]].forEach(([k, bit]) => { parts[k].classList.toggle('down', on[k]); if (on[k]) b |= 1 << bit; });
+    PAD.touch.buttons = b >>> 0; padFlush();
+  };
+  d.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); try { d.setPointerCapture(e.pointerId); } catch (_) {} id = e.pointerId; aim(e); });
+  d.addEventListener('pointermove', e => { if (e.pointerId === id) aim(e); });
+  const up = e => {
+    if (e.pointerId !== id) return;
+    id = null; Object.values(parts).forEach(p => p.classList.remove('down'));
+    PAD.touch.buttons = (PAD.touch.buttons & ~0xF000) >>> 0; padFlush();
+  };
+  for (const t of ['pointerup', 'pointercancel']) d.addEventListener(t, up);
+  return d;
+}
+function renderGpad() {
+  gpad.textContent = '';
+  for (const [kind, a, label, cls, style] of PAD_UI) {
+    if (kind === 'btn') gpad.append(padButton(a, label, cls, style));
+    else if (kind === 'stick') gpad.append(padStick(a, cls, style));
+    else if (kind === 'dpad') gpad.append(padDpad(style));
+    else { /* A, B, X, Y in a diamond, Xbox colours */
+      const f = el('div', { class: 'face', style });
+      for (const [bit, t, c, pos] of [[3, 'Y', '#F5C542', 'left:50%;top:17%'], [2, 'X', '#5AA9F0', 'left:17%;top:50%'],
+        [1, 'B', '#F0605A', 'left:83%;top:50%'], [0, 'A', '#5CD08D', 'left:50%;top:83%']])
+        f.append(padButton(bit, t, '', `${pos};color:${c}`));
+      gpad.append(f);
+    }
+  }
+  const x = el('div', { class: 'gc sm x', text: '×', 'aria-label': 'Hide the gamepad' });
+  x.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); });
+  x.addEventListener('click', hideGpad);
+  gpad.append(x);
+}
+function padRest() { /* fingers off: nothing on the touch pad is held */
+  PAD.touch = { buttons: 0, lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0 };
+  gpad.querySelectorAll('.down').forEach(e => e.classList.remove('down'));
+  gpad.querySelectorAll('.stick i').forEach(k => { k.style.transform = ''; });
+}
+function showGpad() {
+  if (!padOk()) { toast((st.ready && st.ready.caps && st.ready.caps.gamepad_problem) || 'This computer can\'t take a gamepad'); return; }
+  renderGpad();
+  gpad.hidden = false;
+  if (innerHeight > innerWidth) toast('Turn the phone sideways for the gamepad');
+  syncMenuStates();
+}
+function hideGpad() { gpad.hidden = true; padRest(); padFlush(); syncMenuStates(); }
+/* real controllers: read every frame while one is connected (Safari lists a pad after its first press) */
+function padPoll() {
+  PAD.poll = 0;
+  const gps = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+  let any = false;
+  for (let i = 0; i < PAD_N; i++) {
+    const g = gps[i];
+    if (!g || !g.connected) { PAD.real[i] = null; continue; }
+    any = true;
+    let b = 0;
+    g.buttons.slice(0, 17).forEach((x, k) => { if (x.pressed) b |= 1 << k; });
+    const ax = k => Math.round(clamp(g.axes[k] || 0, -1, 1) * 32767), tr = k => Math.round(clamp((g.buttons[k] || {}).value || 0, 0, 1) * 255);
+    PAD.real[i] = { buttons: b >>> 0, lx: ax(0), ly: ax(1), rx: ax(2), ry: ax(3), lt: tr(6), rt: tr(7) };
+  }
+  padFlush();
+  if (any) PAD.poll = requestAnimationFrame(padPoll);
+}
+window.addEventListener('gamepadconnected', () => { if (!PAD.poll) PAD.poll = requestAnimationFrame(padPoll); });
 
 /* ================= photo upload (A.6 file.push + A.8 chunks) ================= */
 let xferId = 1;
