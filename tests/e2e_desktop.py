@@ -331,6 +331,12 @@ notify = false
             # two fingers = scroll
             await asyncio.sleep(1.5)
             tctx = await browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+            # the gamepad messages the page sends (shown when the gamepad check fails)
+            await tctx.add_init_script("""window.__padLog = []; const send = RTCDataChannel.prototype.send;
+                RTCDataChannel.prototype.send = function (d) {
+                  if (d instanceof Uint8Array && d[0] === 6) { const v = new DataView(d.buffer, d.byteOffset);
+                    window.__padLog.push([performance.now() | 0, v.getUint32(2), v.getInt16(6), v.getInt16(8), this.readyState]); }
+                  return send.call(this, d); };""")
             tp = await tctx.new_page()
             tp.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
             await tp.goto(f"http://127.0.0.1:{http_port}/")
@@ -428,6 +434,9 @@ notify = false
                             break
                         await tp.wait_for_timeout(100)
                     os.close(fd)
+                    if not all(res["pad"].values()):  # what arrived, for the log
+                        res["pad_events"] = [e for e in evs if e[0] != 0][-16:]
+                        res["pad_sent"] = await tp.evaluate("window.__padLog || null")
                 else:
                     res["pad"] = {"device": bool(node), "events": "not readable here"}
             else:
