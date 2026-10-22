@@ -676,10 +676,14 @@ function releaseAll() {
 }
 window.addEventListener('blur', releaseAll);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
-/* A key combination from the Keys sheet: press in order, release in reverse. */
+/* A key combination from the Keys sheet: press in order, release in reverse. Each event
+ * carries the modifiers the combination holds at that moment: the computer releases any
+ * modifier a key event leaves out, which would turn Ctrl+C into a plain C. */
 function sendCombo(hids) {
-  for (const h of hids) sendKey(true, h, 0);
-  for (const h of hids.slice().reverse()) sendKey(false, h, 0);
+  const bit = h => h >= 0xE0 ? 1 << (h - 0xE0) : 0;
+  let mods = 0;
+  for (const h of hids) { mods |= bit(h); sendKey(true, h, mods); }
+  for (const h of hids.slice().reverse()) { mods &= ~bit(h); sendKey(false, h, mods); }
 }
 /* full screen on Chromium: also capture Esc, Alt+Tab, Ctrl+W… */
 function lockKeys(on) {

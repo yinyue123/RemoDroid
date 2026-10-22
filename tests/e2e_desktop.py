@@ -261,6 +261,11 @@ notify = false
                 if ev:
                     got.append(ev["keysym"])
             res["text"] = got
+            # a shortcut button: C arrives with Control still held (state bit 4)
+            probe.drain()
+            await page.locator("#kbKeys button", has_text="Ctrl+C").click()
+            ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keycode"] == 54)
+            res["ctrl_c_ok"] = bool(ev and ev["state"] & 4)
             await page.locator("#sheet-keys button[data-close]").click()
             # clipboard: the computer copies → the viewer's clip bar shows it
             probe.send("setclip copied on linux")
@@ -348,7 +353,7 @@ notify = false
             await browser.close()
         ok = (res.get("pair") and res.get("platform") == "linux" and res["video"]["w"] == 1280 and res.get("colours_ok") and res.get("click_ok")
               and res.get("right_click_ok") and res.get("wheel_ok") and res.get("key_a") == "a" and res.get("shift_1") == "exclam"
-              and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("clip_to_viewer")
+              and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("ctrl_c_ok") and res.get("clip_to_viewer")
               and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok")
               and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
               and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))
