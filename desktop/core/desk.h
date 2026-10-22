@@ -192,8 +192,9 @@ void yuv_nv12_uv(const uint8_t *u, const uint8_t *v, uint8_t *uv, int w, int h);
 /* swenc.c: minih264 */
 typedef struct swenc swenc_t;
 swenc_t *swenc_new(int w, int h, int fps, int kbps);
-/* Encodes one I420 frame (strides w, w/2, w/2). Returns Annex-B bytes (valid until the next call). */
-const uint8_t *swenc_encode(swenc_t *e, const uint8_t *y, const uint8_t *u, const uint8_t *v, int key, size_t *n);
+/* Encodes one I420 frame (strides w, w/2, w/2). Returns Annex-B bytes (valid until the next call).
+ * qp > 0: at that fixed quality, outside the rate control. */
+const uint8_t *swenc_encode(swenc_t *e, const uint8_t *y, const uint8_t *u, const uint8_t *v, int key, int qp, size_t *n);
 void     swenc_bitrate(swenc_t *e, int kbps);
 void     swenc_free(swenc_t *e);
 

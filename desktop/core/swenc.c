@@ -197,15 +197,20 @@ void swenc_bitrate(swenc_t *e, int kbps)
         e->kbps = kbps;
 }
 
-const uint8_t *swenc_encode(swenc_t *e, const uint8_t *y, const uint8_t *u, const uint8_t *v, int key, size_t *n)
+/* qp > 0 encodes at that fixed quality, outside the rate control (sharpening a still picture):
+ * its state is put back afterwards, or it would starve the frames that follow to pay for it. */
+const uint8_t *swenc_encode(swenc_t *e, const uint8_t *y, const uint8_t *u, const uint8_t *v, int key, int qp, size_t *n)
 {
     H264E_run_param_t rp;
     memset(&rp, 0, sizeof rp);
-    rp.encode_speed = 9; /* fast: real time */
+    rp.encode_speed = 6; /* 9 skips sub-pixel motion search: scrolled text loses ~3 dB at the same bitrate */
     rp.frame_type = key ? H264E_FRAME_TYPE_KEY : 0;
     rp.desired_frame_bytes = e->kbps * 1000 / 8 / e->fps;
-    rp.qp_min = 18;
-    rp.qp_max = 44;
+    rp.qp_min = qp > 0 ? qp : 18;
+    rp.qp_max = qp > 0 ? qp : 44;
+    h264e_enc_t *enc = (h264e_enc_t *)e->enc;
+    unsigned char rc[sizeof enc->rc];
+    memcpy(rc, &enc->rc, sizeof rc);
     H264E_io_yuv_t io;
     io.yuv[0] = (uint8_t *)y;
     io.yuv[1] = (uint8_t *)u;
@@ -214,7 +219,10 @@ const uint8_t *swenc_encode(swenc_t *e, const uint8_t *y, const uint8_t *u, cons
     io.stride[1] = io.stride[2] = e->w / 2;
     unsigned char *coded;
     int size;
-    if (H264E_encode(e->enc, e->scratch, &rp, &io, &coded, &size) || size <= 0) {
+    int err = H264E_encode(e->enc, e->scratch, &rp, &io, &coded, &size);
+    if (qp > 0)
+        memcpy(&enc->rc, rc, sizeof rc);
+    if (err || size <= 0) {
         *n = 0;
         return NULL;
     }

@@ -119,8 +119,8 @@ static void run_sw(void)
     swenc_t *enc = NULL;
     uint8_t *yuv = malloc((size_t)w * h * 3 / 2);
     int kbps = V.kbps;
-    int64_t last_sent = 0, frame_us = 1000000 / fps;
-    int have_frame = 0, fails = 0;
+    int64_t last_sent = 0, frame_us = 1000000 / fps, refine_gap = 0;
+    int have_frame = 0, fails = 0, refine = 0;
     set_info(w, h, "software");
     LOGI("video: software H.264 %dx%d @%d fps, %d kbps", w, h, fps, kbps);
     while (!V.quit) {
@@ -160,9 +160,17 @@ static void run_sw(void)
         }
         if (!have_frame)
             continue;
-        int key = V.want_key;
-        /* encode when the screen changed (at most fps), on request, and as a 500 ms refresh */
-        if (!key && (r == 0 ? t - last_sent < 500000 : t - last_sent < frame_us))
+        int key = V.want_key, qp = 0;
+        if (r > 0)
+            refine = 36;
+        /* encode when the screen changed (at most fps), on request, and as a 500 ms refresh.
+         * Moving pictures get what the bitrate allows, which blurs scrolled text; once the
+         * screen is still, a few fixed-quality frames sharpen it (QP 36 → 24), no faster than
+         * the bitrate carries them. */
+        if (!key && r == 0 && refine && t - last_sent >= refine_gap) {
+            qp = refine;
+            refine = refine > 24 ? refine - 4 : 0;
+        } else if (!key && (r == 0 ? t - last_sent < 500000 : t - last_sent < frame_us))
             continue;
         if (V.kbps != kbps) {
             kbps = V.kbps;
@@ -170,10 +178,11 @@ static void run_sw(void)
         }
         V.want_key = 0;
         size_t n;
-        const uint8_t *au = swenc_encode(enc, yuv, yuv + (size_t)w * h, yuv + (size_t)w * h * 5 / 4, key, &n);
+        const uint8_t *au = swenc_encode(enc, yuv, yuv + (size_t)w * h, yuv + (size_t)w * h * 5 / 4, key, qp, &n);
         if (au && n)
             rd_rtc_video(NULL, 0, au, n, t, key);
         last_sent = t;
+        refine_gap = RD_MAX(100000, (int64_t)n * 8000 / RD_MAX(kbps, 100));
         count_frame();
     }
     if (cap)

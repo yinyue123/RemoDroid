@@ -239,7 +239,7 @@ static void test_swenc(void)
     if (!e)
         return;
     size_t n;
-    const uint8_t *au = swenc_encode(e, yuv, yuv + W * H, yuv + W * H * 5 / 4, 1, &n);
+    const uint8_t *au = swenc_encode(e, yuv, yuv + W * H, yuv + W * H * 5 / 4, 1, 0, &n);
     CHECK(au && n > 8 && !memcmp(au, "\0\0\0\1", 4), "keyframe starts with a start code (%zu bytes)", n);
     int sps = 0, idr = 0;
     for (size_t i = 0; au && i + 4 < n; i++)
@@ -249,7 +249,7 @@ static void test_swenc(void)
         }
     CHECK(sps && idr, "keyframe has SPS %d and IDR %d", sps, idr);
     yuv[100] = 200;
-    au = swenc_encode(e, yuv, yuv + W * H, yuv + W * H * 5 / 4, 0, &n);
+    au = swenc_encode(e, yuv, yuv + W * H, yuv + W * H * 5 / 4, 0, 0, &n);
     int p = 0;
     for (size_t i = 0; au && i + 4 < n; i++)
         if (!memcmp(au + i, "\0\0\1", 3))
