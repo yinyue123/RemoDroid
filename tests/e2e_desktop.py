@@ -349,6 +349,27 @@ notify = false
             await touch("touchEnd", [])
             ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] in (4, 5))
             res["touch_scroll"] = ev and ev["b"]
+            await tctx.close()
+            # a Mac viewer: Ctrl+C stays Ctrl+C (a terminal's interrupt), ⌘C becomes Ctrl+C (copy)
+            await asyncio.sleep(1.5)
+            mctx = await browser.new_context(viewport={"width": 1280, "height": 720})
+            await mctx.add_init_script("Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' })")
+            mp = await mctx.new_page()
+            mp.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
+            await mp.goto(f"http://127.0.0.1:{http_port}/")
+            await mp.fill("#user", "me")
+            await mp.fill("#password", "pw")
+            await mp.click("#go")
+            await mp.wait_for_url(f"http://127.0.0.1:{http_port}/")
+            await mp.wait_for_function("() => document.querySelector('#disc').hidden && document.querySelector('#video').videoWidth > 0",
+                                       timeout=30000)
+            await mp.wait_for_timeout(800)
+            for name, combo in (("mac_ctrl_c", "Control+KeyC"), ("mac_cmd_c", "Meta+KeyC")):
+                probe.drain()
+                await mp.keyboard.press(combo)
+                ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keycode"] == 54)
+                res[name] = ev and {"state": ev["state"], "ctrl": bool(ev["state"] & 4), "super": bool(ev["state"] & 0x40)}
+                await mp.wait_for_timeout(200)
             res["errors"] = [l for l in logs if "PAGEERROR" in l][:5]
             await browser.close()
         ok = (res.get("pair") and res.get("platform") == "linux" and res["video"]["w"] == 1280 and res.get("colours_ok") and res.get("click_ok")
@@ -356,6 +377,8 @@ notify = false
               and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("ctrl_c_ok") and res.get("clip_to_viewer")
               and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok")
               and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
+              and res.get("mac_ctrl_c") == {"state": 4, "ctrl": True, "super": False}
+              and res.get("mac_cmd_c") == {"state": 4, "ctrl": True, "super": False}
               and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))
               and not res.get("errors"))
     finally:

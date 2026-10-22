@@ -633,9 +633,11 @@ const KEYS = {
   ControlLeft: 0xE0, ShiftLeft: 0xE1, AltLeft: 0xE2, MetaLeft: 0xE3, ControlRight: 0xE4, ShiftRight: 0xE5,
   AltRight: 0xE6, MetaRight: 0xE7, OSLeft: 0xE3, OSRight: 0xE7,
 };
-/* ⌘ on one side, Ctrl on the other: swap them so shortcuts keep their meaning (Settings → Stream) */
+/* ⌘ on one side, Ctrl on the other: map them so shortcuts keep their meaning (Settings → Stream).
+ * From a Mac, ⌘ becomes Ctrl and Ctrl stays Ctrl, so ⌘C copies and Ctrl+C still stops a
+ * terminal; towards a Mac, Ctrl and the Windows key trade places. */
 const swapCmd = () => S.swapCmd === 'on' || (S.swapCmd === 'auto' && st.device && appleHere !== (st.device.platform === 'macos'));
-const SWAP = { 0xE0: 0xE3, 0xE3: 0xE0, 0xE4: 0xE7, 0xE7: 0xE4 };
+const SWAP = appleHere ? { 0xE3: 0xE0, 0xE7: 0xE4 } : { 0xE0: 0xE3, 0xE3: 0xE0, 0xE4: 0xE7, 0xE7: 0xE4 };
 let held = 0; /* modifiers down here, bit n = usage 0xE0 + n (before swapping) */
 function sendKey(down, hid, mods) {
   const b = new ArrayBuffer(10), v = new DataView(b);
@@ -645,6 +647,7 @@ function sendKey(down, hid, mods) {
 function remoteMods(m) {
   if (!swapCmd()) return m;
   const ctrl = m & 0x11, meta = m & 0x88;
+  if (appleHere) return (m & ~0x88) | (meta >> 3);
   return (m & ~0x99) | (ctrl << 3) | (meta >> 3);
 }
 function keyTarget(e) {
@@ -663,7 +666,9 @@ function onKey(e, down) {
   if (!e.altKey) held &= ~0x44;
   if (!e.metaKey) held &= ~0x88;
   const hid = swapCmd() && SWAP[local] ? SWAP[local] : local;
-  sendKey(down, hid, remoteMods(held));
+  const mods = remoteMods(held);
+  if (!down && hid >= 0xE0 && mods & (1 << (hid - 0xE0))) return; /* Ctrl and ⌘ both map here; the other is still down */
+  sendKey(down, hid, mods);
 }
 document.addEventListener('keydown', e => onKey(e, true));
 document.addEventListener('keyup', e => onKey(e, false));
@@ -1255,7 +1260,7 @@ function renderTab(id) {
       toggleRow('stats', 'Stats overlay', 'fps, bitrate, round-trip time, decoder, last input bytes'),
       toggleRow('touches', 'Show touches', 'Draw your touch points (demo stream only)')));
     if (desk()) add(group('Keyboard',
-      segRow('swapCmd', '⌘ and Ctrl', [['auto', 'Auto'], ['on', 'Swap'], ['off', 'As is']], 'Auto swaps them when only one side is a Mac, so ⌘C copies on Windows and Ctrl+C copies on a Mac.')));
+      segRow('swapCmd', '⌘ and Ctrl', [['auto', 'Auto'], ['on', 'Swap'], ['off', 'As is']], 'Auto maps them when only one side is a Mac: from a Mac, ⌘C copies on Windows or Linux and Ctrl+C still stops a terminal; towards a Mac, Ctrl+C copies.')));
   }
   if (id === 'phone' && desk()) renderComputerTab(add);
   if (id === 'phone' && !desk()) {
