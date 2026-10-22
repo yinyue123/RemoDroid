@@ -35,10 +35,10 @@ linux)
     # Needs appimagetool on PATH and APPIMAGE_RUNTIME, a directory with runtime-x86_64 and
     # runtime-aarch64 from AppImage/type2-runtime.
     A=build/RemoDroid-$VERSION-$ARCH.AppDir
-    rm -rf "$A" && mkdir -p "$A/usr/lib/remodroid" "$A/usr/bin" "$A/usr/share/applications"
+    rm -rf "$A" && mkdir -p "$A/usr/lib/remodroid" "$A/usr/bin" "$A/usr/share/applications" "$A/usr/share/icons"
     cp "$DIR/libremodroid.so" "$A/usr/lib/remodroid/"
     cp "$DIR/remodroid-desktop" "$DIR/remodroid-desktopd" "$A/usr/bin/"
-    cp -r "$DIR/icons" "$A/usr/share/icons"
+    cp -r "$DIR/icons" "$A/usr/share/icons/hicolor"
     cp packaging/desktop/remodroid-desktop.desktop "$A/usr/share/applications/"
     cp packaging/desktop/remodroid-desktop.desktop "$DIR/icons/256x256/apps/remodroid.png" "$A/"
     install -m 0755 packaging/desktop/AppRun "$A/AppRun"
