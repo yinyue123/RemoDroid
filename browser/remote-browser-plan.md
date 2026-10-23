@@ -85,7 +85,7 @@ Two kinds of traffic leave the container:
 | Host | Armbian (Debian base), vendor kernel 6.1 for rk35xx, cgroup v2, `passt`, zram | Must show `/dev/mpp_service` and `/dev/dma_heap/` |
 | Storage | 64 GB SSD, one ext4 partition, mounted at `/var/hqnode` | ext4 because hqnode uses idmapped mounts; the eMMC stays for the OS only |
 | Container | hqnode, image `…/hub:remote-browser-hqnode` (arm64) on `hqnode:debian-13`, `devices: ["rkmpp"]` | 4 cores, 1.5 GB RAM, 8 GB root disk, 1 GB `/data` |
-| Browser | CloakBrowser Linux arm64 binary | `--fingerprint-platform=linux`, seed per identity |
+| Browser | CloakBrowser Linux arm64 binary | `--fingerprint-platform=windows`, seed per identity |
 | Screen | Xorg 21.1 + `xserver-xorg-video-dummy` | 880×1808 (multiples of 16, iPhone 14 Plus below its status bar), Chrome scale 2 → 440×904 CSS px |
 | Touch | `inputtest` input driver (in `xserver-xorg-core`), `DeviceType "Touch"`, 5 points | The agent writes touch events to its socket |
 | Keyboard | XTest, existing `desktop/linux/input_x11.c` | Typing from the iPhone keyboard sheet arrives as ctrl `text` |
@@ -636,9 +636,12 @@ negotiates it.
 - **One `memcpy` into the MPP buffer.**
 - **Chromium's software rendering:** this is the real load, and the reason the default screen is `light`.
 
-**Chromium doesn't get the GPU.** CloakBrowser runs with `--disable-gpu`, so WebGL goes through SwiftShader
-and the real GPU never appears in it. On the OECT that also avoids exposing the vendor Mali driver to the
-browser. GPU rasterization on the Mali-G52 is a possible later experiment, if scrolling is too slow, and
+**Chromium doesn't get the GPU.** There is none in the container for it, so WebGL goes through SwiftShader
+on the CPU (`--enable-unsafe-swiftshader`), and pages see the GPU CloakBrowser makes up for the seed, never
+the real one. On the OECT that also keeps the vendor Mali driver away from the browser. WebGL has to work:
+the first version ran with `--disable-gpu`, and a page with no WebGL at all is one of the strongest bot
+signals there is (tested: none before, a spoofed NVIDIA after). `webgl = 0` in `browser.conf` still turns
+the GPU process off, if the OECT's cores need the time. GPU rasterization on the Mali-G52 is a possible later experiment, if scrolling is too slow, and
 then only together with CloakBrowser's WebGL spoofing.
 
 ---
@@ -646,19 +649,31 @@ then only together with CloakBrowser's WebGL spoofing.
 ## Browser settings
 
 ```bash
---fingerprint-platform=linux
+--fingerprint-platform=windows        # CloakBrowser's advice on Linux; it has no phone persona (below)
 --fingerprint=<seed>                  # same seed = same identity; new seed = new identity
 --proxy-server=socks5://PROXY:PORT    # socks5:// → DNS resolved by the proxy
 --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE PROXY"   # no local DNS lookups, ever
 --force-webrtc-ip-handling-policy=disable_non_proxied_udp
---webrtc-ip=<proxy IP or auto>
+--fingerprint-webrtc-ip=<proxy IP or auto>
 --kiosk --force-device-scale-factor=2 --touch-events=enabled
 --user-data-dir=/tmp/profile          # tmpfs, wiped by "New identity" and every reinstall
 --disable-dev-shm-usage               # hqnode's /dev/shm is 64 MB
---disable-gpu                         # WebGL via SwiftShader; no Mali driver in the browser
+--enable-unsafe-swiftshader           # WebGL on the CPU; no Mali driver in the browser
+--remote-debugging-pipe               # the tab list: Target calls only, no port (Controller bar)
 --renderer-process-limit=2 --disk-cache-size=52428800
---lang=<locale>                       # plus TZ=<zone> in the browser's environment
+--lang=<locale> --fingerprint-locale=<locale> --fingerprint-timezone=<zone>
 ```
+
+- **The binary:** the free build from CloakBrowser's GitHub Releases, pinned with its checksum in the
+  Dockerfile (Chromium 146: `.5` for amd64, `.4` for arm64, since `.5` has no arm64 tarball). Newer builds
+  need a key (free with a GitHub sign-in, or Pro). Its licence allows no redistribution, so the image stays
+  private. It needs `libcairo2`, which Debian's chromium package used to bring in.
+- **The persona is a Windows computer with a touch screen**, not a phone. CloakBrowser has only `windows`,
+  `macos` and `linux`. A Chromium can't pass for Safari, and an Android user agent over a Windows
+  fingerprint (client hints, GPU, fonts, screen) is a mismatch that scores worse than either. Pages still
+  get their phone layout from the 440 px window. Tested in the container: `Win32`, `webdriver` false, 5
+  touch points, 440×860 at 2×, WebGL with a spoofed NVIDIA GPU, and a Google search without "unusual
+  traffic".
 
 - Timezone, language and locale must match the proxy's exit location. `rd-shell` sets `TZ` and `--lang`
   from `browser.conf`.

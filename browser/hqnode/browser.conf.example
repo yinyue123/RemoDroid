@@ -27,7 +27,9 @@ search = https://duckduckgo.com/?q=%s
 
 # The browser, and anything to add to its command line (space-separated).
 browser = /opt/cloakbrowser/chrome
-platform = linux
+# The system CloakBrowser presents (--fingerprint-platform): windows (its advice on a Linux machine: the
+# most common one, the hardest to single out), macos, or linux.
+platform = windows
 args =
 profile = /tmp/profile
 renderer_process_limit = 2

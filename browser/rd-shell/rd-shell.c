@@ -252,7 +252,7 @@ static char **browser_argv(const char *url, int devtools)
     int n = 0;
 #define ARG(...) snprintf(args[n], sizeof args[n], __VA_ARGS__), argv[n] = args[n], n++
     ARG("%s", conf("browser", "/opt/cloakbrowser/chrome"));
-    ARG("--fingerprint-platform=%s", conf("platform", "linux"));
+    ARG("--fingerprint-platform=%s", conf("platform", "windows"));
     ARG("--fingerprint=%s", BR.seed);
     const char *proxy = conf("proxy", "");
     if (*proxy) {
@@ -261,23 +261,32 @@ static char **browser_argv(const char *url, int devtools)
         if (!proxy_hostport(host, sizeof host, port, sizeof port)) /* no lookups but the proxy's own name */
             ARG("--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE %s", host);
         ARG("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
-        ARG("--webrtc-ip=%s", conf("webrtc_ip", "auto"));
+        ARG("--fingerprint-webrtc-ip=%s", conf("webrtc_ip", "auto")); /* the proxy's exit address, not ours */
     }
     ARG("--kiosk");
     ARG("--force-device-scale-factor=%d", S);
     ARG("--touch-events=enabled");
     ARG("--user-data-dir=%s", conf("profile", "/tmp/profile"));
     ARG("--disable-dev-shm-usage");
-    ARG("--disable-gpu");
+    /* No GPU here, but a page without WebGL looks like a bot: SwiftShader draws it on the CPU.
+     * webgl = 0 turns the GPU process off instead (cheaper on the OECT's cores). */
+    if (strcmp(conf("webgl", "1"), "0"))
+        ARG("--enable-unsafe-swiftshader");
+    else
+        ARG("--disable-gpu");
     ARG("--renderer-process-limit=%s", conf("renderer_process_limit", "2"));
     ARG("--disk-cache-size=52428800");
     ARG("--no-first-run");
     ARG("--no-default-browser-check");
     if (devtools)
         ARG("--remote-debugging-pipe"); /* fds 3 and 4: see spawn */
-    const char *lang = conf("lang", "");
-    if (*lang)
+    const char *lang = conf("lang", ""), *tz = conf("timezone", "");
+    if (*lang) {
         ARG("--lang=%s", lang);
+        ARG("--fingerprint-locale=%s", lang);
+    }
+    if (*tz)
+        ARG("--fingerprint-timezone=%s", tz); /* CloakBrowser's own; TZ (spawn) is for a plain Chromium */
     /* extra flags, space-separated */
     static char extra[512];
     snprintf(extra, sizeof extra, "%s", conf("args", ""));

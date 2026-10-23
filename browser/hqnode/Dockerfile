@@ -15,9 +15,13 @@
 # reaches it.
 #
 # Build from the repository root (browser/hqnode/build.sh does):
-#   CLOAKBROWSER_URL   a .tar.gz of CloakBrowser's Linux build for the target arch; its sha256 in
-#   CLOAKBROWSER_SHA256. Without them Debian's chromium is installed instead, which runs but has no
-#                      fingerprint control (--fingerprint* are ignored): fine for trying the rest out.
+#   CLOAKBROWSER       the free CloakBrowser build from GitHub Releases (the default): Chromium 146,
+#                      146.0.7680.177.5 for amd64 and .4 for arm64 (.5 has no arm64 tarball), checked
+#                      against the release's SHA256SUMS. "chromium" installs Debian's instead, which
+#                      has no fingerprint control (--fingerprint* are ignored).
+#   CLOAKBROWSER_URL   another .tar.gz of it (a newer build), with its sha256 in CLOAKBROWSER_SHA256.
+#                      The binary's licence allows no redistribution: don't push an image with it to a
+#                      public registry.
 #   MPP_COMMIT         the rockchip-linux/mpp commit to build.
 
 # ── the agent, the bar and Rockchip MPP, built for the target ───────────────
@@ -43,25 +47,40 @@ RUN set -eux; make -j"$(nproc)" desktop browser OPT='-O2 -g0'; \
 
 # ── the container ────────────────────────────────────────────────────────────
 FROM ghcr.io/yinyue123/hqnode:debian-13
+ARG TARGETARCH
+ARG CLOAKBROWSER=free
 ARG CLOAKBROWSER_URL=
 ARG CLOAKBROWSER_SHA256=
 
-# Xorg (its inputtest driver is in xserver-xorg-core) with the dummy screen; the fonts a phone page
-# expects; the agent's and the bar's libraries; xauth for the display's cookie.
+# Xorg (its inputtest driver is in xserver-xorg-core) with the dummy screen; the fonts a page expects, and
+# the ones CloakBrowser asks for (anti-bot scripts hash emoji and CJK drawn on a canvas, and a set no real
+# browser has gives it away); the agent's and the bar's libraries; xauth for the display's cookie.
 RUN set -eux; apt-get update; \
     apt-get install -y --no-install-recommends xserver-xorg-core xserver-xorg-video-dummy xauth x11-utils xinput \
         fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
+        fonts-freefont-ttf fonts-unifont fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf \
         libx11-6 libxext6 libxtst6 libxrandr2 libxdamage1 libxfixes3 libxft2 libfontconfig1 \
         libnss3 libgbm1 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 libxkbcommon0 libpango-1.0-0 \
-        libxcomposite1 libdrm2 libva2 libva-drm2 libxi6 libdbus-1-3 curl ca-certificates; \
-    if [ -z "$CLOAKBROWSER_URL" ]; then apt-get install -y --no-install-recommends chromium; fi; \
+        libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 curl ca-certificates; \
+    if [ "$CLOAKBROWSER" = chromium ]; then apt-get install -y --no-install-recommends chromium; fi; \
     rm -rf /var/lib/apt/lists/*
 
 # CloakBrowser into /opt/cloakbrowser, its binary as /opt/cloakbrowser/chrome
-RUN set -eux; if [ -n "$CLOAKBROWSER_URL" ]; then \
-        curl -fsSL "$CLOAKBROWSER_URL" -o /tmp/cb.tgz; \
-        [ -z "$CLOAKBROWSER_SHA256" ] || echo "$CLOAKBROWSER_SHA256  /tmp/cb.tgz" | sha256sum -c -; \
-        mkdir -p /opt/cloakbrowser; tar xzf /tmp/cb.tgz -C /opt/cloakbrowser --strip-components=1; rm /tmp/cb.tgz; \
+RUN set -eux; url=$CLOAKBROWSER_URL sum=$CLOAKBROWSER_SHA256; \
+    if [ -z "$url" ] && [ "$CLOAKBROWSER" = free ]; then \
+        r=https://github.com/CloakHQ/CloakBrowser/releases/download; \
+        case $TARGETARCH in \
+        amd64) url=$r/chromium-v146.0.7680.177.5/cloakbrowser-linux-x64.tar.gz \
+               sum=4a12bcde95fa1bb1beef2b41ab5e5c27c36be78e3be3d0dac8c64d705216670e ;; \
+        arm64) url=$r/chromium-v146.0.7680.177.4/cloakbrowser-linux-arm64.tar.gz \
+               sum=8b71ce53b4fd131327331a31fba3835d71882d19bfaabde78dd0f5390bd16f45 ;; \
+        *) echo "no CloakBrowser build for $TARGETARCH: CLOAKBROWSER=chromium" >&2; exit 1 ;; \
+        esac; \
+    fi; \
+    if [ -n "$url" ]; then \
+        curl -fsSL "$url" -o /tmp/cb.tgz; \
+        [ -z "$sum" ] || echo "$sum  /tmp/cb.tgz" | sha256sum -c -; \
+        mkdir -p /opt/cloakbrowser; tar xzf /tmp/cb.tgz -C /opt/cloakbrowser; rm /tmp/cb.tgz; \
         [ -x /opt/cloakbrowser/chrome ] || ln -sf "$(find /opt/cloakbrowser -maxdepth 2 -type f -name 'chrome*' -perm -u+x | head -1)" /opt/cloakbrowser/chrome; \
     else \
         mkdir -p /opt/cloakbrowser; ln -sf /usr/bin/chromium /opt/cloakbrowser/chrome; \

@@ -5,8 +5,12 @@
 #     ./browser/hqnode/build.sh --push           and push
 #     PLATFORM=linux/amd64 ./browser/hqnode/build.sh
 #
-#     CLOAKBROWSER_URL=… CLOAKBROWSER_SHA256=…   CloakBrowser's Linux build for that arch (a .tar.gz);
-#                                                without it the image gets Debian's chromium instead
+#     CloakBrowser: the free build from GitHub Releases, pinned in the Dockerfile, by default
+#     CLOAKBROWSER_URL=… CLOAKBROWSER_SHA256=…   another build of it (a .tar.gz for that arch)
+#     CLOAKBROWSER=chromium                      Debian's chromium instead
+#
+# The CloakBrowser binary's licence allows no redistribution: keep the image private (no --push to a
+# public repository).
 #
 # The context is the repository root, because the image compiles the agent and rd-shell from it.
 # --pull=always so it starts from the current ghcr.io/yinyue123/hqnode:debian-13. Building arm64 on
@@ -31,6 +35,7 @@ esac
 
 echo "==> building $IMAGE for $PLATFORM ($engine, context $context)"
 "$engine" build --pull=always --platform "$PLATFORM" "${net[@]}" \
+	--build-arg CLOAKBROWSER="${CLOAKBROWSER:-free}" \
 	--build-arg CLOAKBROWSER_URL="${CLOAKBROWSER_URL:-}" --build-arg CLOAKBROWSER_SHA256="${CLOAKBROWSER_SHA256:-}" \
 	-f "$here/Dockerfile" -t "$IMAGE" "$context"
 
