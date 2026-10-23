@@ -2,17 +2,19 @@
  * in one small X client (remote-browser-plan.md, "Controller bar").
  *
  *   - The bar: a strip 44 CSS px tall across the top of the screen (88 px at 2x, 44 pt on the iPhone):
- *     back, forward, reload, the page's title (tap it to type a URL), and a menu with Home, the tabs,
- *     New identity, Restart and Stop/Start. Taps arrive as the touch screen's emulated pointer events.
+ *     back, forward, reload, the page's title (tap it to type a URL), and a menu with Home, the tabs
+ *     (listed only when there is more than one), New identity, Restart and Stop/Start. Taps arrive as
+ *     the touch screen's emulated pointer events.
  *   - The window manager: the only one on the display. Every browser window is placed below the bar
  *     whatever it asks for, a fullscreen request (kiosk) included, and there are no frames.
  *   - The supervisor: starts the browser with the settings in /data/browser.conf, restarts it when it
  *     dies, and gives it a new fingerprint seed and an empty profile on New identity. With no proxy set
  *     it refuses to start it, since the page would see this machine's own address.
  *
- * It talks to the browser only as a person would: keys through XTest (Alt+Left, F5, Ctrl+W …) and
- * URLs handed to the running browser on its command line. No DevTools connection, nothing for a page
- * to notice.
+ * Back, forward and reload are keys through XTest (Alt+Left, Alt+Right, F5), as a person would press them.
+ * The tabs go through DevTools on a pipe (--remote-debugging-pipe: no port a page could scan), and only
+ * through the browser-level Target calls: list, switch to, open and close a tab. Nothing attaches to a
+ * page and no Runtime call is made, so a page has nothing to notice.
  *
  *   rd-shell [-c /data/browser.conf]          DISPLAY from the environment
  */
@@ -45,6 +47,8 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/XTest.h>
 #include <X11/keysym.h>
+
+#include "cJSON.h"
 
 #define LOG(...) (fprintf(stderr, "rd-shell: " __VA_ARGS__), fputc('\n', stderr))
 #define MAX_CLIENTS 64
@@ -196,6 +200,7 @@ static double now_s(void)
 
 static void draw_bar(void);
 static void draw_menu(void);
+static void menu_layout(void);
 
 /* ---------------- the browser ---------------- */
 
@@ -240,7 +245,7 @@ static int proxy_hostport(char *host, size_t hcap, char *port, size_t pcap)
     return 0;
 }
 
-static char **browser_argv(const char *url)
+static char **browser_argv(const char *url, int devtools)
 {
     static char args[40][600];
     static char *argv[48];
@@ -268,6 +273,8 @@ static char **browser_argv(const char *url)
     ARG("--disk-cache-size=52428800");
     ARG("--no-first-run");
     ARG("--no-default-browser-check");
+    if (devtools)
+        ARG("--remote-debugging-pipe"); /* fds 3 and 4: see spawn */
     const char *lang = conf("lang", "");
     if (*lang)
         ARG("--lang=%s", lang);
@@ -283,11 +290,17 @@ static char **browser_argv(const char *url)
     return argv;
 }
 
-static pid_t spawn(char **argv)
+/* With to/from >= 0 the child gets them as fds 3 (what it reads) and 4 (what it writes), DevTools' pipe. */
+static pid_t spawn(char **argv, int to, int from)
 {
     pid_t pid = fork();
     if (pid == 0) {
         setsid();
+        if (to >= 0) { /* out of the way first: either may already be 3 or 4 */
+            int a = fcntl(to, F_DUPFD_CLOEXEC, 10), b = fcntl(from, F_DUPFD_CLOEXEC, 10);
+            if (a < 0 || b < 0 || dup2(a, 3) < 0 || dup2(b, 4) < 0)
+                _exit(127);
+        }
         const char *tz = conf("timezone", ""), *lang = conf("lang", "");
         if (*tz)
             setenv("TZ", tz, 1);
@@ -309,6 +322,219 @@ static pid_t spawn(char **argv)
     return pid;
 }
 
+/* ---------------- the tabs: DevTools' Target calls over the pipe ---------------- */
+
+#define MAX_TABS 16
+
+static struct {
+    int wfd, rfd;       /* to the browser, from it; -1 when it isn't running */
+    char buf[1 << 16];  /* what came so far: messages end with a NUL */
+    size_t n;
+    int id;             /* the last request's */
+    int create_id;      /* the createTarget whose answer closes `replace` (one tab) */
+    int list_id;        /* the getTargets asked for when the menu opens: the titles as they are now */
+    char replace[40];
+    struct {
+        char id[40], title[200];
+    } tab[MAX_TABS];
+    int ntabs;          /* page tabs, in the order they opened; -1: not known (no DevTools) */
+    char cur[40];       /* the one in front, as far as can be told */
+} T = { .wfd = -1, .rfd = -1, .ntabs = -1 };
+
+static int cdp_send(const char *method, cJSON *params)
+{
+    if (T.wfd < 0) {
+        cJSON_Delete(params);
+        return -1;
+    }
+    cJSON *m = cJSON_CreateObject();
+    cJSON_AddNumberToObject(m, "id", ++T.id);
+    cJSON_AddStringToObject(m, "method", method);
+    if (params)
+        cJSON_AddItemToObject(m, "params", params);
+    char *s = cJSON_PrintUnformatted(m);
+    cJSON_Delete(m);
+    size_t len = s ? strlen(s) + 1 : 0, off = 0; /* the NUL ends the message */
+    while (off < len) {
+        ssize_t w = write(T.wfd, s + off, len - off);
+        if (w < 0 && errno == EINTR)
+            continue;
+        if (w <= 0)
+            break;
+        off += (size_t)w;
+    }
+    free(s);
+    return len && off == len ? T.id : -1;
+}
+
+static cJSON *target(const char *key, const char *val)
+{
+    cJSON *p = cJSON_CreateObject();
+    cJSON_AddStringToObject(p, key, val);
+    return p;
+}
+
+static int tab_find(const char *id)
+{
+    for (int i = 0; i < T.ntabs; i++)
+        if (!strcmp(T.tab[i].id, id))
+            return i;
+    return -1;
+}
+
+static void tabs_changed(void)
+{
+    if (menu_open) {
+        menu_layout();
+        draw_menu();
+    }
+}
+
+/* Target.targetCreated / targetInfoChanged: a page tab, new or retitled. A new one is in front: tabs a
+ * page opens (target=_blank, window.open) and the ones opened from the bar all come up in front. */
+static void tab_info(const cJSON *info, int created)
+{
+    const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(info, "type"));
+    const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(info, "targetId"));
+    const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(info, "title"));
+    const char *url = cJSON_GetStringValue(cJSON_GetObjectItem(info, "url"));
+    if (!type || strcmp(type, "page") || !id)
+        return;
+    int i = tab_find(id);
+    if (i < 0) {
+        if (T.ntabs >= MAX_TABS)
+            return;
+        i = T.ntabs++;
+        snprintf(T.tab[i].id, sizeof T.tab[i].id, "%s", id);
+    }
+    snprintf(T.tab[i].title, sizeof T.tab[i].title, "%s", t && *t ? t : url ? url : "");
+    if (created)
+        snprintf(T.cur, sizeof T.cur, "%s", id);
+    tabs_changed();
+}
+
+static void tab_gone(const char *id)
+{
+    int i = id ? tab_find(id) : -1;
+    if (i < 0)
+        return;
+    memmove(&T.tab[i], &T.tab[i + 1], sizeof T.tab[0] * (size_t)(T.ntabs - i - 1));
+    T.ntabs--;
+    if (!strcmp(T.cur, id)) /* the browser picks the next one; the window title says which (tab_match) */
+        snprintf(T.cur, sizeof T.cur, "%s", T.ntabs ? T.tab[T.ntabs - 1].id : "");
+    tabs_changed();
+}
+
+/* The window's title is the front tab's ("Title - Chromium"): when the tab thought to be in front doesn't
+ * match it and another does, that one is (a tab closed, or Ctrl+Tab from the iPhone's keyboard). */
+static void tab_match(const char *wtitle)
+{
+    int best = -1;
+    for (int i = 0; i < T.ntabs; i++) {
+        size_t l = strlen(T.tab[i].title);
+        if (!l || strncmp(wtitle, T.tab[i].title, l) || (wtitle[l] && strncmp(wtitle + l, " - ", 3)))
+            continue;
+        if (!strcmp(T.tab[i].id, T.cur))
+            return;
+        best = i;
+    }
+    if (best >= 0) {
+        snprintf(T.cur, sizeof T.cur, "%s", T.tab[best].id);
+        tabs_changed();
+    }
+}
+
+static void cdp_message(char *msg)
+{
+    cJSON *m = cJSON_Parse(msg);
+    if (!m)
+        return;
+    const char *method = cJSON_GetStringValue(cJSON_GetObjectItem(m, "method"));
+    cJSON *params = cJSON_GetObjectItem(m, "params");
+    if (method && !strcmp(method, "Target.targetCreated"))
+        tab_info(cJSON_GetObjectItem(params, "targetInfo"), 1);
+    else if (method && !strcmp(method, "Target.targetInfoChanged"))
+        tab_info(cJSON_GetObjectItem(params, "targetInfo"), 0);
+    else if (method && !strcmp(method, "Target.targetDestroyed"))
+        tab_gone(cJSON_GetStringValue(cJSON_GetObjectItem(params, "targetId")));
+    else if (!method && T.list_id && cJSON_GetNumberValue(cJSON_GetObjectItem(m, "id")) == T.list_id) {
+        T.list_id = 0; /* titles only: which tabs exist is the events' business */
+        const cJSON *info;
+        cJSON_ArrayForEach(info, cJSON_GetObjectItem(cJSON_GetObjectItem(m, "result"), "targetInfos"))
+        {
+            const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(info, "targetId"));
+            if (id && tab_find(id) >= 0)
+                tab_info(info, 0);
+        }
+    } else if (!method && T.create_id && cJSON_GetNumberValue(cJSON_GetObjectItem(m, "id")) == T.create_id) {
+        T.create_id = 0; /* the new tab exists (or failed to): only then is the old one closed */
+        if (cJSON_GetObjectItem(m, "result") && T.replace[0] && tab_find(T.replace) >= 0)
+            cdp_send("Target.closeTarget", target("targetId", T.replace));
+        T.replace[0] = 0;
+    } else if (!method && cJSON_GetObjectItem(m, "error")) {
+        char *e = cJSON_PrintUnformatted(cJSON_GetObjectItem(m, "error"));
+        LOG("devtools: %s", e ? e : "error");
+        free(e);
+    }
+    cJSON_Delete(m);
+}
+
+static void cdp_close(void)
+{
+    if (T.wfd >= 0)
+        close(T.wfd);
+    if (T.rfd >= 0)
+        close(T.rfd);
+    T.wfd = T.rfd = -1;
+    T.n = 0;
+    T.ntabs = -1;
+    T.cur[0] = T.replace[0] = 0;
+    T.create_id = T.list_id = 0;
+    tabs_changed();
+}
+
+static void cdp_read(void)
+{
+    for (;;) {
+        ssize_t r = read(T.rfd, T.buf + T.n, sizeof T.buf - 1 - T.n);
+        if (r < 0 && errno == EINTR)
+            continue;
+        if (r < 0 && errno == EAGAIN)
+            break;
+        if (r <= 0) { /* the browser went */
+            cdp_close();
+            return;
+        }
+        T.n += (size_t)r;
+        T.buf[T.n] = 0;
+        char *p = T.buf, *end;
+        while ((end = memchr(p, 0, (size_t)(T.buf + T.n - p))) && end < T.buf + T.n) {
+            cdp_message(p);
+            p = end + 1;
+        }
+        T.n -= (size_t)(p - T.buf);
+        memmove(T.buf, p, T.n);
+        if (T.n >= sizeof T.buf - 1) { /* one message too big for the buffer: none of ours is */
+            LOG("devtools: message over %zu bytes, dropped", sizeof T.buf);
+            T.n = 0;
+        }
+    }
+}
+
+static void tab_select(int i)
+{
+    if (i < 0 || i >= T.ntabs)
+        return;
+    snprintf(T.cur, sizeof T.cur, "%s", T.tab[i].id);
+    cdp_send("Target.activateTarget", target("targetId", T.tab[i].id));
+}
+
+static void tab_close_current(void)
+{
+    if (T.ntabs > 1 && T.cur[0]) /* never the last one: that would end the browser */
+        cdp_send("Target.closeTarget", target("targetId", T.cur));
+}
+
 static void browser_start(void)
 {
     if (BR.pid > 0)
@@ -328,7 +554,27 @@ static void browser_start(void)
         else
             random_seed(BR.seed, sizeof BR.seed);
     }
-    BR.pid = spawn(browser_argv(conf("home", "about:blank")));
+    int to[2] = { -1, -1 }, from[2] = { -1, -1 };
+    int devtools = !pipe2(to, O_CLOEXEC) && !pipe2(from, O_CLOEXEC);
+    BR.pid = spawn(browser_argv(conf("home", "about:blank"), devtools), devtools ? to[0] : -1, devtools ? from[1] : -1);
+    if (to[0] >= 0)
+        close(to[0]);
+    if (from[1] >= 0)
+        close(from[1]);
+    if (devtools && BR.pid > 0) {
+        T.wfd = to[1];
+        T.rfd = from[0];
+        fcntl(T.rfd, F_SETFL, O_NONBLOCK);
+        T.ntabs = 0;
+        cJSON *p = cJSON_CreateObject();
+        cJSON_AddBoolToObject(p, "discover", 1);
+        cdp_send("Target.setDiscoverTargets", p); /* every tab there is, then each change */
+    } else {
+        if (to[1] >= 0)
+            close(to[1]);
+        if (from[0] >= 0)
+            close(from[0]);
+    }
     BR.started = time(NULL);
     LOG("browser started (pid %d, seed %s)", (int)BR.pid, BR.seed);
     draw_bar();
@@ -353,6 +599,7 @@ static void browser_stop(void)
         waitpid(BR.pid, NULL, 0);
         BR.pid = 0;
     }
+    cdp_close();
     LOG("browser stopped");
 }
 
@@ -379,10 +626,11 @@ static void new_identity(void)
     browser_start();
 }
 
-/* Kiosk has no address bar to type into, so a URL goes to the running browser through a second copy of
- * itself (its process singleton), which opens it in a new tab. Once the title changes, the new tab is in
- * front and there are two: the first is closed, so one tab stays open. Until then nothing is closed,
- * since closing the last tab ends the browser. */
+/* Kiosk has no address bar to type into, so a URL opens in a new tab (Target.createTarget), and with one_tab
+ * the tab it replaces is closed once the new one exists: closing the last tab would end the browser.
+ *
+ * Without DevTools it goes through a second copy of the browser (its process singleton), which opens it in
+ * a new tab. Once the title changes, the new tab is in front and there are two: the first is closed. */
 static struct {
     double until; /* waiting for the new tab's title, until then */
     char before[512];
@@ -394,7 +642,16 @@ static void browser_open(const char *url)
         browser_start();
         return;
     }
-    if (spawn(browser_argv(url)) > 0 && strcmp(conf("one_tab", "1"), "0")) {
+    int one = strcmp(conf("one_tab", "1"), "0") != 0;
+    if (T.wfd >= 0) {
+        int id = cdp_send("Target.createTarget", target("url", url));
+        if (id > 0 && one && T.cur[0]) {
+            T.create_id = id;
+            snprintf(T.replace, sizeof T.replace, "%s", T.cur);
+        }
+        return;
+    }
+    if (spawn(browser_argv(url, 0), -1, -1) > 0 && one) {
         OPEN.until = now_s() + 5;
         snprintf(OPEN.before, sizeof OPEN.before, "%s", title);
     }
@@ -408,6 +665,7 @@ static void reap(void)
         if (p != BR.pid)
             continue; /* a URL handed over */
         BR.pid = 0;
+        cdp_close();
         LOG("browser exited (%s %d)", WIFSIGNALED(st) ? "signal" : "status",
             WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st));
         if (!BR.want)
@@ -561,12 +819,44 @@ static void draw_bar(void)
     XFlush(dpy);
 }
 
-enum { M_HOME, M_NEXT_TAB, M_CLOSE_TAB, M_NEW_ID, M_RESTART, M_STARTSTOP, M_PROXY, M_COUNT };
+/* The menu's rows. The tabs are listed only when there is more than one, with Close tab under them; one tab
+ * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W). */
+enum { M_HOME, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_NEW_ID, M_RESTART, M_STARTSTOP, M_PROXY };
+
+static struct {
+    int kind, tab;
+} items[MAX_TABS + 8];
+static int nitems;
+
+static int menu_w(void) { return W * 3 / 5; }
+
+static void menu_layout(void)
+{
+    nitems = 0;
+#define ITEM(k, t) (items[nitems].kind = (k), items[nitems].tab = (t), nitems++)
+    ITEM(M_HOME, -1);
+    if (T.ntabs > 1) {
+        int room = (H - B) / B - 6; /* the rows that fit on the screen beside the others */
+        for (int i = 0; i < T.ntabs && i < room; i++)
+            ITEM(M_TAB, i);
+        ITEM(M_CLOSE_TAB, -1);
+    } else if (T.ntabs < 0 && BR.pid > 0) {
+        ITEM(M_NEXT_TAB, -1);
+        ITEM(M_CLOSE_TAB, -1);
+    }
+    ITEM(M_NEW_ID, -1);
+    ITEM(M_RESTART, -1);
+    ITEM(M_STARTSTOP, -1);
+    ITEM(M_PROXY, -1);
+#undef ITEM
+    XResizeWindow(dpy, menu, (unsigned)menu_w(), (unsigned)(B * nitems));
+}
 
 static void menu_label(int i, char *out, size_t cap)
 {
-    switch (i) {
+    switch (items[i].kind) {
     case M_HOME: snprintf(out, cap, "Home"); break;
+    case M_TAB: snprintf(out, cap, "%s", T.tab[items[i].tab].title[0] ? T.tab[items[i].tab].title : "New tab"); break;
     case M_NEXT_TAB: snprintf(out, cap, "Next tab"); break;
     case M_CLOSE_TAB: snprintf(out, cap, "Close tab"); break;
     case M_NEW_ID: snprintf(out, cap, "New identity"); break;
@@ -578,8 +868,6 @@ static void menu_label(int i, char *out, size_t cap)
     }
 }
 
-static int menu_w(void) { return W * 3 / 5; }
-
 static void draw_menu(void)
 {
     if (!menu_open)
@@ -587,13 +875,21 @@ static void draw_menu(void)
     GC gc = DefaultGC(dpy, DefaultScreen(dpy));
     int mw = menu_w();
     XSetForeground(dpy, gc, px_field);
-    XFillRectangle(dpy, menu, gc, 0, 0, (unsigned)mw, (unsigned)(B * M_COUNT));
-    for (int i = 0; i < M_COUNT; i++) {
-        char l[80];
+    XFillRectangle(dpy, menu, gc, 0, 0, (unsigned)mw, (unsigned)(B * nitems));
+    for (int i = 0; i < nitems; i++) {
+        char l[220];
         menu_label(i, l, sizeof l);
-        int base = i * B + B / 2 + (font[0]->ascent - font[0]->descent) / 2;
-        text(menu_draw, i == M_PROXY ? &c_dim : &c_text, S * 12, base, l, mw - S * 24);
-        if (i) {
+        int tab = items[i].kind == M_TAB, front = tab && !strcmp(T.tab[items[i].tab].id, T.cur);
+        if (front) { /* the tab in front */
+            XSetForeground(dpy, gc, px_press);
+            XFillRectangle(dpy, menu, gc, 0, i * B, (unsigned)mw, (unsigned)B);
+            XSetForeground(dpy, gc, c_ok.pixel);
+            XFillRectangle(dpy, menu, gc, 0, i * B, (unsigned)(S * 3), (unsigned)B);
+        }
+        int base = i * B + B / 2 + (font[0]->ascent - font[0]->descent) / 2, x = tab ? S * 24 : S * 12;
+        text(menu_draw, items[i].kind == M_PROXY ? &c_dim : &c_text, x, base, l, mw - x - S * 12);
+        int after_front = i && items[i - 1].kind == M_TAB && !strcmp(T.tab[items[i - 1].tab].id, T.cur);
+        if (i && !front && !after_front) { /* no line against the highlighted row */
             XSetForeground(dpy, gc, px_line);
             XFillRectangle(dpy, menu, gc, S * 12, i * B, (unsigned)(mw - S * 12), (unsigned)S);
         }
@@ -607,6 +903,10 @@ static void menu_show(int on)
         return;
     menu_open = on;
     if (on) {
+        /* the events carry a tab's title only when it navigates, not when the page sets it */
+        if (T.ntabs > 1)
+            T.list_id = cdp_send("Target.getTargets", NULL);
+        menu_layout();
         XMapRaised(dpy, menu);
         draw_menu();
         /* a tap anywhere else closes it: the grab sends it here */
@@ -877,11 +1177,18 @@ static void edit_key(XKeyEvent *ev)
 static void menu_action(int i)
 {
     KeySym ctrl = XK_Control_L;
+    int kind = items[i].kind, tab = items[i].tab;
     menu_show(0);
-    switch (i) {
+    switch (kind) {
     case M_HOME: browser_open(conf("home", "about:blank")); break;
+    case M_TAB: tab_select(tab); break;
     case M_NEXT_TAB: send_keys(&ctrl, 1, XK_Tab); break;
-    case M_CLOSE_TAB: send_keys(&ctrl, 1, XK_w); break; /* the last one ends the browser: it restarts */
+    case M_CLOSE_TAB:
+        if (T.wfd >= 0)
+            tab_close_current();
+        else
+            send_keys(&ctrl, 1, XK_w); /* the last one ends the browser: it restarts */
+        break;
     case M_NEW_ID: new_identity(); break;
     case M_RESTART:
         browser_stop();
@@ -1004,7 +1311,7 @@ int main(int argc, char **argv)
     long strut[12] = { 0, 0, B, 0, 0, 0, 0, 0, 0, W - 1, 0, 0 };
     XChangeProperty(dpy, bar, A[A_NET_STRUT], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)strut, 12);
     XStoreName(dpy, bar, "rd-shell");
-    menu = XCreateWindow(dpy, root, W - menu_w(), B, (unsigned)menu_w(), (unsigned)(B * M_COUNT), 0, CopyFromParent,
+    menu = XCreateWindow(dpy, root, W - menu_w(), B, (unsigned)menu_w(), (unsigned)B, 0, CopyFromParent,
                          InputOutput, CopyFromParent, CWOverrideRedirect | CWBackPixel | CWEventMask, &wa);
     bar_draw = XftDrawCreate(dpy, bar, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
     menu_draw = XftDrawCreate(dpy, menu, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
@@ -1081,6 +1388,7 @@ int main(int argc, char **argv)
                 if (ev.xproperty.window == active &&
                     (ev.xproperty.atom == A[A_NET_NAME] || ev.xproperty.atom == XA_WM_NAME)) {
                     read_title();
+                    tab_match(title);
                     if (OPEN.until && strcmp(title, OPEN.before)) { /* the new tab is in front */
                         KeySym ctrl = XK_Control_L;
                         OPEN.until = 0;
@@ -1100,7 +1408,7 @@ int main(int argc, char **argv)
                     break;
                 if (menu_open) {
                     int x = ev.xbutton.x_root - (W - menu_w()), y = ev.xbutton.y_root - B;
-                    if (x >= 0 && x < menu_w() && y >= 0 && y < B * M_COUNT)
+                    if (x >= 0 && x < menu_w() && y >= 0 && y < B * nitems)
                         menu_action(y / B);
                     else if (ev.xbutton.y_root < B && ev.xbutton.x_root >= W - B)
                         menu_show(0); /* the ⋯ again */
@@ -1135,17 +1443,20 @@ int main(int argc, char **argv)
         if (PX.fd >= 0 && PX.deadline < next)
             next = PX.deadline;
 
-        struct pollfd pf[3] = { { ConnectionNumber(dpy), POLLIN, 0 }, { sigpipe[0], POLLIN, 0 }, { PX.fd, POLLOUT, 0 } };
+        struct pollfd pf[4] = { { ConnectionNumber(dpy), POLLIN, 0 }, { sigpipe[0], POLLIN, 0 }, { T.rfd, POLLIN, 0 },
+                                { PX.fd, POLLOUT, 0 } };
         int ms = (int)((next - now_s()) * 1000) + 1;
-        if (poll(pf, PX.fd >= 0 ? 3 : 2, ms < 0 ? 0 : ms) < 0 && errno != EINTR)
+        if (poll(pf, PX.fd >= 0 ? 4 : 3, ms < 0 ? 0 : ms) < 0 && errno != EINTR)
             break;
+        if (T.rfd >= 0 && pf[2].revents)
+            cdp_read();
         if (pf[1].revents) {
             char c[16];
             while (read(sigpipe[0], c, sizeof c) > 0) {
             }
             reap();
         }
-        if (PX.fd >= 0 && pf[2].revents) {
+        if (PX.fd >= 0 && pf[3].revents) {
             int err = 0;
             socklen_t el = sizeof err;
             getsockopt(PX.fd, SOL_SOCKET, SO_ERROR, &err, &el);

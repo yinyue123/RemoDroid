@@ -10,9 +10,10 @@
 BROWSER_OUT := $(OUT)/browser
 BROWSER_CFLAGS := $(OPT) $(ARCHFLAGS) -std=gnu11 -D_GNU_SOURCE $(DESK_WARN)
 
-$(BROWSER_OUT)/rd-shell: browser/rd-shell/rd-shell.c
+$(BROWSER_OUT)/rd-shell: browser/rd-shell/rd-shell.c third_party/cjson/cJSON.c
 	@mkdir -p $(@D)
-	$(CC) $(BROWSER_CFLAGS) $$(pkg-config --cflags xft) -o $@ $< $$(pkg-config --libs xft fontconfig) -lX11 -lXtst
+	$(CC) $(BROWSER_CFLAGS) -Ithird_party/cjson $$(pkg-config --cflags xft) -o $@ $^ $$(pkg-config --libs xft fontconfig) \
+	    -lX11 -lXtst -lm
 
 $(BROWSER_OUT)/mpptest: browser/test/mpptest.c browser/agent/video_mpp.c browser/agent/mpp_api.h browser/agent/mppenc.h
 	@mkdir -p $(@D)

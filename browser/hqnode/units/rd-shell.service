@@ -15,6 +15,9 @@ ExecStartPre=/bin/sh -c 'for i in $(seq 50); do [ -S /tmp/.X11-unix/X0 ] && exit
 ExecStart=/usr/bin/rd-shell -c /data/browser.conf
 Restart=always
 RestartSec=2
+# systemd's default is 15% of the container's pids.max (76 of hqnode's 512): Chromium's zygote then
+# cannot fork a renderer and every page stays blank. The container's own limit still applies.
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target

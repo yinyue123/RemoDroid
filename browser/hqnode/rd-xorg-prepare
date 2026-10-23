@@ -9,6 +9,7 @@ rm -f /run/rd-xorg.auth
 umask 027
 xauth -q -f /run/rd-xorg.auth add :0 . "$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 chgrp rdx /run/rd-xorg.auth
+chmod 0640 /run/rd-xorg.auth   # xauth writes 0600 whatever the umask
 # the agent's settings live on /data: the first boot copies the example
 if [ ! -f /data/remodroid/desktop.ini ]; then
 	install -d -o rdagent -g rdagent -m 0750 /data/remodroid

@@ -23,11 +23,14 @@
 # ── the agent, the bar and Rockchip MPP, built for the target ───────────────
 FROM debian:13 AS build
 ARG MPP_COMMIT=20959ec3dabb313b8c33ca0b7b09c06ffd2a9caa
+ARG TARGETARCH
 RUN set -eux; apt-get update; \
     apt-get install -y --no-install-recommends build-essential cmake git ca-certificates pkg-config \
-        libx11-dev libxext-dev libxtst-dev libxrandr-dev libxdamage-dev libxfixes-dev libxft-dev libfontconfig-dev
-# MPP: only the library and its encoder test; Debian has no package of it
-RUN set -eux; git clone https://github.com/rockchip-linux/mpp.git /src/mpp; cd /src/mpp; git checkout "$MPP_COMMIT"; \
+        libx11-dev libxext-dev libxtst-dev libxrandr-dev libxdamage-dev libxfixes-dev libxft-dev libfontconfig-dev libva-dev
+# MPP: only the library and its encoder test; Debian has no package of it. arm64 only: elsewhere
+# there is no Rockchip encoder, and the agent uses VA-API or software.
+RUN set -eux; mkdir -p /opt/mpp/lib /opt/mpp/bin; [ "$TARGETARCH" = arm64 ] || exit 0; \
+    git clone https://github.com/rockchip-linux/mpp.git /src/mpp; cd /src/mpp; git checkout "$MPP_COMMIT"; \
     cmake -S . -B b -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/mpp -DBUILD_TEST=ON -DRKPLATFORM=ON \
         -DHAVE_DRM=ON; \
     cmake --build b -j"$(nproc)"; cmake --install b; \
@@ -35,7 +38,8 @@ RUN set -eux; git clone https://github.com/rockchip-linux/mpp.git /src/mpp; cd /
 COPY . /src/remodroid
 WORKDIR /src/remodroid
 RUN set -eux; make -j"$(nproc)" desktop browser OPT='-O2 -g0'; \
-    make browser-mpptest MPP_INC=/src/mpp/inc OPT='-O2 -g0'
+    if [ "$TARGETARCH" = arm64 ]; then make browser-mpptest MPP_INC=/src/mpp/inc OPT='-O2 -g0'; \
+        cp build/host/browser/mpptest /opt/mpp/bin/; fi
 
 # ── the container ────────────────────────────────────────────────────────────
 FROM ghcr.io/yinyue123/hqnode:debian-13
@@ -49,7 +53,7 @@ RUN set -eux; apt-get update; \
         fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
         libx11-6 libxext6 libxtst6 libxrandr2 libxdamage1 libxfixes3 libxft2 libfontconfig1 \
         libnss3 libgbm1 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 libxkbcommon0 libpango-1.0-0 \
-        libxcomposite1 libdrm2 libdbus-1-3 curl ca-certificates; \
+        libxcomposite1 libdrm2 libva2 libva-drm2 libdbus-1-3 curl ca-certificates; \
     if [ -z "$CLOAKBROWSER_URL" ]; then apt-get install -y --no-install-recommends chromium; fi; \
     rm -rf /var/lib/apt/lists/*
 
@@ -71,7 +75,6 @@ RUN set -eux; groupadd -r rdx; \
 COPY --from=build /src/remodroid/build/host/desktop/libremodroid.so /usr/lib/remodroid/libremodroid.so
 COPY --from=build /src/remodroid/build/host/desktop/remodroid-desktopd /usr/bin/remodroid-desktopd
 COPY --from=build /src/remodroid/build/host/browser/rd-shell /usr/bin/rd-shell
-COPY --from=build /src/remodroid/build/host/browser/mpptest /usr/bin/mpptest
 COPY --from=build /opt/mpp/lib/ /usr/local/lib/
 COPY --from=build /opt/mpp/bin/ /usr/local/bin/
 COPY browser/hqnode/rd-xorg-light.conf browser/hqnode/rd-xorg-small.conf browser/hqnode/rd-xorg-native.conf /etc/X11/

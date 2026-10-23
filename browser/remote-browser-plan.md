@@ -477,18 +477,24 @@ change.
 |---|---|
 | ◀ ▶ ⟳ | Back, forward, reload: Alt+Left, Alt+Right, F5 sent with XTest to the browser window |
 | Title / URL | Shows the window title (`_NET_WM_NAME`). Tap: becomes a text field with the bar focused. Type on the iPhone keyboard; Enter opens it (below) |
-| ⋯ menu | Drops down over the page while open: **Home**, **New identity**, **Restart browser**, **Stop / Start browser**, **Tabs** (Ctrl+Tab, Ctrl+W), **Proxy: ok / down** |
+| ⋯ menu | Drops down over the page while open: **Home**, the **tabs** (only when there is more than one: each by its title, the one in front marked; tap to switch; **Close tab** under them), **New identity**, **Restart browser**, **Stop / Start browser**, **Proxy: ok / down** |
 
-Opening a URL runs CloakBrowser again with the same profile and the URL. Kiosk mode has no address bar,
-so Ctrl+L does nothing (tested). Chromium's process singleton hands the URL to the running browser as a new
-tab. Once the window title changes, the new tab is in front and there are two, so the bar presses Ctrl+1
-and Ctrl+W to close the old one; until then it closes nothing, because closing the last tab would end the
-browser. One tab also matters for the OECT's memory. This uses no DevTools connection at all, so there's
-nothing for a site to detect.
+Kiosk mode has no tab strip and no address bar (Ctrl+L does nothing, tested), so the tabs and URLs go
+through DevTools. `rd-shell` starts CloakBrowser with `--remote-debugging-pipe`: DevTools on fds 3 and 4,
+with no port that a page could scan for. It uses only browser-level `Target` calls, which never attach to a
+page, and no `Runtime.*`, so a site has nothing to detect:
 
-If v2 needs the real URL rather than the title, `rd-shell` can launch CloakBrowser with
-`--remote-debugging-pipe` and use only `Target.setDiscoverTargets`, which reports url and title without
-attaching to the page. It still calls no `Runtime.*`. That's a choice to make after testing, not part of v1.
+| Call | For |
+|---|---|
+| `Target.setDiscoverTargets` | The tabs (`type: "page"`) as they open, navigate and close. A new one is in front: tabs from `target=_blank` or `window.open` and those opened from the bar all come up in front |
+| `Target.getTargets` | When the menu opens: the titles as they are now. The events carry a title only on navigation, not when the page sets `<title>` (tested) |
+| `Target.activateTarget` | A tab tapped in the menu |
+| `Target.createTarget` | A URL typed in the bar, and Home: a new tab, in front. With `one_tab = 1` (the default) the old tab is closed once the answer says the new one exists, so one tab stays open; the OECT's memory needs that |
+| `Target.closeTarget` | Close tab, and the tab a URL replaces. Never the last tab: that would end the browser |
+
+Which tab is in front isn't reported. `rd-shell` takes the newest tab, then the one whose title the window
+title (`Title - Chromium`) starts with, which also catches Ctrl+Tab from the iPhone's keyboard. Without
+the pipe it falls back to Chromium's process singleton for URLs, and to Ctrl+Tab and Ctrl+W for the tabs.
 
 ### 2. The window manager
 
