@@ -129,10 +129,11 @@ static int wait_fd(int fd, int ms)
     return select(fd + 1, &rf, NULL, NULL, &tv);
 }
 
-/* Draws the pointer (premultiplied ARGB from XFixes) into the frame. */
+/* Draws the pointer (premultiplied ARGB from XFixes) into the frame. Not on a touch screen ([input] touch):
+ * a phone shows no pointer, and the one the fingers drag along would sit on whatever was last tapped. */
 static int draw_cursor(dsk_capture_t *c, uint8_t *dst, int stride)
 {
-    if (!c->fixes)
+    if (!c->fixes || dsk_touch_points() > 0)
         return 0;
     XFixesCursorImage *ci = XFixesGetCursorImage(c->d);
     if (!ci)
@@ -174,7 +175,7 @@ int dsk_capture_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
         if (wait_fd(ConnectionNumber(c->d), left < 16 ? left : 16) < 0 && errno != EINTR)
             return -1;
         changed = drain(c);
-        if (!changed && c->fixes) {
+        if (!changed && c->fixes && dsk_touch_points() <= 0) {
             Window r, ch;
             int rx, ry, wx, wy;
             unsigned mask;
