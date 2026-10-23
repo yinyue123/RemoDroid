@@ -206,6 +206,20 @@ static void test_input(void)
     t[1] = 1;
     input_handle(t, sizeof t);
     CHECK(has("move 100 550") && has("button 0 down") && has("button 0 up"), "touch as click");
+    /* with a touch screen ([input] touch): every finger goes to it, none to the mouse */
+    dsk_touch_open("inputtest:/x", 5, NULL, 0);
+    STUB.n = 0;
+    t[1] = 0;
+    t[2] = 3; /* pointer 3, down at the bottom left */
+    input_handle(t, sizeof t);
+    t[1] = 2;
+    rd_put_be16(t + 4, 65535);
+    input_handle(t, sizeof t);
+    CHECK(has("touch 3 0 100 550") && has("touch 3 2 1100 550") && !has("button 0 down"), "touch screen: %s",
+          STUB.n ? STUB.ev[0] : "-");
+    input_handle(reset, sizeof reset);
+    CHECK(has("touch reset"), "reset lifts the fingers");
+    dsk_touch_open("", 0, NULL, 0);
     /* scroll: 1/256 notches */
     STUB.n = 0;
     uint8_t s[13] = { 2 };

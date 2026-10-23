@@ -4,7 +4,10 @@
  * NV12 at the encode size, which goes into a VA surface and is encoded as H.264 or H.265 for low delay:
  * P frames only, one reference, constant bitrate, an IDR on request. The parameter sets (SPS, PPS and
  * the H.265 VPS) and every slice header are written here and handed over as packed headers: Mesa's
- * radeonsi writes none itself and takes the NAL unit types from them. */
+ * radeonsi writes none itself and takes the NAL unit types from them.
+ *
+ * The dsk_hwvideo layer at the end prefers Rockchip MPP (browser/agent/video_mpp.c: the OECT's RK3566)
+ * when it is there; it takes the captured BGRA as it is. */
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -18,6 +21,7 @@
 #include <va/va_enc_hevc.h>
 
 #include "desk.h"
+#include "mppenc.h"
 #include "vaenc.h"
 
 /* ---------------- libva, loaded at run time ---------------- */
@@ -800,7 +804,7 @@ void vaenc_bitrate(vaenc_t *e, int kbps)
 
 const char *vaenc_name(vaenc_t *e) { return e->name; }
 
-/* ---------------- dsk_hwvideo: X11 capture → NV12 → VA-API ---------------- */
+/* ---------------- dsk_hwvideo: X11 capture → NV12 → VA-API, or → BGRA/NV12 → MPP ---------------- */
 
 struct dsk_hwvideo {
     dsk_video_cfg_t cfg;
@@ -808,6 +812,7 @@ struct dsk_hwvideo {
     void *ud;
     dsk_capture_t *cap;
     vaenc_t *enc;
+    mppenc_t *mpp;      /* instead of enc on Rockchip */
     int w, h;           /* the encode size: the fitted size cut to multiples of 16 */
     uint8_t *i420, *nv12;
     int have_frame, fresh, want_key, sent;
@@ -822,7 +827,10 @@ dsk_hwvideo_t *dsk_hwvideo_open(const dsk_video_cfg_t *c, dsk_au_cb cb, void *ud
     v->ud = ud;
     v->w = c->width & ~15;
     v->h = c->height & ~15;
-    if (!(v->enc = vaenc_open(c->codec, c->high, v->w, v->h, c->fps, c->kbps, err, cap)) ||
+    char why[200] = "";
+    if (mppenc_caps() && !(v->mpp = mppenc_open(c->codec, c->high, v->w, v->h, c->fps, c->kbps, why, sizeof why)))
+        LOGW("video: %s; trying VA-API", why);
+    if ((!v->mpp && !(v->enc = vaenc_open(c->codec, c->high, v->w, v->h, c->fps, c->kbps, err, cap))) ||
         !(v->cap = dsk_capture_open(&c->screen, err, cap))) {
         dsk_hwvideo_close(v);
         return NULL;
@@ -849,11 +857,17 @@ int dsk_hwvideo_step(dsk_hwvideo_t *v, int timeout_ms)
         v->cap = dsk_capture_open(&v->cfg.screen, err, sizeof err);
         return v->cap ? 0 : -1;
     }
-    if (r > 0) {
+    if (r > 0 && v->mpp && f.w == v->w && f.h == v->h) { /* the encoder converts BGRA itself */
+        if (mppenc_load_bgra(v->mpp, f.bgra, f.stride) < 0)
+            return -1;
+        v->have_frame = v->fresh = 1;
+    } else if (r > 0) {
         size_t ysz = (size_t)v->w * v->h;
         yuv_from_bgra(f.bgra, f.w, f.h, f.stride, v->i420, v->i420 + ysz, v->i420 + ysz * 5 / 4, v->w, v->h);
         memcpy(v->nv12, v->i420, ysz);
         yuv_nv12_uv(v->i420 + ysz, v->i420 + ysz * 5 / 4, v->nv12 + ysz, v->w, v->h);
+        if (v->mpp && mppenc_load_nv12(v->mpp, v->nv12) < 0)
+            return -1;
         v->have_frame = v->fresh = 1;
     }
     now = rd_mono_ms();
@@ -865,14 +879,15 @@ int dsk_hwvideo_step(dsk_hwvideo_t *v, int timeout_ms)
         return 0;
     int key = v->want_key || !v->sent;
     size_t n;
-    const uint8_t *au = vaenc_frame(v->enc, v->nv12, key, &n);
+    int is_key = key;
+    const uint8_t *au = v->mpp ? mppenc_frame(v->mpp, key, &n, &is_key) : vaenc_frame(v->enc, v->nv12, key, &n);
     if (!au)
         return -1;
     v->want_key = v->fresh = 0;
     v->sent = 1;
     v->last_ms = now;
     if (n)
-        v->cb(v->ud, au, n, (int64_t)now * 1000, key);
+        v->cb(v->ud, au, n, (int64_t)now * 1000, is_key);
     return 0;
 }
 
@@ -880,7 +895,10 @@ void dsk_hwvideo_keyframe(dsk_hwvideo_t *v) { v->want_key = 1; }
 void dsk_hwvideo_bitrate(dsk_hwvideo_t *v, int kbps)
 {
     v->cfg.kbps = kbps;
-    vaenc_bitrate(v->enc, kbps);
+    if (v->mpp)
+        mppenc_bitrate(v->mpp, kbps);
+    else
+        vaenc_bitrate(v->enc, kbps);
 }
 
 void dsk_hwvideo_close(dsk_hwvideo_t *v)
@@ -890,10 +908,11 @@ void dsk_hwvideo_close(dsk_hwvideo_t *v)
     if (v->cap)
         dsk_capture_close(v->cap);
     vaenc_close(v->enc);
+    mppenc_close(v->mpp);
     free(v->i420);
     free(v->nv12);
     free(v);
 }
 
-int dsk_hwvideo_has_h265(void) { return (vaenc_caps() & 2) != 0; }
-const char *dsk_hwvideo_name(dsk_hwvideo_t *v) { return vaenc_name(v->enc); }
+int dsk_hwvideo_has_h265(void) { return ((mppenc_caps() | vaenc_caps()) & 2) != 0; }
+const char *dsk_hwvideo_name(dsk_hwvideo_t *v) { return v->mpp ? mppenc_name(v->mpp) : vaenc_name(v->enc); }

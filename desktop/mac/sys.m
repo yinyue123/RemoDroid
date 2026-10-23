@@ -145,6 +145,16 @@ int dsk_pad_open(int index) { return -1; }
 void dsk_pad_update(int index, const dsk_pad_t *p) {}
 void dsk_pad_close(int index) {}
 
+/* touch screens: only the Linux inputtest backend (browser/) so far */
+int dsk_touch_open(const char *spec, int points, char *err, size_t cap)
+{
+    snprintf(err, cap, "no touch backend on macOS");
+    return *spec ? -1 : 0;
+}
+int dsk_touch_points(void) { return 0; }
+void dsk_touch(const dsk_screen_t *s, int id, int action, double nx, double ny) {}
+void dsk_touch_reset(void) {}
+
 static IOPMAssertionID awake;
 
 void dsk_session(int active)

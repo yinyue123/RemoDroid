@@ -1,0 +1,13 @@
+# The Rockchip encoder's device nodes, made by hqnode for this container ("rkmpp": /dev/mpp_service,
+# /dev/dma_heap/*) owned by its root: handed to group video, which only rdagent is in.
+[Unit]
+Description=Give the encoder's device nodes to group video
+Before=remodroid-desktopd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/rd-browser/rd-video-prepare
+
+[Install]
+WantedBy=multi-user.target

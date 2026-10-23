@@ -1,0 +1,18 @@
+# The remote browser's kill switch on the OECT host: this container reaches only what
+# /etc/rd-killswitch.conf allows (browser/host/rd-killswitch). Install:
+#   install -m 0755 rd-killswitch /usr/local/sbin/ && install -m 0644 rd-killswitch.service /etc/systemd/system/
+#   install -m 0600 rd-killswitch.conf.example /etc/rd-killswitch.conf   # then fill it in
+#   systemctl enable --now rd-killswitch
+[Unit]
+Description=Remote browser kill switch (nftables on the container's pasta cgroup)
+After=hqnode.service nftables.service
+Wants=hqnode.service
+
+[Service]
+ExecStart=/usr/local/sbin/rd-killswitch watch
+ExecStopPost=/usr/local/sbin/rd-killswitch off
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

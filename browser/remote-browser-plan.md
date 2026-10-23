@@ -479,9 +479,11 @@ change.
 | Title / URL | Shows the window title (`_NET_WM_NAME`). Tap: becomes a text field with the bar focused. Type on the iPhone keyboard; Enter opens it (below) |
 | ⋯ menu | Drops down over the page while open: **Home**, **New identity**, **Restart browser**, **Stop / Start browser**, **Tabs** (Ctrl+Tab, Ctrl+W), **Proxy: ok / down** |
 
-Opening a URL runs CloakBrowser again with the same profile and the URL. Chromium's process singleton hands
-it to the running browser as a new tab, and the bar closes the previous tab with Ctrl+W so there's one tab
-at a time. One tab also matters for the OECT's memory. This uses no DevTools connection at all, so there's
+Opening a URL runs CloakBrowser again with the same profile and the URL. Kiosk mode has no address bar,
+so Ctrl+L does nothing (tested). Chromium's process singleton hands the URL to the running browser as a new
+tab. Once the window title changes, the new tab is in front and there are two, so the bar presses Ctrl+1
+and Ctrl+W to close the old one; until then it closes nothing, because closing the last tab would end the
+browser. One tab also matters for the OECT's memory. This uses no DevTools connection at all, so there's
 nothing for a site to detect.
 
 If v2 needs the real URL rather than the title, `rd-shell` can launch CloakBrowser with
@@ -560,6 +562,7 @@ Placed where hqnode already does the same thing for `/dev/null`:
 |---|---|
 | `agent/internal/manager/devices.go` | `prepareDevices` takes the container's device list. Each name maps to a fixed list of host paths. For `rkmpp`: `/dev/mpp_service`, every `/dev/dma_heap/*`, and `/dev/rga` if present. For each, it `stat`s the host node for its type and major:minor, `mknod`s the same in the device tmpfs, and chowns it to the container's mapped root, mode 0660. Nothing outside the list, and never a path from the request |
 | `agent/internal/runtime/mounts.go` `populateDev` | Binds each prepared node at its own path (`/dev/mpp_service`, `/dev/dma_heap/<name>`, `/dev/rga`), creating directories as needed. The fixed six stay as they are |
+| `agent/internal/runtime/mounts.go` `showDeviceTree` | MPP finds out which SoC it is on from `/proc/device-tree/compatible`, a link into `/sys/firmware`, which hqnode masks. For `rkmpp` the daemon copies the host's compatible string into the device directory, and the child shows that one file read-only on a small tmpfs over the mask. The rest of the firmware tree stays hidden |
 | `agent/internal/store/types.go` `Container` | `Devices []string json:"devices,omitempty"`; accepted values: `"rkmpp"` (and later `"gpu"` for DRM render nodes on x86 machines) |
 | `agent/internal/api/containers.go` `createRequest` | `devices`, refused with a clear error if the host lacks the profile's nodes |
 | Host report | The agent reports which profiles the machine can offer (`rkmpp` when `/dev/mpp_service` exists), so the panel shows it |
@@ -753,6 +756,19 @@ the phone's multi-touch path for this computer.
 | `tests/e2e_desktop.py` | a case on Xorg dummy + inputtest: send a two-finger `0x01` sequence, assert XI2 touch events |
 
 ---
+
+## What is built (2026-10-23)
+
+| Part | Where | Tested |
+|---|---|---|
+| Touch hook in the agent (`[input] touch`, `caps.touch`, every finger to `dsk_touch`) | `desktop/core/`, stubs in `desktop/win`, `desktop/mac` | `desk_test` (8050 checks); `tests/e2e_desktop.py` passes, so computers without a touch screen still turn taps into clicks |
+| inputtest backend | `browser/agent/touch_inputtest.c` | `browser/test/touch_test.sh` against a real Xorg 21.1 (dummy screen, user namespace): message layout matches the X server's header, a pinch and a reset arrive as XI2 touches, fingers land within 1 px |
+| Viewer: raw touch for computers that report `touch` | `web/app.js` | Syntax only; the iPhone is step 6 |
+| MPP encoder (BGRA in, H.265/H.264 out), tried before VA-API | `browser/agent/video_mpp.c`, hook in `desktop/linux/video_vaapi.c` | Builds; `MppApi`'s layout and every constant checked against MPP's own headers (`make browser-mpptest MPP_INC=…`). Encoding needs the OECT (step 1: `mpptest`) |
+| `rd-shell` | `browser/rd-shell/rd-shell.c` | On Xvfb at 880×1904 with Chrome: kiosk placed below the bar (440×908 CSS px, `devicePixelRatio` 2, `availHeight` 908 of 952), typing a URL, one tab kept, back/forward, menu, New identity (new seed, empty profile), restart after a crash, clean stop |
+| The image and its scripts | `browser/hqnode/` | Not built yet: it needs an arm64 builder and CloakBrowser's download |
+| Kill switch | `browser/host/rd-killswitch` | nftables accepts the rules (`nft -c`); the cgroup match needs the OECT's cgroup v2 |
+| hqnode `rkmpp` option | hqnode `agent/internal/{store,api,manager,runtime}`, `server/internal/{api,agent,store}` | Unit tests for the profiles (only character devices, owned by the container's root, missing nodes refused) and mount tests in a private namespace (nodes bound, paths out of `/dev` refused, compatible file read-only, the rest masked); all agent and panel tests pass. Not yet: the panel's web page (create through `create.sh` or the API) and the machine report of available profiles |
 
 ## Build order
 

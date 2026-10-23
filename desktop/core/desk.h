@@ -86,6 +86,15 @@ void dsk_mouse_scroll(double dx, double dy);                       /* notches; d
 void dsk_key(int hid, int down);                                   /* USB HID usage (keyboard page) */
 void dsk_text(const char *utf8);
 
+/* ---- touch screen: real multi-touch, for viewers that send every finger (agent thread); optional ---- */
+/* spec names the backend, e.g. "inputtest:/run/rd-touch.sock" (Linux: browser/agent/touch_inputtest.c);
+ * points is how many fingers it takes. 0, or -1 with the reason. Opening again replaces the backend. */
+int  dsk_touch_open(const char *spec, int points, char *err, size_t cap);
+int  dsk_touch_points(void); /* fingers the open backend takes; 0 = none (touch falls back to the mouse) */
+/* One finger: id is the viewer's pointer id (0..9); action 0 down, 1 up, 2 move, 3 cancel; 0..1 across s. */
+void dsk_touch(const dsk_screen_t *s, int id, int action, double nx, double ny);
+void dsk_touch_reset(void); /* lift every finger */
+
 /* ---- gamepads: virtual Xbox 360 pads the computer's games see (agent thread); optional ---- */
 /* Buttons in the W3C standard-gamepad order: bit 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 View/Back,
  * 9 Menu/Start, 10 left stick, 11 right stick, 12 up, 13 down, 14 left, 15 right, 16 Guide. Sticks

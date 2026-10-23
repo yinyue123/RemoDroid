@@ -67,6 +67,17 @@ static void load_conf(void)
     D.notify = desk_conf_bool("desktop", "notify", 1);
     D.lock_on_disc = desk_conf_bool("desktop", "lock_on_disconnect", 0);
     D.audio = desk_conf_bool("desktop", "audio", 1);
+    /* a touch screen of its own, e.g. a container's Xorg with the inputtest driver (browser/) */
+    static char touch[256];
+    const char *t = desk_conf("input", "touch", "");
+    if (strcmp(t, touch)) {
+        char err[200] = "";
+        snprintf(touch, sizeof touch, "%s", t);
+        if (*t && dsk_touch_open(t, (int)desk_conf_int("input", "touch_points", 5), err, sizeof err) < 0)
+            LOGW("touch: %s: %s", t, err);
+        else if (!*t)
+            dsk_touch_open("", 0, err, sizeof err);
+    }
 }
 
 void desk_refresh_screens(void)

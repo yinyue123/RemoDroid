@@ -1,0 +1,23 @@
+; /data/remodroid/desktop.ini: the RemoDroid desktop agent in the remote browser's container.
+; Pair it once (the panel's Agents → Add → Computer gives the code):
+;   remodroid-desktopd -c /data/remodroid/desktop.ini pair --panel https://your.panel --code XXXX-XXXX --name oect-browser
+; then: systemctl restart remodroid-desktopd
+
+[input]
+; the touch screen: every finger from the iPhone goes to Xorg's inputtest device (rd-xorg-*.conf)
+touch = inputtest:/run/rd-touch.sock
+touch_points = 5
+
+[desktop]
+; nothing crosses between the browser and the iPhone but the picture and the input
+clipboard_sync = false
+allow_shell = false
+notify = false
+audio = false
+
+[files]
+; uploads refused (any file over 0 MB)
+max_mb = 0
+
+[video]
+max_fps = 30

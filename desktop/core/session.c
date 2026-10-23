@@ -224,6 +224,7 @@ void session_channel_open(const char *label)
     cJSON_AddBoolToObject(caps, "audio", S.audio_ok && audio_available());
     cJSON_AddBoolToObject(caps, "keyboard", 1);
     cJSON_AddBoolToObject(caps, "mouse", 1);
+    cJSON_AddNumberToObject(caps, "touch", dsk_touch_points()); /* > 0: send every finger as 0x01 */
     char why[160] = "";
     cJSON_AddBoolToObject(caps, "gamepad", dsk_pad_supported(why, sizeof why));
     if (*why)

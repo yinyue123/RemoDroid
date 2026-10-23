@@ -65,6 +65,18 @@ void dsk_pad_update(int index, const dsk_pad_t *p)
     rec("pad %d %05x %d %d %d %d %d %d", index, (unsigned)p->buttons, p->lx, p->ly, p->rx, p->ry, p->lt, p->rt);
 }
 void dsk_pad_close(int index) { rec("pad %d close", index); }
+int STUB_TOUCH;
+int dsk_touch_open(const char *spec, int points, char *err, size_t cap)
+{
+    STUB_TOUCH = *spec ? points : 0;
+    return 0;
+}
+int dsk_touch_points(void) { return STUB_TOUCH; }
+void dsk_touch(const dsk_screen_t *s, int id, int action, double nx, double ny)
+{
+    rec("touch %d %d %d %d", id, action, (int)(s->x + nx * s->w + 0.5), (int)(s->y + ny * s->h + 0.5));
+}
+void dsk_touch_reset(void) { rec("touch reset"); }
 int dsk_lock(void) { return 0; }
 void dsk_notify(const char *title, const char *text) {}
 const char *dsk_config_dir(void) { return "."; }

@@ -1,0 +1,10 @@
+#!/bin/sh
+# The encoder's nodes (hqnode "rkmpp") to group video, mode 0660. Missing ones are not an error: the
+# agent then encodes in software and says why.
+for n in /dev/mpp_service /dev/dma_heap/* /dev/rga; do
+	[ -c "$n" ] || continue
+	chgrp video "$n" && chmod 0660 "$n" && echo "rd-video: $n"
+done
+[ -r /proc/device-tree/compatible ] && echo "rd-video: SoC $(tr '\0' ' ' < /proc/device-tree/compatible)" ||
+	echo "rd-video: /proc/device-tree/compatible isn't readable; MPP can't tell which SoC this is"
+exit 0

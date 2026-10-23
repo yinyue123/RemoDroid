@@ -1,0 +1,18 @@
+#!/bin/sh
+# Before Xorg starts: the screen config named by screen= in /data/browser.conf, and a fresh cookie
+# that browser and rdagent (group rdx) can read.
+set -eu
+screen=$(sed -n 's/^[[:space:]]*screen[[:space:]]*=[[:space:]]*\([a-z]*\).*/\1/p' /data/browser.conf 2>/dev/null | tail -n 1)
+case "$screen" in light|small|native) ;; *) screen=light ;; esac
+ln -sf "/etc/X11/rd-xorg-$screen.conf" /run/rd-xorg.conf
+rm -f /run/rd-xorg.auth
+umask 027
+xauth -q -f /run/rd-xorg.auth add :0 . "$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+chgrp rdx /run/rd-xorg.auth
+# the agent's settings live on /data: the first boot copies the example
+if [ ! -f /data/remodroid/desktop.ini ]; then
+	install -d -o rdagent -g rdagent -m 0750 /data/remodroid
+	install -o rdagent -g rdagent -m 0640 /etc/rd-browser/desktop.ini.example /data/remodroid/desktop.ini
+fi
+[ -f /data/browser.conf ] || install -m 0644 /etc/rd-browser/browser.conf.example /data/browser.conf
+echo "rd-xorg: screen $screen"

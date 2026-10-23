@@ -1,5 +1,6 @@
 /* The binary "input" channel on a computer (multi-platform.md §8.2):
- *   0x01 touch   (14 bytes)  pointer 0 acts as the left mouse button (older viewers, touch screens)
+ *   0x01 touch   (14 bytes)  every finger to the touch screen when there is one ([input] touch),
+ *                            else pointer 0 acts as the left mouse button (older viewers)
  *   0x02 scroll  (13 bytes)  x, y, h, v in 1/256 notches
  *   0x03 mouse   (12 bytes)  action, button, buttons, x, y
  *   0x04 key     (10 bytes)  action, HID usage, modifier state
@@ -80,6 +81,8 @@ void input_release_all(void)
     for (int i = 0; i < DSK_MAX_PADS; i++)
         if (pad_on[i] > 0)
             dsk_pad_update(i, &rest);
+    if (dsk_touch_points())
+        dsk_touch_reset();
 }
 
 void input_pads_close(void)
@@ -109,7 +112,11 @@ void input_handle(const uint8_t *d, size_t n)
     events++;
     switch (d[0]) {
     case 0x01: /* touch: action, pointer, tool, x, y, pressure, ts */
-        if (n >= 14 && d[2] == 0) {
+        if (n >= 14 && dsk_touch_points()) {
+            const dsk_screen_t *s = screen();
+            if (s)
+                dsk_touch(s, d[2], d[1], rd_get_be16(d + 4) / 65535.0, rd_get_be16(d + 6) / 65535.0);
+        } else if (n >= 14 && d[2] == 0) {
             move(rd_get_be16(d + 4), rd_get_be16(d + 6));
             if (d[1] == 0)
                 button(0, 1);

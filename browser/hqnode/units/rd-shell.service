@@ -1,0 +1,20 @@
+# The controller bar, window manager and CloakBrowser supervisor (browser/rd-shell).
+[Unit]
+Description=Remote browser: controller bar and CloakBrowser
+After=rd-xorg.service
+Requires=rd-xorg.service
+PartOf=rd-xorg.service
+
+[Service]
+User=browser
+Group=browser
+SupplementaryGroups=rdx
+Environment=DISPLAY=:0 XAUTHORITY=/run/rd-xorg.auth HOME=/var/lib/browser
+# Xorg's socket is there a moment after it starts
+ExecStartPre=/bin/sh -c 'for i in $(seq 50); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.1; done; exit 1'
+ExecStart=/usr/bin/rd-shell -c /data/browser.conf
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

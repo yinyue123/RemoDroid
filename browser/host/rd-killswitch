@@ -1,0 +1,93 @@
+#!/bin/sh
+# The remote browser's kill switch, on the OECT host (remote-browser-plan.md, "Network and the kill
+# switch"). The container can't firewall itself (no CAP_NET_ADMIN), but every connection it makes
+# leaves the host as a socket of its pasta, and hqnode runs each container's pasta in a cgroup of its
+# own, /sys/fs/cgroup/hqnode/<cid>.pasta. nftables matches that cgroup, so these rules cover exactly
+# this container: it may reach the addresses in /etc/rd-killswitch.conf and nothing else — not the
+# internet, not the home network.
+#
+#   rd-killswitch apply     load the rules now
+#   rd-killswitch watch     apply, then again whenever the pasta cgroup is made anew (the container
+#                           restarted: nftables holds the cgroup it resolved, not its name)
+#   rd-killswitch off       remove them
+#   rd-killswitch status    the rules and their counters
+#
+# /etc/rd-killswitch.conf:
+#   cid = 277abc1f8eb0                 the container (hqnode list)
+#   allow = tcp 203.0.113.10 1080      PROTO ADDRESS [PORT]: no port = any (a SOCKS5 UDP relay picks one)
+#   allow = udp 203.0.113.10
+#   allow = tcp 198.51.100.7 443       the RemoDroid panel (the agent's WebSocket)
+#   allow = udp 198.51.100.7 3478      its TURN server (WebRTC then always relays)
+#   allow = udp 192.168.10.1 53        the resolver pasta forwards the container's DNS to (the agent
+#                                      looks the panel up; the browser resolves nothing itself)
+#   scope = container                  or "box": every outgoing connection of the whole host is held to
+#                                      the list (plus what the host needs: hqnoded's panel link, given
+#                                      as more allow lines) — the coarse fallback if the cgroup match
+#                                      can't be used on this kernel
+set -eu
+CONF=${RD_KILLSWITCH_CONF:-/etc/rd-killswitch.conf}
+TABLE=rd_killswitch
+
+val() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" | sed 's/[[:space:]]*$//'; }
+
+rules() {
+	cid=$(val cid | tail -n 1)
+	scope=$(val scope | tail -n 1)
+	[ -n "$cid" ] || [ "$scope" = box ] || { echo "rd-killswitch: no cid in $CONF" >&2; exit 1; }
+	echo "table inet $TABLE {"
+	echo "  chain out {"
+	echo "    type filter hook output priority filter; policy accept;"
+	if [ "$scope" = box ]; then
+		echo "    oifname \"lo\" accept"
+		echo "    jump allow"
+	else
+		echo "    socket cgroupv2 level 2 \"hqnode/$cid.pasta\" jump allow"
+	fi
+	echo "  }"
+	echo "  chain allow {"
+	echo "    ct state established,related accept"
+	val allow | while read -r proto addr port; do
+		case "$addr" in *:*) fam=ip6 ;; *) fam=ip ;; esac
+		case "$proto" in tcp|udp) ;; *) echo "rd-killswitch: bad allow line: $proto $addr $port" >&2; exit 1 ;; esac
+		if [ -n "$port" ]; then
+			echo "    $fam daddr $addr $proto dport $port accept"
+		else
+			echo "    $fam daddr $addr meta l4proto $proto accept"
+		fi
+	done
+	echo "    counter drop comment \"everything else\""
+	echo "  }"
+	echo "}"
+}
+
+apply() {
+	[ -f "$CONF" ] || { echo "rd-killswitch: no $CONF" >&2; exit 1; }
+	scope=$(val scope | tail -n 1)
+	cid=$(val cid | tail -n 1)
+	if [ "$scope" != box ] && [ ! -d "/sys/fs/cgroup/hqnode/$cid.pasta" ]; then
+		echo "rd-killswitch: /sys/fs/cgroup/hqnode/$cid.pasta isn't there (container stopped?); nothing to hold" >&2
+		return 1
+	fi
+	{ nft list table inet $TABLE >/dev/null 2>&1 && echo "delete table inet $TABLE"; rules; } | nft -f -
+	echo "rd-killswitch: applied (${scope:-container}${cid:+ $cid})"
+}
+
+case "${1:-}" in
+apply) apply ;;
+off) nft delete table inet $TABLE 2>/dev/null && echo "rd-killswitch: off" || true ;;
+status) nft list table inet $TABLE ;;
+watch)
+	last=
+	while :; do
+		cid=$(val cid | tail -n 1)
+		now=$(stat -c %i "/sys/fs/cgroup/hqnode/$cid.pasta" 2>/dev/null || echo gone)
+		if [ "$now" != "$last" ] && [ "$now" != gone ]; then
+			apply && last=$now || true
+		elif [ "$now" = gone ]; then
+			last=
+		fi
+		sleep 5
+	done ;;
+rules) rules ;;
+*) sed -n '2,32p' "$0" >&2; exit 2 ;;
+esac

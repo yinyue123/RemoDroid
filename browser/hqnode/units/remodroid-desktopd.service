@@ -1,0 +1,21 @@
+# The RemoDroid desktop agent: the screen to the iPhone (Rockchip MPP H.265), touches and keys back.
+# Paired once with `remodroid-desktopd -c /data/remodroid/desktop.ini pair --panel … --code …`; the
+# pairing is on /data, so a reinstall keeps it.
+[Unit]
+Description=RemoDroid desktop agent for the remote browser
+After=rd-xorg.service rd-video.service network-online.target
+Wants=network-online.target
+PartOf=rd-xorg.service
+
+[Service]
+User=rdagent
+Group=rdagent
+SupplementaryGroups=rdx video
+Environment=DISPLAY=:0 XAUTHORITY=/run/rd-xorg.auth HOME=/var/lib/rdagent
+ExecStartPre=/bin/sh -c 'for i in $(seq 50); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.1; done; exit 1'
+ExecStart=/usr/bin/remodroid-desktopd -c /data/remodroid/desktop.ini
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

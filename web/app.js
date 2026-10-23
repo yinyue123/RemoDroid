@@ -513,7 +513,7 @@ function norm(e) {
   return [clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)];
 }
 function down(e) {
-  if (desk()) { deskPointer('down', e); return; }
+  if (desk() && !rawTouch(e)) { deskPointer('down', e); return; }
   e.preventDefault(); closeMenu();
   try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
   const pid = allocPid(e.pointerId), [x, y] = norm(e);
@@ -522,7 +522,7 @@ function down(e) {
   sendTouch(0, pid, x, y, e.pressure || 1);
 }
 function move(e) {
-  if (desk()) { deskPointer('move', e); return; }
+  if (desk() && !rawTouch(e)) { deskPointer('move', e); return; }
   if (!pidMap.has(e.pointerId)) return;
   e.preventDefault();
   const pid = pidMap.get(e.pointerId), [x, y] = norm(e);
@@ -531,7 +531,7 @@ function move(e) {
   sendTouch(2, pid, x, y, e.pressure || 1);
 }
 function up(e, action) {
-  if (desk()) { deskPointer(action === 1 ? 'up' : 'cancel', e); return; }
+  if (desk() && !rawTouch(e)) { deskPointer(action === 1 ? 'up' : 'cancel', e); return; }
   if (!pidMap.has(e.pointerId)) return;
   const pid = pidMap.get(e.pointerId), [x, y] = norm(e);
   sendTouch(action, pid, x, y, 0);
@@ -562,6 +562,9 @@ stage.addEventListener('wheel', e => {
 
 /* ================= computers: mouse and keyboard (multi-platform.md §8.2, §9) ================= */
 const desk = () => !DEMO && !!(st.device && st.device.platform && st.device.platform !== 'android');
+/* A computer with a touch screen of its own (caps.touch: the remote browser's inputtest device, browser/)
+ * takes fingers as they are, like a phone; a mouse there is still a mouse. */
+const rawTouch = e => e.pointerType === 'touch' && !!(st.ready && st.ready.caps && st.ready.caps.touch > 0);
 const appleHere = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
 const noun = () => desk() ? 'computer' : 'phone';
 function sendInput(u8, log) {

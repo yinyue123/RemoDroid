@@ -20,7 +20,7 @@ DESK_OS ?= linux
 endif
 DESK_SRC := desktop/$(if $(filter windows,$(DESK_OS)),win,$(if $(filter macos,$(DESK_OS)),mac,linux))
 
-DESK_INCS := -Idesktop -Idesktop/core -I$(DESK_SRC) -Irtc -Icommon -Ithird_party/libev -Ithird_party/cjson \
+DESK_INCS := -Idesktop -Idesktop/core -I$(DESK_SRC) -Ibrowser/agent -Irtc -Icommon -Ithird_party/libev -Ithird_party/cjson \
              -Ithird_party/inih -Ithird_party/picohttpparser -Ithird_party/mbedtls/include \
              -Ithird_party/libsrtp/include -Ithird_party/libsrtp/crypto/include -Ithird_party/usrsctp/usrsctplib \
              -Ithird_party/minih264 -Ithird_party/opus/include
@@ -72,8 +72,10 @@ DESK_CFLAGS := $(OPT) $(ARCHFLAGS) -std=gnu11 -fno-strict-aliasing -ffunction-se
                -fvisibility=hidden $(DESK_PIC) $(DESK_INCS) $(DESK_DEFS)
 DESK_WARN   := -Wall -Wextra -Wno-unused-parameter -Wshadow -Wno-missing-field-initializers -Wno-format-truncation
 
+# Linux also gets the remote browser's backends (browser/agent: the inputtest touch screen, Rockchip MPP)
+DESK_EXTRA := $(if $(filter linux,$(DESK_OS)),browser/agent)
 DESK_OWN := $(wildcard desktop/core/*.c) $(wildcard $(DESK_SRC)/*.c) $(wildcard $(DESK_SRC)/*.m) \
-            $(wildcard rtc/*.c) \
+            $(foreach d,$(DESK_EXTRA),$(wildcard $(d)/*.c)) $(wildcard rtc/*.c) \
             common/util.c common/tunnel.c common/msg.c common/stun.c common/plat.c common/wsc.c common/ws.c \
             common/httpc.c common/enroll.c common/cas.c common/conf.c
 DESK_TP  := third_party/libev/ev.c third_party/cjson/cJSON.c third_party/inih/ini.c \
@@ -137,17 +139,19 @@ $(DESK_OUT)/remodroid-desktopd$(DESK_EXE): desktop/app/headless.c $(DESK_LIB) $(
 	    $(DESK_LINK) $(DESK_RPATH)
 
 # Unit tests of the shared desktop code (no display needed)
-$(DESK_OUT)/desk_test$(DESK_EXE): desktop/test/desk_test.c $(filter-out $(DESK_OUT)/obj/$(DESK_SRC)/%,$(DESK_OBJ))
+$(DESK_OUT)/desk_test$(DESK_EXE): desktop/test/desk_test.c $(filter-out $(DESK_OUT)/obj/$(DESK_SRC)/% \
+                                    $(DESK_OUT)/obj/browser/%,$(DESK_OBJ))
 	$(CC) $(DESK_CFLAGS) $(DESK_WARN) -o $@ $^ desktop/test/stubs.c $(DESK_TEST_LIBS)
 
 desktop: $(DESK_LIB) $(DESK_OUT)/remodroid-desktopd$(DESK_EXE)
 desktop-test: $(DESK_OUT)/desk_test$(DESK_EXE)
 
 # Linux: the VA-API encoder on this machine's GPU (desktop/test/vatest.c), run by hand where there is one
-VATEST_SRC := desktop/test/vatest.c desktop/linux/video_vaapi.c desktop/linux/capture_x11.c desktop/core/yuv.c
-$(DESK_OUT)/vatest: $(VATEST_SRC) desktop/linux/vaenc.h
+VATEST_SRC := desktop/test/vatest.c desktop/linux/video_vaapi.c desktop/linux/capture_x11.c desktop/core/yuv.c \
+              browser/agent/video_mpp.c
+$(DESK_OUT)/vatest: $(VATEST_SRC) desktop/linux/vaenc.h browser/agent/mppenc.h
 	@mkdir -p $(@D)
-	$(CC) $(OPT) $(ARCHFLAGS) -std=gnu11 -D_GNU_SOURCE -DVATEST_SCREEN -Idesktop -Idesktop/core -Idesktop/linux -Icommon \
+	$(CC) $(OPT) $(ARCHFLAGS) -std=gnu11 -D_GNU_SOURCE -DVATEST_SCREEN -Idesktop -Idesktop/core -Idesktop/linux -Ibrowser/agent -Icommon \
 	    -Ithird_party/libev -Ithird_party/cjson -Ithird_party/inih $(DESK_WARN) -o $@ $(VATEST_SRC) \
 	    -lX11 -lXext -lXdamage -lXfixes -ldl -lpthread
 desktop-vatest: $(DESK_OUT)/vatest
@@ -157,3 +161,5 @@ desktop-vatest: $(DESK_OUT)/vatest
 .PHONY: desktop desktop-test desktop-vatest
 
 include desktop/app/app.mk
+
+include browser/browser.mk

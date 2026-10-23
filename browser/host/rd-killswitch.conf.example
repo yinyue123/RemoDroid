@@ -1,0 +1,12 @@
+# /etc/rd-killswitch.conf on the OECT host. See rd-killswitch for the format.
+cid = 000000000000
+scope = container
+# the SOCKS5 proxy: TCP to its port, UDP to any (its UDP relay)
+allow = tcp 203.0.113.10 1080
+allow = udp 203.0.113.10
+# the RemoDroid panel and its TURN server
+allow = tcp 198.51.100.7 443
+allow = udp 198.51.100.7 3478
+allow = tcp 198.51.100.7 3478
+# the resolver the container's DNS goes to (pasta forwards to the host's)
+allow = udp 192.168.10.1 53

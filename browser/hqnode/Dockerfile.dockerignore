@@ -1,0 +1,9 @@
+# The build context is the repository root; the image needs the sources, not builds or history.
+.git
+build
+back
+doc
+android
+packaging/merlin
+tests
+**/.DS_Store

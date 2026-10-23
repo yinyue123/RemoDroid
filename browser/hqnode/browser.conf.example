@@ -1,0 +1,35 @@
+# /data/browser.conf: the remote browser's settings, read by rd-shell (and screen= by rd-xorg).
+# key = value; a line starting with # is a comment. After a change:
+#   systemctl restart rd-shell             (screen: systemctl restart rd-xorg rd-shell)
+
+# The SOCKS5 proxy every page, its DNS and its WebRTC go through. Without one the browser isn't started,
+# since a page would see this machine's own address (allow_direct = 1 starts it anyway).
+# A proxy that needs a password: run a local forwarder (gost, microsocks) and point this at 127.0.0.1.
+proxy = socks5://203.0.113.10:1080
+webrtc_ip = auto
+
+# Match the proxy's exit: the page compares these with the address it sees.
+timezone = America/New_York
+lang = en-US
+
+# The screen: the iPhone 14 Plus's shape. light = 880x1904 at 2x (the OECT's), small = 784x1696 at 2x,
+# native = 1280x2768 at 3x (too heavy for the OECT).
+screen = light
+
+# The fingerprint seed: same seed, same identity. Empty: a new one on every start of rd-shell.
+# "New identity" on the bar picks a new one and empties the profile; with seed_mode = sticky it is
+# written back here, so the identity survives a reboot.
+seed =
+seed_mode = session
+
+home = https://www.google.com/
+search = https://duckduckgo.com/?q=%s
+
+# The browser, and anything to add to its command line (space-separated).
+browser = /opt/cloakbrowser/chrome
+platform = linux
+args =
+profile = /tmp/profile
+renderer_process_limit = 2
+# A URL opened from the bar replaces the tab (1), or opens beside it (0).
+one_tab = 1

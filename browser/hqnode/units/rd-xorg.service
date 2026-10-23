@@ -1,0 +1,17 @@
+# Xorg :0 for the remote browser: the dummy screen (screen = light | small | native in
+# /data/browser.conf) and the inputtest touch device at /run/rd-touch.sock. No VT, no /dev/dri,
+# no /dev/input: it runs as the container's root, which hqnode maps to an unprivileged host uid.
+[Unit]
+Description=Xorg for the remote browser
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/lib/rd-browser/rd-xorg-prepare
+ExecStart=/usr/bin/Xorg :0 -auth /run/rd-xorg.auth -config /run/rd-xorg.conf -configdir /etc/X11/rd-xorg.conf.d \
+    -noreset -nolisten tcp -novtswitch -keeptty -logfile /run/rd-xorg.log
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
