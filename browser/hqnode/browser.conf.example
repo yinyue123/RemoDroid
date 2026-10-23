@@ -12,8 +12,8 @@ webrtc_ip = auto
 timezone = America/New_York
 lang = en-US
 
-# The screen: the iPhone 14 Plus's shape. light = 880x1904 at 2x (the OECT's), small = 784x1696 at 2x,
-# native = 1280x2768 at 3x (too heavy for the OECT).
+# The screen: the iPhone 14 Plus's, below its status bar. light = 880x1808 at 2x (the OECT's),
+# small = 784x1616 at 2x, native = 1280x2624 at 3x (too heavy for the OECT).
 screen = light
 
 # The fingerprint seed: same seed, same identity. Empty: a new one on every start of rd-shell.

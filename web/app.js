@@ -836,17 +836,49 @@ async function tickStats() {
   if (statusRefresh) statusRefresh();
 }
 setInterval(tickStats, 1000);
-/* Hold the chip for the layout check; a tap toggles the stats. */
-let chipHold = 0, chipHeld = false;
-$('#chip').addEventListener('pointerdown', () => {
+/* Hold the chip for the layout check, drag it off whatever it covers (it stays where it's put, per
+ * browser), tap it to toggle the stats. */
+const chip = $('#chip');
+let chipHold = 0, chipHeld = false, chipDrag = null, chipPos = null;
+try { chipPos = JSON.parse(localStorage.getItem(KEY + '-chip')); } catch (e) {}
+function placeChip(x, y) {
+  const b = bounds(), w = chip.offsetWidth, h = chip.offsetHeight;
+  x = clamp(x, b.l + MARGIN, Math.max(b.l + MARGIN, innerWidth - b.r - MARGIN - w));
+  y = clamp(y, b.t + MARGIN, Math.max(b.t + MARGIN, innerHeight - b.b - MARGIN - h));
+  chip.style.left = x + 'px'; chip.style.top = y + 'px'; chip.style.right = 'auto';
+  return { x, y };
+}
+function restoreChip() { if (chipPos) placeChip(chipPos.fx * innerWidth, chipPos.fy * innerHeight); }
+chip.addEventListener('pointerdown', e => {
   chipHeld = false;
+  try { chip.setPointerCapture(e.pointerId); } catch (_) {}
+  const r = chip.getBoundingClientRect();
+  chipDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, moved: false };
   chipHold = setTimeout(() => {
     chipHeld = true; S.lc = !S.lc; save(); layoutCheck(S.lc);
     toast(S.lc ? 'Layout check on. Hold the chip again to hide it.' : 'Layout check off');
   }, 700);
 });
-for (const t of ['pointerup', 'pointercancel', 'pointerleave']) $('#chip').addEventListener(t, () => clearTimeout(chipHold));
-$('#chip').addEventListener('click', () => { if (chipHeld) { chipHeld = false; return; } S.stats = !S.stats; save(); tickStats(); syncMenuStates(); });
+chip.addEventListener('pointermove', e => {
+  if (!chipDrag || e.pointerId !== chipDrag.id) return;
+  const dx = e.clientX - chipDrag.sx, dy = e.clientY - chipDrag.sy;
+  if (!chipDrag.moved && Math.hypot(dx, dy) > 6) { chipDrag.moved = true; clearTimeout(chipHold); }
+  if (chipDrag.moved) placeChip(chipDrag.ox + dx, chipDrag.oy + dy);
+});
+function chipUp(e) {
+  clearTimeout(chipHold);
+  if (!chipDrag || e.pointerId !== chipDrag.id) return;
+  if (chipDrag.moved) {
+    chipHeld = true; /* the click that follows is the end of the drag, not a tap */
+    const r = chip.getBoundingClientRect();
+    chipPos = { fx: r.left / innerWidth, fy: r.top / innerHeight };
+    try { localStorage.setItem(KEY + '-chip', JSON.stringify(chipPos)); } catch (_) {}
+  }
+  chipDrag = null;
+}
+chip.addEventListener('pointerup', chipUp);
+chip.addEventListener('pointercancel', chipUp);
+chip.addEventListener('click', () => { if (chipHeld) { chipHeld = false; return; } S.stats = !S.stats; save(); tickStats(); syncMenuStates(); });
 
 /* ================= floating ball + menu ================= */
 const ball = $('#ball'), menu = $('#menu');
@@ -906,7 +938,7 @@ ball.addEventListener('pointerup', ballUp);
 ball.addEventListener('pointercancel', ballUp);
 ball.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#disc').hidden ? toggleMenu() : toDevices(); } });
 function toDevices() { location.href = '/panel.html#devices'; }
-window.addEventListener('resize', () => { restoreBall(); if (!menu.hidden) positionMenu(); });
+window.addEventListener('resize', () => { restoreBall(); restoreChip(); if (!menu.hidden) positionMenu(); });
 function positionMenu() {
   const r = ball.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight, W = innerWidth, H = innerHeight;
   let x = r.left < W / 2 ? r.right + 10 : r.left - 10 - mw;
@@ -2015,6 +2047,7 @@ if (DEMO) {
 }
 layout();
 restoreBall();
+restoreChip();
 armIdle();
 syncMenuStates();
 tickStats();

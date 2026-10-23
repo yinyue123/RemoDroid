@@ -21,7 +21,7 @@ proxy's IP.
 | Android over ADB, or desktop Linux? | **Desktop Linux** | An hqnode container can run Xorg and CloakBrowser; it can't run Android (see below) |
 | Remote control | **RemoDroid desktop agent** + RemoDroid server/panel + the RemoDroid web viewer | Already built: WebRTC, TURN, login, iPhone full-screen viewer, keyboard sheet |
 | Container | **hqnode** (hqnoded arm64), from `ghcr.io/yinyue123/hqnode:debian-13` | glibc, which CloakBrowser (a Chromium build) needs; systemd runs the services |
-| Screen | **Xorg + dummy driver, 880×1904 at 2×**: the iPhone 14 Plus's exact shape | Tested; sized for what four A55 cores can render (see Screen size) |
+| Screen | **Xorg + dummy driver, 880×1808 at 2×**: the iPhone 14 Plus's shape below its status bar | Tested; sized for what four A55 cores can render (see Screen size) |
 | Touch | **Xorg `inputtest` driver** (chosen); `uinput` kept as the fallback | Tested: real XI2 direct-touch events, with no kernel device and no hqnode change |
 | Keyboard | **XTest** (what the desktop agent already does) | Tested on the same Xorg |
 | Video | **Hardware H.265 through Rockchip MPP**: a new `desktop/linux/video_mpp.c` | The RK3566 has no VA-API, so the agent's existing hardware path doesn't apply |
@@ -63,7 +63,7 @@ remodroid-server on AWS (panel, signaling, TURN) ── WS /ws/agent ──┐
 OECT ── Armbian (vendor 6.1) ── hqnoded ── nftables kill switch ── home network (own VLAN)
   └─ hqnode container (debian-13 arm64, systemd, devices: rkmpp)
        ├─ /dev/mpp_service, /dev/dma_heap/*   made by hqnode for this container; group video inside
-       ├─ rd-xorg.service        Xorg :0, dummy 880×1904 + inputtest touch socket /run/rd-touch.sock
+       ├─ rd-xorg.service        Xorg :0, dummy 880×1808 + inputtest touch socket /run/rd-touch.sock
        ├─ rd-shell.service       controller bar + mini window manager + CloakBrowser supervisor
        │    └─ CloakBrowser      kiosk, below the bar; SOCKS5 proxy for all traffic incl. WebRTC
        └─ remodroid-desktopd     X11 capture (BGRA) → MPP H.265 → WebRTC; touches → inputtest, keys → XTest
@@ -86,7 +86,7 @@ Two kinds of traffic leave the container:
 | Storage | 64 GB SSD, one ext4 partition, mounted at `/var/hqnode` | ext4 because hqnode uses idmapped mounts; the eMMC stays for the OS only |
 | Container | hqnode, image `…/hub:remote-browser-hqnode` (arm64) on `hqnode:debian-13`, `devices: ["rkmpp"]` | 4 cores, 1.5 GB RAM, 8 GB root disk, 1 GB `/data` |
 | Browser | CloakBrowser Linux arm64 binary | `--fingerprint-platform=linux`, seed per identity |
-| Screen | Xorg 21.1 + `xserver-xorg-video-dummy` | 880×1904 (multiples of 16, iPhone 14 Plus shape), Chrome scale 2 → 440×952 CSS px |
+| Screen | Xorg 21.1 + `xserver-xorg-video-dummy` | 880×1808 (multiples of 16, iPhone 14 Plus below its status bar), Chrome scale 2 → 440×904 CSS px |
 | Touch | `inputtest` input driver (in `xserver-xorg-core`), `DeviceType "Touch"`, 5 points | The agent writes touch events to its socket |
 | Keyboard | XTest, existing `desktop/linux/input_x11.c` | Typing from the iPhone keyboard sheet arrives as ctrl `text` |
 | Video | Existing X11 capture (MIT-SHM + XDamage) → BGRA into an MPP buffer → RK3566 encoder, H.265 | P frames only, CBR, 30 fps; the encoder converts the colours itself, so the CPU does no YUV work |
@@ -111,12 +111,12 @@ Two kinds of traffic leave the container:
 2. **Encoder check before anything else.** Build Rockchip's MPP (`github.com/rockchip-linux/mpp`) on the
    host and encode a test frame at the planned size, from BGRA input:
    ```
-   mpi_enc_test -t 16777220 -w 880 -h 1904 -f 0x1000b -n 60 -o /tmp/t.h265   # HEVC, BGRA8888
+   mpi_enc_test -t 16777220 -w 880 -h 1808 -f 0x1000b -n 60 -o /tmp/t.h265   # HEVC, BGRA8888
    ```
    - The `-t` and `-f` values are MPP's `MppCodingType` and `MppFrameFormat` numbers; check them against
      `mpp_frame.h` of the commit you build.
    - If BGRA input is refused, the agent has to convert to NV12 first (see Video).
-   - If 1904 lines is refused, use `small` (784×1696) and see Risks.
+   - If 1808 lines is refused, use `small` (784×1616) and see Risks.
 3. **Storage: the 64 GB SSD.** Give it one ext4 partition, mounted at `/var/hqnode` before hqnode
    starts. hqnode keeps everything there: images, each container's `disk.img`, uploads and its swap file.
    ```
@@ -243,7 +243,7 @@ Section "Monitor"
   Identifier "mon"
   HorizSync 5.0-1000.0
   VertRefresh 5.0-200.0
-  Modeline "880x1904"  141.75  880 944 1040 1200  1904 1907 1917 1973 -hsync +vsync   # cvt 880 1904 60
+  Modeline "880x1808"  134.75  880 944 1040 1200  1808 1811 1821 1873 -hsync +vsync   # cvt 880 1808 60
 EndSection
 Section "Screen"
   Identifier "screen"
@@ -252,8 +252,8 @@ Section "Screen"
   DefaultDepth 24
   SubSection "Display"
     Depth 24
-    Modes "880x1904"
-    Virtual 880 1904
+    Modes "880x1808"
+    Virtual 880 1808
   EndSubSection
 EndSection
 Section "InputDevice"
@@ -273,8 +273,8 @@ EndSection
 `rd-xorg-small.conf` is the same with:
 
 ```
-  Modeline "784x1696"  113.00  784 848 928 1072  1696 1699 1709 1757 -hsync +vsync   # cvt 784 1696 60
-  Modes "784x1696" / Virtual 784 1696
+  Modeline "784x1616"  107.50  784 848 928 1072  1616 1619 1629 1675 -hsync +vsync   # cvt 784 1616 60
+  Modes "784x1616" / Virtual 784 1616
 ```
 
 ### Start
@@ -291,22 +291,25 @@ Xorg :0 -config /etc/X11/rd-xorg.conf -configdir /etc/X11/rd-xorg.conf.d \
 
 ### Screen size: the iPhone 14 Plus, proportionally
 
-The iPhone 14 Plus has a 1284×2778 px panel, a 428×926 CSS viewport and a `devicePixelRatio` of 3. The X
-screen keeps that shape (214:463), so the viewer fills the phone's screen with no black bars.
+The iPhone 14 Plus has a 1284×2778 px panel, a 428×926 CSS viewport and a `devicePixelRatio` of 3. Its
+status bar always takes the top 47 pt: no web page can hide it on an iPhone, not even a Home Screen app.
+So the X screen has the shape of what is left, 428×879. The viewer then fills the phone below the status
+bar with no black bars. (The first version had the whole screen's shape, 214:463, and left black strips at
+the sides, tested on the iPhone.)
 
 Both sides must also be multiples of 16, because the encoder works in 16×16 blocks. The agent's encoders
 refuse other sizes or round them down. So the sizes are the nearest multiples of 16:
 
 | `screen =` | X screen | Chrome scale | CSS viewport (below the bar) | Shape vs iPhone | Pixels | On the OECT |
 |---|---|---|---|---|---|---|
-| **`light`** (default) | **880×1904** | **2** | 440×952 (440×908) | 0.00% | 1.68 MP | **yes** |
-| `small` | 784×1696 | 2 | 392×848 (392×804) | +0.01% | 1.33 MP | if `light` is too heavy |
-| `native` | 1280×2768 | 3 | 427×923 (427×879) | +0.05% | 3.54 MP | **no**: 2.1× the pixels to rasterize on A55 cores, and past the encoder's rated rate |
+| **`light`** (default) | **880×1808** | **2** | 440×904 (440×860) | −0.04% | 1.59 MP | **yes** |
+| `small` | 784×1616 | 2 | 392×808 (392×764) | −0.36% | 1.27 MP | if `light` is too heavy |
+| `native` | 1280×2624 | 3 | 427×875 (427×831) | +0.18% | 3.36 MP | **no**: 2.1× the pixels to rasterize on A55 cores, and past the encoder's rated rate |
 
 **Why `light` on the OECT:**
 - Chromium has no GPU here (see Video), so every frame of the page is rasterized by four A55 cores. That,
   not the encoder, is what limits scrolling.
-- The RK3566's encoder is rated for 1080p at 60 fps (124 MP/s). `light` at 30 fps is 50 MP/s.
+- The RK3566's encoder is rated for 1080p at 60 fps (124 MP/s). `light` at 30 fps is 48 MP/s.
 - The page lays out at 440 CSS px wide, 12 px wider than the phone. Mobile layouts treat both the same.
 
 `small` is the step down if scrolling stutters. Switching means changing `screen` in `browser.conf` and
@@ -319,8 +322,8 @@ is for a stronger machine.
 Tested in an Alpine 3.22 rootfs whose `/dev` held only hqnode's nodes (`null zero random urandom tty`),
 first as root and then inside a user namespace (`unshare -r`), as hqnode runs containers:
 
-- Xorg starts with **no `/dev/tty0`, no `/dev/dri`, no `/dev/input`**. `xdpyinfo` reports 880×1904,
-  784×1696 and 1280×2768 with their configs. Touch works at each size.
+- Xorg starts with **no `/dev/tty0`, no `/dev/dri`, no `/dev/input`**. `xdpyinfo` reports 880×1808,
+  784×1616 and 1280×2624 with their configs. Touch works at each size.
 - The modeline must be a real CVT line: a hand-made one with short blanking is rejected
   ("monitor doesn't support reduced blanking"), and Xorg silently falls back to 640×480.
 - `Virtual` is required too, or the dummy driver picks its own virtual size.
@@ -470,14 +473,14 @@ change.
 │ ◀  ▶  ⟳  │ example.com — Page title …          │ ⋯ │   88 px
 ├──────────────────────────────────────────────────────┤
 │                                                      │
-│          CloakBrowser (kiosk), 880 × 1816            │
+│          CloakBrowser (kiosk), 880 × 1720            │
 ```
 
 | Control | Action |
 |---|---|
 | ◀ ▶ ⟳ | Back, forward, reload: Alt+Left, Alt+Right, F5 sent with XTest to the browser window |
 | Title / URL | Shows the window title (`_NET_WM_NAME`). Tap: becomes a text field with the bar focused. Type on the iPhone keyboard; Enter opens it (below) |
-| ⋯ menu | Drops down over the page while open: **Home**, the **tabs** (only when there is more than one: each by its title, the one in front marked; tap to switch; **Close tab** under them), **New identity**, **Restart browser**, **Stop / Start browser**, **Proxy: ok / down** |
+| ⋯ menu | Drops down over the page while open: **Home**, **New tab** (the home page beside the current one), the **tabs** (only when there is more than one: each by its title, the one in front marked; tap to switch; **Close tab** under them), **New identity**, **Restart browser**, **Stop / Start browser**, **Proxy: ok / down** |
 
 Kiosk mode has no tab strip and no address bar (Ctrl+L does nothing, tested), so the tabs and URLs go
 through DevTools. `rd-shell` starts CloakBrowser with `--remote-debugging-pipe`: DevTools on fds 3 and 4,
@@ -501,7 +504,7 @@ the pipe it falls back to Chromium's process singleton for URLs, and to Ctrl+Tab
 It's the only window manager on `:0`, deliberately minimal:
 
 - It selects `SubstructureRedirect` on the root. It places every top-level window below the bar, whatever
-  the window asks for: `(0, 88, 880, 1816)` at `light`, `(0, 88, 784, 1608)` at `small`. A
+  the window asks for: `(0, 88, 880, 1720)` at `light`, `(0, 88, 784, 1528)` at `small`. A
   `_NET_WM_STATE_FULLSCREEN` request (kiosk mode) gets the state set but the same geometry, so the browser
   is "full screen" below the bar.
 - It publishes `_NET_SUPPORTING_WM_CHECK`, `_NET_SUPPORTED`, `_NET_WORKAREA` and `_NET_ACTIVE_WINDOW`.
@@ -731,7 +734,7 @@ table inet rd_killswitch {
 RemoDroid's web app, as it is today:
 
 - Added to the Home Screen, it runs full screen.
-- Video fit to the screen. At 880×1904 it fills the iPhone 14 Plus exactly.
+- Video fit to the screen. At 880×1808 it fills the iPhone 14 Plus below its status bar exactly.
 - Login and cookie.
 - Keyboard sheet for typing.
 - Quality menu: bitrate and fps. Resolution stays at the screen size with MPP.
@@ -771,7 +774,7 @@ the phone's multi-touch path for this computer.
 | inputtest backend | `browser/agent/touch_inputtest.c` | `browser/test/touch_test.sh` against a real Xorg 21.1 (dummy screen, user namespace): message layout matches the X server's header, a pinch and a reset arrive as XI2 touches, fingers land within 1 px |
 | Viewer: raw touch for computers that report `touch` | `web/app.js` | Syntax only; the iPhone is step 6 |
 | MPP encoder (BGRA in, H.265/H.264 out), tried before VA-API | `browser/agent/video_mpp.c`, hook in `desktop/linux/video_vaapi.c` | Builds; `MppApi`'s layout and every constant checked against MPP's own headers (`make browser-mpptest MPP_INC=…`). Encoding needs the OECT (step 1: `mpptest`) |
-| `rd-shell` | `browser/rd-shell/rd-shell.c` | On Xvfb at 880×1904 with Chrome: kiosk placed below the bar (440×908 CSS px, `devicePixelRatio` 2, `availHeight` 908 of 952), typing a URL, one tab kept, back/forward, menu, New identity (new seed, empty profile), restart after a crash, clean stop |
+| `rd-shell` | `browser/rd-shell/rd-shell.c` | On Xvfb with Chrome, at the first size (880×1904): kiosk placed below the bar (440×908 CSS px, `devicePixelRatio` 2, `availHeight` 908 of 952), typing a URL, one tab kept, back/forward, menu, New identity (new seed, empty profile), restart after a crash, clean stop |
 | The image and its scripts | `browser/hqnode/` | Not built yet: it needs an arm64 builder and CloakBrowser's download |
 | Kill switch | `browser/host/rd-killswitch` | nftables accepts the rules (`nft -c`); the cgroup match needs the OECT's cgroup v2 |
 | hqnode `rkmpp` option | hqnode `agent/internal/{store,api,manager,runtime}`, `server/internal/{api,agent,store}` | Unit tests for the profiles (only character devices, owned by the container's root, missing nodes refused) and mount tests in a private namespace (nodes bound, paths out of `/dev` refused, compatible file read-only, the rest masked); all agent and panel tests pass. Not yet: the panel's web page (create through `create.sh` or the API) and the machine report of available profiles |
@@ -780,8 +783,8 @@ the phone's multi-touch path for this computer.
 
 1. **OECT host**:
    - Armbian with the vendor 6.1 kernel; check `/dev/mpp_service`, `/dev/dma_heap/`, cgroup v2;
-   - build MPP and run `mpi_enc_test` at 880×1904 from BGRA. This answers the three hardware unknowns:
-     BGRA input, the 1904-line height, and the rate at 30 fps;
+   - build MPP and run `mpi_enc_test` at 880×1808 from BGRA. This answers the three hardware unknowns:
+     BGRA input, the 1808-line height, and the rate at 30 fps;
    - the 64 GB SSD at `/var/hqnode` with `RequiresMountsFor`, zram plus the SSD swap file, VLAN;
    - install hqnoded and enroll the OECT.
 2. **hqnode `rkmpp` option**:
@@ -816,11 +819,11 @@ the phone's multi-touch path for this computer.
 |---|---|---|
 | Kernel / devices | OECT host | 6.1 vendor kernel; `/dev/mpp_service` and `/dev/dma_heap/*` present |
 | Storage | `findmnt /var/hqnode`; boot with the SSD unplugged | ext4 on the SSD; without it, hqnode doesn't start (nothing written to the eMMC) |
-| Encoder (host) | `mpi_enc_test` at 880×1904, BGRA | Decodable H.265 file; 30 fps or better |
+| Encoder (host) | `mpi_enc_test` at 880×1808, BGRA | Decodable H.265 file; 30 fps or better |
 | Devices (container) | `ls -l /dev/mpp_service /dev/dma_heap` | Present, group `video`, nothing else added |
 | Encoder access | `sudo -u rdagent mpptest` / `sudo -u browser mpptest` | Agent encodes; browser is refused |
-| Encoder (live) | Viewer stats, agent log | H.265 hardware (MPP), steady 30 fps at 880×1904; H.264 when H.265 isn't negotiated |
-| Screen | `xdpyinfo` in the container; `innerWidth`, `devicePixelRatio` in the page | 880×1904; 440, 2 |
+| Encoder (live) | Viewer stats, agent log | H.265 hardware (MPP), steady 30 fps at 880×1808; H.264 when H.265 isn't negotiated |
+| Screen | `xdpyinfo` in the container; `innerWidth`, `devicePixelRatio` in the page | 880×1808; 440, 2 |
 | Touch device | `xinput list --long touch` | `Touch mode: direct`, 5 touches |
 | Touch in the page | A touch-test page, plus `navigator.maxTouchPoints`, `matchMedia('(pointer: coarse)')`, `matchMedia('(hover: none)')` | 5 / true / true |
 | IP / DNS | browserleaks.com | Only the proxy IP and proxy-side DNS |
@@ -837,8 +840,8 @@ the phone's multi-touch path for this computer.
 ## Risks / open questions
 
 - **The encoder's limits at portrait sizes.** The RK3566 encoder is rated 1080p60. Whether it takes a
-  frame 1904 (or 1696) lines tall, and BGRA input, is checked on day one (step 1).
-  - If height is the limit, encode the frame rotated 90° (MPP's prep rotation; 1904×880 is within
+  frame 1808 (or 1616) lines tall, and BGRA input, is checked on day one (step 1).
+  - If height is the limit, encode the frame rotated 90° (MPP's prep rotation; 1808×880 is within
     1080p's size) and have the viewer rotate it back. That's a viewer change.
   - If BGRA is the limit, convert with RGA first.
 - **Chromium on four A55 cores** without a GPU is the weakest part: heavy pages will scroll slowly. `small`

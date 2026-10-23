@@ -2,7 +2,7 @@
  * in one small X client (remote-browser-plan.md, "Controller bar").
  *
  *   - The bar: a strip 44 CSS px tall across the top of the screen (88 px at 2x, 44 pt on the iPhone):
- *     back, forward, reload, the page's title (tap it to type a URL), and a menu with Home, the tabs
+ *     back, forward, reload, the page's title (tap it to type a URL), and a menu with Home, New tab, the tabs
  *     (listed only when there is more than one), New identity, Restart and Stop/Start. Taps arrive as
  *     the touch screen's emulated pointer events.
  *   - The window manager: the only one on the display. Every browser window is placed below the bar
@@ -636,13 +636,14 @@ static struct {
     char before[512];
 } OPEN;
 
-static void browser_open(const char *url)
+/* replace: with one_tab, the tab in front gives way to the new one (a typed URL, Home); New tab keeps it */
+static void browser_open(const char *url, int replace)
 {
     if (BR.pid <= 0) {
         browser_start();
         return;
     }
-    int one = strcmp(conf("one_tab", "1"), "0") != 0;
+    int one = replace && strcmp(conf("one_tab", "1"), "0") != 0;
     if (T.wfd >= 0) {
         int id = cdp_send("Target.createTarget", target("url", url));
         if (id > 0 && one && T.cur[0]) {
@@ -821,7 +822,7 @@ static void draw_bar(void)
 
 /* The menu's rows. The tabs are listed only when there is more than one, with Close tab under them; one tab
  * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W). */
-enum { M_HOME, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_NEW_ID, M_RESTART, M_STARTSTOP, M_PROXY };
+enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_NEW_ID, M_RESTART, M_STARTSTOP, M_PROXY };
 
 static struct {
     int kind, tab;
@@ -835,8 +836,10 @@ static void menu_layout(void)
     nitems = 0;
 #define ITEM(k, t) (items[nitems].kind = (k), items[nitems].tab = (t), nitems++)
     ITEM(M_HOME, -1);
+    if (BR.pid > 0)
+        ITEM(M_NEW_TAB, -1);
     if (T.ntabs > 1) {
-        int room = (H - B) / B - 6; /* the rows that fit on the screen beside the others */
+        int room = (H - B) / B - 7; /* the rows that fit on the screen beside the others */
         for (int i = 0; i < T.ntabs && i < room; i++)
             ITEM(M_TAB, i);
         ITEM(M_CLOSE_TAB, -1);
@@ -856,6 +859,7 @@ static void menu_label(int i, char *out, size_t cap)
 {
     switch (items[i].kind) {
     case M_HOME: snprintf(out, cap, "Home"); break;
+    case M_NEW_TAB: snprintf(out, cap, "New tab"); break;
     case M_TAB: snprintf(out, cap, "%s", T.tab[items[i].tab].title[0] ? T.tab[items[i].tab].title : "New tab"); break;
     case M_NEXT_TAB: snprintf(out, cap, "Next tab"); break;
     case M_CLOSE_TAB: snprintf(out, cap, "Close tab"); break;
@@ -1140,7 +1144,7 @@ static void edit_end(int go)
                 snprintf(url, sizeof url, "%s%s", t, q);
         }
         LOG("open %s", url);
-        browser_open(url);
+        browser_open(url, 1);
     }
     focus(active);
 }
@@ -1180,7 +1184,8 @@ static void menu_action(int i)
     int kind = items[i].kind, tab = items[i].tab;
     menu_show(0);
     switch (kind) {
-    case M_HOME: browser_open(conf("home", "about:blank")); break;
+    case M_HOME: browser_open(conf("home", "about:blank"), 1); break;
+    case M_NEW_TAB: browser_open(conf("home", "about:blank"), 0); break;
     case M_TAB: tab_select(tab); break;
     case M_NEXT_TAB: send_keys(&ctrl, 1, XK_Tab); break;
     case M_CLOSE_TAB:
