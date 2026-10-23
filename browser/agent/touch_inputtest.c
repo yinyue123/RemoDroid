@@ -7,16 +7,33 @@
  *   touch = inputtest:/run/rd-touch.sock
  *   touch_points = 5            the device's TouchCount: navigator.maxTouchPoints
  *
- * The socket is connected on the first finger down and again after Xorg restarts. Wire format: the
+ * The socket is connected on the first finger down and again after Xorg restarts. The driver accepts a
+ * connection only as the device is switched on, and never again after that one closes: a client that
+ * comes later (the agent restarted, Xorg's device already on) waits unaccepted. So when the driver doesn't
+ * answer, the agent switches the device off and on through XInput, and the driver takes the connection
+ * that is waiting. libXi is loaded for that alone (dlopen), so the agent doesn't depend on it otherwise.
+ * It switches every direct-touch device: this is for an X server of the remote browser's own, whose
+ * only one is the inputtest device (rd-xorg-*.conf).
+ *
+ * Wire format: the
  * driver's xf86-input-inputtest-protocol.h, version 1.1, repeated here so the agent builds without
  * the X server's headers (browser/test/touch_test.c checks the layout against the real one). */
+#include <dlfcn.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
+
+#include <X11/Xatom.h>
+#if __has_include(<X11/extensions/XInput2.h>)
+#include <X11/extensions/XInput2.h>
+#define HAVE_XI2 1
+#endif
 
 #include "desk.h"
 #include "touch_inputtest.h"
@@ -32,7 +49,67 @@ static struct {
     uint32_t next_id;
     uint32_t tid[MAX_FINGERS]; /* the driver's touch id for each of the viewer's pointer ids */
     uint8_t on[MAX_FINGERS];
+    double retry_at; /* after a failed connect: not before this (each try can take a second) */
 } T = { .fd = -1 };
+
+static double now_s(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec + t.tv_nsec / 1e9;
+}
+
+static int answered(int ms)
+{
+    struct pollfd p = { T.fd, POLLIN, 0 };
+    return poll(&p, 1, ms) > 0;
+}
+
+/* Switches the X server's direct-touch devices off and on (XI's "Device Enabled"). 0 when one was. */
+static int rearm(void)
+{
+#ifdef HAVE_XI2
+    static void *xi;
+    static __typeof__(&XIQueryVersion) p_version;
+    static __typeof__(&XIQueryDevice) p_query;
+    static __typeof__(&XIFreeDeviceInfo) p_free;
+    static __typeof__(&XIChangeProperty) p_change;
+    if (!xi && (xi = dlopen("libXi.so.6", RTLD_NOW | RTLD_LOCAL))) {
+        p_version = (__typeof__(p_version))dlsym(xi, "XIQueryVersion");
+        p_query = (__typeof__(p_query))dlsym(xi, "XIQueryDevice");
+        p_free = (__typeof__(p_free))dlsym(xi, "XIFreeDeviceInfo");
+        p_change = (__typeof__(p_change))dlsym(xi, "XIChangeProperty");
+    }
+    if (!p_version || !p_query || !p_free || !p_change) {
+        LOGW("touch: no libXi.so.6 to switch the touch device back on with");
+        return -1;
+    }
+    Display *d = x11_open();
+    if (!d)
+        return -1;
+    int maj = 2, min = 2, n = 0, done = 0;
+    XIDeviceInfo *info = p_version(d, &maj, &min) == Success ? p_query(d, XIAllDevices, &n) : NULL;
+    Atom enabled = XInternAtom(d, "Device Enabled", False);
+    for (int i = 0; i < n; i++)
+        for (int c = 0; c < info[i].num_classes; c++)
+            if (info[i].use == XISlavePointer && info[i].classes[c]->type == XITouchClass &&
+                ((XITouchClassInfo *)info[i].classes[c])->mode == XIDirectTouch) {
+                unsigned char off = 0, on = 1;
+                p_change(d, info[i].deviceid, enabled, XA_INTEGER, 8, PropModeReplace, &off, 1);
+                XSync(d, False);
+                p_change(d, info[i].deviceid, enabled, XA_INTEGER, 8, PropModeReplace, &on, 1);
+                XSync(d, False);
+                done++;
+                break;
+            }
+    if (info)
+        p_free(info);
+    XCloseDisplay(d);
+    return done ? 0 : -1;
+#else
+    return -1;
+#endif
+}
 
 static void forget(void)
 {
@@ -62,6 +139,9 @@ static int put(const void *m, size_t n)
 
 static int connect_x(void)
 {
+    if (now_s() < T.retry_at)
+        return -1;
+    T.retry_at = now_s() + 2;
     struct sockaddr_un a = { .sun_family = AF_UNIX };
     snprintf(a.sun_path, sizeof a.sun_path, "%s", T.path);
     T.fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -78,6 +158,14 @@ static int connect_x(void)
     it_server_version_t r;
     if (put(&v, sizeof v) < 0)
         return -1;
+    if (!answered(200)) { /* waiting unaccepted (see the top): the device switched off and on takes it */
+        LOGI("touch: %s didn't accept the connection; switching the touch device off and on", T.path);
+        if (rearm() < 0 || !answered(1000)) {
+            LOGW("touch: %s didn't answer as an inputtest device", T.path);
+            forget();
+            return -1;
+        }
+    }
     if (recv(T.fd, &r, sizeof r, MSG_WAITALL) != (ssize_t)sizeof r || r.header.type != IT_RESPONSE_SERVER_VERSION) {
         LOGW("touch: %s didn't answer as an inputtest device", T.path);
         forget();
@@ -92,6 +180,7 @@ static int connect_x(void)
     }
     LOGI("touch: inputtest %u.%u at %s, %d fingers, root %dx%d", r.major, r.minor, T.path, T.points, T.root_w,
          T.root_h);
+    T.retry_at = 0;
     return 0;
 }
 
@@ -125,6 +214,7 @@ int dsk_touch_open(const char *spec, int points, char *err, size_t cap)
         return -1;
     }
     snprintf(T.path, sizeof T.path, "%s", spec + 10);
+    T.retry_at = 0;
     T.points = points < 1 ? 1 : points > MAX_FINGERS ? MAX_FINGERS : points;
     return 0;
 }

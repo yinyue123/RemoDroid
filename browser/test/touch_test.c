@@ -1,5 +1,6 @@
 /* browser/agent/touch_inputtest.c against a real X server: a two-finger pinch sent with dsk_touch must
- * come back as XI2 touch events from a direct-touch device, where the fingers were. Run by
+ * come back as XI2 touch events from a direct-touch device, where the fingers were, and still after the
+ * backend connects a second time. Run by
  * touch_test.sh, which starts Xorg with the dummy screen and the inputtest touch device.
  *
  *   touch_test SOCKET        DISPLAY set to that Xorg */
@@ -137,6 +138,32 @@ int main(int argc, char **argv)
           (int)(0.50 * (H - 1)));
     CHECK(abs((int)last0_x - (int)(0.20 * (W - 1))) <= 2, "and moved to x %.0f (want %d)", last0_x,
           (int)(0.20 * (W - 1)));
+
+    /* a second connection, as after the agent restarts: the driver accepts none once the first has closed,
+     * until the device is switched off and on, which the backend does when it isn't answered */
+    CHECK(dsk_touch_open(spec, 5, err, sizeof err) == 0, "open again %s", err); /* closes the first */
+    usleep(200000);
+    dsk_touch(&s, 0, 0, 0.70, 0.30);
+    dsk_touch(&s, 0, 1, 0.70, 0.30);
+    int again = 0;
+    double ax = -1, ay = -1;
+    for (int idle = 0; idle < 30 && !again;) {
+        if (!XPending(d)) {
+            usleep(50000);
+            idle++;
+            continue;
+        }
+        XEvent e;
+        XNextEvent(d, &e);
+        if (e.type != GenericEvent || e.xcookie.extension != op || !XGetEventData(d, &e.xcookie))
+            continue;
+        XIDeviceEvent *de = e.xcookie.data;
+        if (de->evtype == XI_TouchBegin)
+            again = 1, ax = de->root_x, ay = de->root_y;
+        XFreeEventData(d, &e.xcookie);
+    }
+    CHECK(again && abs((int)ax - (int)(0.70 * (W - 1))) <= 2 && abs((int)ay - (int)(0.30 * (H - 1))) <= 2,
+          "a second connection's finger arrives too (%.0f,%.0f)", ax, ay);
     printf("%s\n", fails ? "FAILED" : "all passed");
     return fails ? 1 : 0;
 }

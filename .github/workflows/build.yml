@@ -137,7 +137,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libx11-dev libxext-dev libxtst-dev libxrandr-dev \
-            libxdamage-dev libxfixes-dev libgtk-3-dev libva-dev xvfb
+            libxdamage-dev libxfixes-dev libxi-dev libgtk-3-dev libva-dev xvfb
       - name: Build
         run: make -j"$(nproc)" OPT=-O2 all desktop desktop-app desktop-icons desktop-test desktop-vatest
       - name: Unit tests (keymap, pairing line, input, video sizes, colour, encoder, sound)
