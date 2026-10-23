@@ -55,6 +55,7 @@ void yuv_from_bgra(const uint8_t *bgra, int sw, int sh, int sstride, uint8_t *y,
 void yuv_nv12_uv(const uint8_t *u, const uint8_t *v, uint8_t *uv, int w, int h) {}
 #else
 Display *x11_open(void) { return XOpenDisplay(NULL); } /* sys.c's */
+int dsk_touch_points(void) { return 0; }                /* no touch screen: capture draws the pointer */
 static FILE *screen_out;
 static int screen_aus, screen_keys;
 static void on_au(void *ud, const uint8_t *au, size_t n, int64_t pts_us, int key)
