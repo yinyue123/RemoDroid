@@ -20,3 +20,9 @@ Then the agent will save it in config and user can config it on server using web
 The stats didn't show the webrtc mode. I can't lock the phone or reconnect the phone on the floating ball. The page didn't enter full-screen mode and the top is blurry. Webrtc doesn't take over sound while scrcpy does. I wish I could add stun servers like a list- all I need is to add a ip. If I need change a port, user or password, just edit it. If not keep the same as current. Move the tab bar to bottom. Just like Telegram or other apps. The tabs include devices, agents, server. Devices shows all added devices. Agents shows all added agents, and I can click an agent to edit. Server is just for settings. The setting page should only allow editing the items you want to change, so It shouldn't use wizard page. You need to create a dedicated settings interface.
 
 The phone part works really well. However, I need agents for Windows, macOS and Linux. They should share the Android native libraries as .so lib or .dll libs. There's also a dedicated app with pairing UI written in C or Object-c calling system UI APIs and has no external library dependencies. It has a menu bar icon and support web browser remote control with mouse and keyboard input. Ensure they share as much of the common library code as possible. They don't need adb. They are seperate tools-a remote desktop tool for each platform. The Adb tool is only for andriod. In total, the remote agent supports for platforms: android, windows, macos, linux.
+
+Read the browser/remote-browser-plan.md. Could you update the plan. We don't use scrcpy, we use remodroid. 
+Help me write the uinput plan and Xorg plan
+We use hqnode as the container. You could refer to /root/Documents/sh0u/quadlet/hqnode.
+Should I choose android adb or desktop linux. Help me make the choise and plan.
+Inside a Xorg, I hope that I could have a controler bar to run the cloak browser.
