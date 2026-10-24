@@ -351,14 +351,31 @@ static void hist_changed(void)
     panel_refresh();
 }
 
-/* A tab went to url. The title comes later (hist_title): what DevTools says now may be the last page's. */
-static void hist_add(const char *url)
+/* the same page but for what follows ? or # */
+static int same_page(const char *a, const char *b)
+{
+    size_t la = strcspn(a, "?#"), lb = strcspn(b, "?#");
+    return la == lb && !strncmp(a, b, la);
+}
+
+/* A tab went from prev to url. The title comes later (hist_title): what DevTools says now may be the last
+ * page's. One visit, not two, when the tab moves on within 2 s of arriving (a redirect, a login), or when
+ * the page rewrites its own query within 15 s (google.com/ to /?zx=…): the entry becomes where it ended. */
+static void hist_add(const char *prev, double prev_at, const char *url)
 {
     if (!is_web(url) || strlen(url) >= URL_MAX || strchr(url, '\t') || strchr(url, '\n'))
         return;
     if (nhist && !strcmp(HI[nhist - 1].url, url)) /* the same page again: a reload */
         return;
-    hist_push(time(NULL), url, "");
+    double since = now_s() - prev_at;
+    int same = prev && same_page(prev, url);
+    if (nhist && prev && !strcmp(HI[nhist - 1].url, prev) && (since < 2 || (same && since < 15))) {
+        snprintf(HI[nhist - 1].url, sizeof HI[0].url, "%s", url);
+        if (!same) /* another page: its title is still to come */
+            HI[nhist - 1].title[0] = 0;
+    } else {
+        hist_push(time(NULL), url, "");
+    }
     hist_changed();
 }
 
@@ -602,6 +619,7 @@ static struct {
     char replace[40];
     struct {
         char id[40], title[200], url[URL_MAX];
+        double url_at;  /* when it got there */
     } tab[MAX_TABS];
     int ntabs;          /* page tabs, in the order they opened; -1: not known (no DevTools) */
     char cur[40];       /* the one in front, as far as can be told */
@@ -711,9 +729,10 @@ static void tab_info(const cJSON *info, int created)
         int again = 0; /* a tab of the user's opened again at the start */
         for (int k = 0; !is_web(T.tab[i].url) && k < BR.nrestored && now_s() < BR.restore_until; k++)
             again |= !strcmp(BR.restored[k], url);
-        snprintf(T.tab[i].url, sizeof T.tab[i].url, "%s", url);
         if (!again)
-            hist_add(url);
+            hist_add(T.tab[i].url, T.tab[i].url_at, url);
+        snprintf(T.tab[i].url, sizeof T.tab[i].url, "%s", url);
+        T.tab[i].url_at = now_s();
     } else if (url) {
         hist_title(url, t);
     }
