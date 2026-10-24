@@ -37,9 +37,10 @@ CPU_CORES="${CPU_CORES:-4}"
 MEM="${MEM:-1536M}"
 # The image is about 1.5 GB; 8G leaves room for logs and Chromium's own files outside the profile.
 DISK="${DISK:-8G}"
-# /data: browser.conf and the agent's pairing. Small, but it must exist — without data_bytes there
-# is no /data and a reinstall forgets the pairing.
-DATA="${DATA:-1G}"
+# /data: browser.conf, the agent's pairing and the six users' profiles, tabs, history and favourites
+# (cookies and site data grow: a few hundred MB a user is normal). It must exist — without data_bytes
+# there is no /data, and a reinstall forgets the pairing and the users.
+DATA="${DATA:-4G}"
 NET_QUOTA="${NET_QUOTA:-1024G}"
 # 22 only: the agent connects out to the panel, and WebRTC goes through TURN when nothing is mapped.
 PORTS="${PORTS:-22}"

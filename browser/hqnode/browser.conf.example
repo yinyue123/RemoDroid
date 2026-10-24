@@ -16,11 +16,21 @@ lang = en-US
 # small = 784x1616 at 2x, native = 1280x2624 at 3x (too heavy for the OECT).
 screen = light
 
-# The fingerprint seed: same seed, same identity. Empty: a new one on every start of rd-shell.
-# "New identity" on the bar picks a new one and empties the profile; with seed_mode = sticky it is
-# written back here, so the identity survives a reboot.
-seed =
-seed_mode = session
+# The users, switched from the bar's menu (User: …). Each has a directory of their own in data:
+# profile/ (cookies, site data), seed (the fingerprint), tabs (open again on the next start), history
+# and favourites. The browser is closed completely before another user's starts. "New identity" gives
+# the user in use a new seed and an empty profile; their history and favourites stay.
+users = Alice Bob Charlie David Eve Frank
+data = /data/users
+# The disk cache, everyone's, on tmpfs: emptied whenever the user changes.
+cache = /tmp/rd-cache
+
+# Any setting above or below can be given for one user: key.Name = value, e.g. a proxy, timezone and
+# language for Bob, so his exit address isn't Alice's. Add each proxy to the host's kill switch too
+# (/etc/rd-killswitch.conf).
+#   proxy.Bob = socks5://198.51.100.20:1080
+#   timezone.Bob = Europe/Berlin
+#   lang.Bob = de-DE
 
 home = https://www.google.com/
 search = https://duckduckgo.com/?q=%s
@@ -31,7 +41,6 @@ browser = /opt/cloakbrowser/chrome
 # most common one, the hardest to single out), macos, or linux.
 platform = windows
 args =
-profile = /tmp/profile
 renderer_process_limit = 2
 # A URL opened from the bar replaces the tab (1), or opens beside it (0).
 one_tab = 1

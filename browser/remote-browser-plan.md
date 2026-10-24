@@ -41,7 +41,7 @@ proxy's IP.
 | Where it runs | A real phone on USB, or an emulator/redroid | The OECT, as one hqnode container |
 | In an hqnode container? | **No.** redroid/Waydroid need `binderfs` and `ashmem` in the host kernel and a privileged container; an emulator needs `/dev/kvm` | **Yes.** Xorg, the dummy driver, `inputtest` and Chromium all run unprivileged (tested) |
 | CloakBrowser | Doesn't exist for Android. You'd get stock Chrome with the phone's own fingerprint and Google account | Runs as built (arm64), with `--fingerprint-platform` and seeds |
-| Throwaway | Wiping a phone between sessions is slow and manual | `hqnode reinstall` or delete-and-create; the profile is on tmpfs anyway |
+| Throwaway | Wiping a phone between sessions is slow and manual | Clear history & data or New identity for one user; `hqnode reinstall` keeps `/data`, delete-and-create wipes everything |
 | New identity | Factory reset, or a second phone | New seed and an empty profile: one tap on the bar |
 | RemoDroid code | Done (the phone path) | Mostly done (the Linux desktop agent); needs touch, MPP and the bar |
 | Fingerprint realism | **Better**: a real Android device, real mobile UA, real touch | Weaker: Linux + portrait phone-sized screen + touch is a rare combination |
@@ -84,7 +84,7 @@ Two kinds of traffic leave the container:
 | Machine | OECT: RK3566, 4× A55, 2 GB RAM, 8 GB eMMC | One container on it; nothing else heavy |
 | Host | Armbian (Debian base), vendor kernel 6.1 for rk35xx, cgroup v2, `passt`, zram | Must show `/dev/mpp_service` and `/dev/dma_heap/` |
 | Storage | 64 GB SSD, one ext4 partition, mounted at `/var/hqnode` | ext4 because hqnode uses idmapped mounts; the eMMC stays for the OS only |
-| Container | hqnode, image `…/hub:remote-browser-hqnode` (arm64) on `hqnode:debian-13`, `devices: ["rkmpp"]` | 4 cores, 1.5 GB RAM, 8 GB root disk, 1 GB `/data` |
+| Container | hqnode, image `…/hub:remote-browser-hqnode` (arm64) on `hqnode:debian-13`, `devices: ["rkmpp"]` | 4 cores, 1.5 GB RAM, 8 GB root disk, 4 GB `/data` (six users' profiles) |
 | Browser | CloakBrowser Linux arm64 binary | `--fingerprint-platform=windows`, seed per identity |
 | Screen | Xorg 21.1 + `xserver-xorg-video-dummy` | 880×1808 (multiples of 16, iPhone 14 Plus below its status bar), Chrome scale 2 → 440×904 CSS px |
 | Touch | `inputtest` input driver (in `xserver-xorg-core`), `DeviceType "Touch"`, 5 points | The agent writes touch events to its socket |
@@ -135,7 +135,7 @@ Two kinds of traffic leave the container:
      |---|---|
      | Image | about 1.5 GB (debian-13 + Xorg + fonts + CloakBrowser + MPP) |
      | Container root disk | 8 GB |
-     | `/data` | 1 GB |
+     | `/data` | 4 GB |
      | Swap file | 2 GB |
      | Room for a second image during an upgrade | the rest, roughly 50 GB free |
 4. **Memory:**
@@ -198,21 +198,22 @@ change the group, and a non-root member of it can then open the node.
 
 | Path | What | Survives reinstall |
 |---|---|---|
-| `/data/browser.conf` | proxy, seed, timezone, locale, home URL, screen size, bar options | yes |
+| `/data/browser.conf` | proxy, timezone, locale, home URL, screen size, users, bar options (any of them per user: `key.Name`) | yes |
+| `/data/users/<Name>/` | each user's `profile/` (cookies, site data), `seed` (fingerprint), `tabs`, `history`, `favourites`; `current` names the one in use | yes |
 | `/data/remodroid/desktop.ini` | the agent's pairing (`[server]`) and settings | yes, so there's no re-pairing |
-| `/tmp/profile` | CloakBrowser profile (tmpfs, charged to the container's memory) | no, by design |
+| `/tmp/rd-cache` | CloakBrowser's disk cache, shared, emptied whenever the user changes (tmpfs, charged to the container's memory) | no |
 | everything else | image content | replaced by the image |
 
 **Sizing** for a 2 GB box: 4 cores, **1.5 GB**. Chromium dominates. Measure in build steps 5 and 8.
 - hqnode mounts `/dev/shm` at 64 MB, which Chromium outgrows, so it runs with `--disable-dev-shm-usage`.
-- The profile is on tmpfs, so a heavy session's cache counts against the 1.5 GB. That's why the disk cache
+- The disk cache is on tmpfs, so a heavy session's cache counts against the 1.5 GB. That's why the disk cache
   is capped at 50 MB.
 
 **Creating it**, as with sh0u: pull on the machine, then create through the panel (never `hqnode run`):
 
 ```
 ssh -p 36000 root@<oect> 'hqnode pull docker.io/yinyue123/hub:remote-browser-hqnode'
-MACHINE=oect DISK=8G DATA=1G MEM=1536M CPU_CORES=4 ./browser/hqnode/create.sh   # ports: 22; "devices": ["rkmpp"]
+MACHINE=oect DISK=8G DATA=4G MEM=1536M CPU_CORES=4 ./browser/hqnode/create.sh   # ports: 22; "devices": ["rkmpp"]
 MACHINE=oect ./browser/hqnode/deploy.sh   # pushes browser.conf, pairs the agent (one panel code)
 ```
 
@@ -480,7 +481,9 @@ change.
 |---|---|
 | ◀ ▶ ⟳ | Back, forward, reload: Alt+Left, Alt+Right, F5 sent with XTest to the browser window |
 | Title / URL | Shows the window title (`_NET_WM_NAME`). Tap: becomes a text field with the bar focused. Type on the iPhone keyboard; Enter opens it (below) |
-| ⋯ menu | Drops down over the page while open: **Home**, **New tab** (the home page beside the current one), the **tabs** (only when there is more than one: each by its title, the one in front marked; tap to switch; **Close tab** under them), **New identity**, **Restart browser**, **Stop / Start browser**, **Proxy: ok / down** |
+| ☆ | Saves the page in front to the user's favourites; filled when it is one, and a tap takes it out again |
+| ⋯ menu | Drops down over the page while open: **Home**, **New tab** (the home page beside the current one), the **tabs** (only when there is more than one: each by its title, the one in front marked; tap to switch; **Close tab** under them), **Favourites**, **History**, **User: Name**, **New identity**, **Restart browser**, **Stop / Start browser**, **Proxy: ok / down**, then gauges for the container's **CPU**, **Memory** and **Disk** (its cgroup's use against its limits, and the disk the users are on; every 2 s while open) |
+| Pages | **Users**, **History** and **Favourites** are drawn over the browser, below the bar; a drag scrolls them and ◀ closes them. Users: tap one to switch. History: newest first under a heading per day, a tap opens the page, and **Clear history & data** / **Clear cookies** at the top, each needing a second tap within 4 s. Favourites: a tap opens it, its ✕ deletes it |
 
 Kiosk mode has no tab strip and no address bar (Ctrl+L does nothing, tested), so the tabs and URLs go
 through DevTools. `rd-shell` starts CloakBrowser with `--remote-debugging-pipe`: DevTools on fds 3 and 4,
@@ -522,7 +525,10 @@ the menu actions:
 | Action | What it does |
 |---|---|
 | Restart | Stop the browser, then start it with the same profile and seed |
-| New identity | Stop the browser, delete `/tmp/profile`, then start with a new random seed. The new seed is written to `/data/browser.conf` only if `seed_mode = sticky` |
+| New identity | Stop the browser, delete the user's profile and tabs, then start with a new random seed, written to the user's `seed`. Their history and favourites stay: they are rd-shell's, never seen by a page |
+| Switch user | Save the tabs, close the browser with DevTools' `Browser.close` (Chromium writes its cookies as on a normal quit), SIGKILL whatever is left of its process group, empty the shared disk cache, then start it with the other user's profile, seed and tabs, the one they left in front brought forward |
+| Clear history & data | Stop the browser, delete the user's profile, tabs and history; keep the seed and the favourites; start it again |
+| Clear cookies | `Storage.clearCookies`, a browser-level DevTools call, while it runs: the tabs stay |
 | Stop | Stop the browser; the bar shows "Stopped — tap ⋯ → Start" |
 | Proxy check | A TCP connect to the proxy every 10 s; it doesn't fetch anything through it |
 
@@ -656,7 +662,8 @@ then only together with CloakBrowser's WebGL spoofing.
 --force-webrtc-ip-handling-policy=disable_non_proxied_udp
 --fingerprint-webrtc-ip=<proxy IP or auto>
 --kiosk --force-device-scale-factor=2 --touch-events=enabled
---user-data-dir=/tmp/profile          # tmpfs, wiped by "New identity" and every reinstall
+--user-data-dir=/data/users/<Name>/profile   # the user's own: cookies and site data stay theirs
+--disk-cache-dir=/tmp/rd-cache        # tmpfs, emptied when the user changes
 --disable-dev-shm-usage               # hqnode's /dev/shm is 64 MB
 --enable-unsafe-swiftshader           # WebGL on the CPU; no Mali driver in the browser
 --remote-debugging-pipe               # the tab list: Target calls only, no port (Controller bar)
@@ -731,15 +738,15 @@ table inet rd_killswitch {
   this container (see "What it costs in isolation"). No `/dev/dri`, no `/dev/uinput`, no `/dev/input`.
 - **Users:** Xorg as container root; the browser and bar as `browser`; the agent as `rdagent`, the only
   member of `video`.
-- **Profile:** tmpfs only; nothing from a site reaches `/data`.
+- **Profiles:** one per user on `/data`, so a login survives a restart. Users are kept apart by profile and fingerprint seed, and the shared disk cache is emptied when the user changes. They share the proxy, and so its exit address, unless each has a `proxy.Name` of their own.
 - **Host:** the OECT on its own VLAN; the host nftables kill switch above; SSH only through the hqnode
   gateway or Tailscale; no ports open on the home router (except an optional WebRTC UDP port).
 - **Storage:** everything of hqnode's is on the SSD, which is local to the OECT; no network storage. The
-  browser profile never touches it (tmpfs), so a reinstall leaves nothing from a site on disk.
+  users' profiles are on `/data`: Clear history & data (per user) or deleting `/data/users` removes what sites left.
 - **Access:** RemoDroid login (cookie, HTTPS). Keep the panel password strong.
 - **RemoDroid options for this device** (`desktop.ini`): `clipboard_sync = 0`, `allow_shell = 0`, no
   `[files] upload_dir`. That means no clipboard, no file transfer and no shell.
-- **Session end:** "New identity", or `reinstall.sh` for a clean root filesystem.
+- **Session end:** Clear history & data or New identity for the user, or `reinstall.sh` for a clean root filesystem (`/data` stays).
 - **Still exposed:** anything typed or uploaded. Use fake details only.
 
 ---
@@ -790,6 +797,7 @@ the phone's multi-touch path for this computer.
 | Viewer: raw touch for computers that report `touch` | `web/app.js` | Syntax only; the iPhone is step 6 |
 | MPP encoder (BGRA in, H.265/H.264 out), tried before VA-API | `browser/agent/video_mpp.c`, hook in `desktop/linux/video_vaapi.c` | Builds; `MppApi`'s layout and every constant checked against MPP's own headers (`make browser-mpptest MPP_INC=…`). Encoding needs the OECT (step 1: `mpptest`) |
 | `rd-shell` | `browser/rd-shell/rd-shell.c` | On Xvfb with Chrome, at the first size (880×1904): kiosk placed below the bar (440×908 CSS px, `devicePixelRatio` 2, `availHeight` 908 of 952), typing a URL, one tab kept, back/forward, menu, New identity (new seed, empty profile), restart after a crash, clean stop |
+| Users, history, favourites, gauges | `browser/rd-shell/rd-shell.c` | On Xvfb 880×1808 with Chrome (2026-10-24): Alice → Bob → Alice closes every process of the first (none left) and brings back her two tabs with the front one in front; a cookie set as Alice survives a restart of rd-shell and Bob gets his own; Clear cookies gives a new cookie after a reload; Clear history & data keeps the seed and favourites; the star adds and removes; ✕ deletes; a drag scrolls 40 entries; Chrome killed: restarted with the tab, nothing of the old one left; CPU, memory and disk shown |
 | The image and its scripts | `browser/hqnode/` | Not built yet: it needs an arm64 builder and CloakBrowser's download |
 | Kill switch | `browser/host/rd-killswitch` | nftables accepts the rules (`nft -c`); the cgroup match needs the OECT's cgroup v2 |
 | hqnode `rkmpp` option | hqnode `agent/internal/{store,api,manager,runtime}`, `server/internal/{api,agent,store}` | Unit tests for the profiles (only character devices, owned by the container's root, missing nodes refused) and mount tests in a private namespace (nodes bound, paths out of `/dev` refused, compatible file read-only, the rest masked); all agent and panel tests pass. Not yet: the panel's web page (create through `create.sh` or the API) and the machine report of available profiles |
@@ -847,7 +855,8 @@ the phone's multi-touch path for this computer.
 | Home network | Connect from the container to a LAN address | Refused |
 | Fingerprint | CreepJS, pixelscan.net, FingerprintJS demo | No tampering or inconsistency flags |
 | Gestures | Real mobile sites | Scroll, fling, pinch, long-press and carousels work |
-| Bar | Back, reload, URL, New identity | New identity gives a new fingerprint ID and an empty profile |
+| Bar | Back, reload, URL, ☆, New identity | New identity gives a new fingerprint ID and an empty profile |
+| Users | Log in to a site as Alice, switch to Bob and back | Bob isn't logged in; Alice still is, with her tabs, the front one in front; no process of Alice's left while Bob runs |
 | Performance | `top` / `free` on the host and in the container, viewer stats | No OOM; Chromium keeps up while scrolling; acceptable latency |
 
 ---
@@ -861,8 +870,8 @@ the phone's multi-touch path for this computer.
   - If BGRA is the limit, convert with RGA first.
 - **Chromium on four A55 cores** without a GPU is the weakest part: heavy pages will scroll slowly. `small`
   and one tab are the levers; GPU rasterization is the later experiment.
-- **2 GB of RAM** is tight for Chromium plus Xorg plus the agent. zram is required, and the profile on
-  tmpfs counts against it.
+- **2 GB of RAM** is tight for Chromium plus Xorg plus the agent. zram is required, and the disk cache on
+  tmpfs counts against it. (The OECT turned out to have 4 GB: see `backup.md`.)
 - **Vendor kernel:** MPP needs Armbian's vendor 6.1 kernel, and hqnode hasn't run on it yet (it needs 5.19+,
   cgroup v2, idmapped mounts on ext4, `passt`). Step 1 shows whether anything is missing.
 - **`mpp_service` in a user namespace** is untested; the DRM-node test only shows the permission side.

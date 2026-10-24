@@ -2,19 +2,26 @@
  * in one small X client (remote-browser-plan.md, "Controller bar").
  *
  *   - The bar: a strip 44 CSS px tall across the top of the screen (88 px at 2x, 44 pt on the iPhone):
- *     back, forward, reload, the page's title (tap it to type a URL), and a menu with Home, New tab, the tabs
- *     (listed only when there is more than one), New identity, Restart and Stop/Start. Taps arrive as
- *     the touch screen's emulated pointer events.
+ *     back, forward, reload, the page's title (tap it to type a URL), a star that saves the page to the
+ *     favourites (or takes it out), and a menu with Home, New tab, the tabs (listed only when there is
+ *     more than one), Favourites, History, the user, New identity, Restart and Stop/Start, then the
+ *     container's CPU, memory and disk. Taps arrive as the touch screen's emulated pointer events.
+ *   - The pages: Users, History (with Clear history & data, Clear cookies) and Favourites (each with a
+ *     close button that deletes it), drawn over the browser below the bar. A drag scrolls them.
+ *   - The users (Alice … Frank by default): each has a profile of their own (cookies, site data), a
+ *     fingerprint seed, the tabs they had open, a history and favourites, in <data>/<name>. Switching
+ *     closes the browser completely and starts it again as the other user, with that user's tabs.
  *   - The window manager: the only one on the display. Every browser window is placed below the bar
  *     whatever it asks for, a fullscreen request (kiosk) included, and there are no frames.
  *   - The supervisor: starts the browser with the settings in /data/browser.conf, restarts it when it
- *     dies, and gives it a new fingerprint seed and an empty profile on New identity. With no proxy set
- *     it refuses to start it, since the page would see this machine's own address.
+ *     dies, and gives the user a new fingerprint seed and an empty profile on New identity. With no proxy
+ *     set it refuses to start it, since the page would see this machine's own address.
  *
  * Back, forward and reload are keys through XTest (Alt+Left, Alt+Right, F5), as a person would press them.
  * The tabs go through DevTools on a pipe (--remote-debugging-pipe: no port a page could scan), and only
- * through the browser-level Target calls: list, switch to, open and close a tab. Nothing attaches to a
- * page and no Runtime call is made, so a page has nothing to notice.
+ * through browser-level calls: the Target calls to list, switch to, open and close a tab, Storage.clearCookies
+ * and Browser.close. Nothing attaches to a page and no Runtime call is made, so a page has nothing to
+ * notice. The history is rd-shell's own, from the tabs' addresses as DevTools reports them.
  *
  *   rd-shell [-c /data/browser.conf]          DISPLAY from the environment
  */
@@ -27,6 +34,7 @@
 #include <ftw.h>
 #include <limits.h>
 #include <locale.h>
+#include <math.h>
 #include <netdb.h>
 #include <poll.h>
 #include <signal.h>
@@ -37,6 +45,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -57,7 +66,7 @@
 
 static struct {
     char path[PATH_MAX];
-    char key[64][32], val[64][512];
+    char key[64][48], val[64][512];
     int n;
 } C = { "/data/browser.conf" };
 
@@ -101,40 +110,125 @@ static const char *conf(const char *k, const char *def)
     return def;
 }
 
-/* Writes key = value into the file: the existing line replaced, or one appended. */
-static void conf_store(const char *k, const char *v)
+/* ---------------- the users: <data>/<name>/{profile/, seed, tabs, history, favourites} ---------------- */
+
+#define MAX_USERS 8
+#define URL_MAX 2048
+#define MAX_TABS_OPEN 8 /* a user's tabs opened again: more would crowd the OECT's memory */
+
+static struct {
+    char name[MAX_USERS][32];
+    int n, cur;
+    char dir[PATH_MAX / 2]; /* <data> */
+} U;
+
+static const char *user(void) { return U.name[U.cur]; }
+
+/* The setting for the user in use: "key.Name = …" before "key = …" (a proxy, timezone or language each). */
+static const char *uconf(const char *k, const char *def)
 {
-    char tmp[PATH_MAX + 8], line[700];
-    snprintf(tmp, sizeof tmp, "%s.new", C.path);
-    FILE *in = fopen(C.path, "r"), *out = fopen(tmp, "w");
-    if (!out) {
-        LOG("can't write %s: %s", tmp, strerror(errno));
-        if (in)
-            fclose(in);
+    char uk[96];
+    snprintf(uk, sizeof uk, "%s.%s", k, user());
+    const char *v = conf(uk, NULL);
+    return v ? v : conf(k, def);
+}
+
+static void upath(char *out, size_t cap, const char *file)
+{
+    snprintf(out, cap, "%s/%s/%s", U.dir, user(), file);
+}
+
+static void read_line(const char *path, char *out, size_t cap)
+{
+    out[0] = 0;
+    FILE *f = fopen(path, "r");
+    if (!f)
         return;
+    if (fgets(out, (int)cap, f))
+        out[strcspn(out, "\r\n")] = 0;
+    fclose(f);
+}
+
+/* A file is written whole beside itself, then renamed over the old one: a power cut leaves one or the other. */
+static FILE *save_begin(const char *path, char *tmp, size_t cap)
+{
+    snprintf(tmp, cap, "%s.new", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f)
+        LOG("can't write %s: %s", tmp, strerror(errno));
+    return f;
+}
+
+static void save_end(FILE *f, const char *tmp, const char *path)
+{
+    if (!f)
+        return;
+    int bad = fflush(f) != 0 || fsync(fileno(f)) != 0;
+    if (fclose(f) || bad || rename(tmp, path)) {
+        LOG("can't replace %s: %s", path, strerror(errno));
+        unlink(tmp);
     }
-    int done = 0;
-    while (in && fgets(line, sizeof line, in)) {
-        const char *p = line;
-        while (*p == ' ' || *p == '\t')
-            p++;
-        size_t kl = strlen(k);
-        if (!done && !strncmp(p, k, kl) && (p[kl] == ' ' || p[kl] == '\t' || p[kl] == '=')) {
-            fprintf(out, "%s = %s\n", k, v);
-            done = 1;
-        } else {
-            fputs(line, out);
+}
+
+static void write_line(const char *path, const char *s)
+{
+    char tmp[PATH_MAX + 8];
+    FILE *f = save_begin(path, tmp, sizeof tmp);
+    if (f)
+        fprintf(f, "%s\n", s);
+    save_end(f, tmp, path);
+}
+
+/* tabs and newlines would break the files' lines */
+static void one_line(char *s)
+{
+    for (; *s; s++)
+        if (*s == '\t' || *s == '\n' || *s == '\r')
+            *s = ' ';
+}
+
+static int is_web(const char *url)
+{
+    return !strncmp(url, "http://", 7) || !strncmp(url, "https://", 8);
+}
+
+static int rm_entry(const char *path, const struct stat *st, int flag, struct FTW *ftw)
+{
+    if (remove(path))
+        LOG("rm %s: %s", path, strerror(errno));
+    return 0;
+}
+
+static void rm_tree(const char *path)
+{
+    if (strlen(path) > 1) /* never "/" */
+        nftw(path, rm_entry, 16, FTW_DEPTH | FTW_PHYS | FTW_MOUNT);
+}
+
+/* users = Alice Bob …: the names are directory names, so letters, digits, - and _ only */
+static void users_load(void)
+{
+    snprintf(U.dir, sizeof U.dir, "%s", conf("data", "/data/users"));
+    char list[512], cur[64], p[PATH_MAX];
+    snprintf(list, sizeof list, "%s", conf("users", "Alice Bob Charlie David Eve Frank"));
+    U.n = U.cur = 0;
+    for (char *save = NULL, *t = strtok_r(list, " ,", &save); t && U.n < MAX_USERS; t = strtok_r(NULL, " ,", &save)) {
+        if (strlen(t) >= sizeof U.name[0] ||
+            strspn(t, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") != strlen(t)) {
+            LOG("users: \"%s\" left out (letters, digits, - and _ only)", t);
+            continue;
         }
+        snprintf(U.name[U.n++], sizeof U.name[0], "%s", t);
     }
-    if (!done)
-        fprintf(out, "%s = %s\n", k, v);
-    if (in)
-        fclose(in);
-    struct stat st;
-    if (!stat(C.path, &st))
-        fchmod(fileno(out), st.st_mode & 07777);
-    if (fclose(out) || rename(tmp, C.path))
-        LOG("can't replace %s: %s", C.path, strerror(errno));
+    if (!U.n)
+        snprintf(U.name[U.n++], sizeof U.name[0], "Default");
+    if (mkdir(U.dir, 0700) && errno != EEXIST)
+        LOG("mkdir %s: %s", U.dir, strerror(errno));
+    snprintf(p, sizeof p, "%s/current", U.dir); /* the one in use when rd-shell last ran */
+    read_line(p, cur, sizeof cur);
+    for (int i = 0; i < U.n; i++)
+        if (!strcmp(U.name[i], cur))
+            U.cur = i;
 }
 
 /* ---------------- state ---------------- */
@@ -142,9 +236,9 @@ static void conf_store(const char *k, const char *v)
 static Display *dpy;
 static Window root, bar, menu, check;
 static int W, H, S, B; /* screen size, scale, bar height */
-static XftFont *font[2];
+static XftFont *font[2], *font_s[2]; /* the main size, the small one */
 static XftDraw *bar_draw, *menu_draw;
-static XftColor c_text, c_dim, c_ok, c_bad;
+static XftColor c_text, c_dim, c_ok, c_bad, c_star;
 static unsigned long px_bg, px_field, px_line, px_press;
 static XIM xim;
 static XIC xic;
@@ -170,14 +264,22 @@ static Window active;
 static struct {
     pid_t pid;
     int want;        /* the browser should be running */
-    char seed[40];
+    char seed[40];   /* the user's fingerprint */
     int fails;       /* quick deaths in a row: the restart waits longer */
     time_t started;
     double restart_at;
+    int stopping;    /* Browser.close sent: the tabs closing now are not the user closing them */
+    int restore_n;   /* the user's tabs being opened: how many, and which goes in front once they are */
+    char front[URL_MAX];
+    double restore_until;
+    char restored[MAX_TABS_OPEN][URL_MAX]; /* their addresses: opening them again isn't a visit */
+    int nrestored;
 } BR;
 
 static char title[512];
 static char message[200];   /* shown instead of the title: why the browser isn't running */
+static char note[120];      /* shown instead of the title for a moment: what a tap did */
+static double note_until;
 static int editing;
 static char edit[1024];
 static int menu_open;
@@ -201,6 +303,154 @@ static double now_s(void)
 static void draw_bar(void);
 static void draw_menu(void);
 static void menu_layout(void);
+static void panel_refresh(void);
+
+static void show_note(const char *s)
+{
+    snprintf(note, sizeof note, "%s", s);
+    note_until = now_s() + 2.5;
+    draw_bar();
+}
+
+/* ---------------- the user's history and favourites: time \t url \t title, one per line ---------------- */
+
+#define MAX_HIST 1000
+#define MAX_FAVS 200
+
+static struct hist {
+    time_t t;
+    char url[URL_MAX], title[200];
+} HI[MAX_HIST];         /* oldest first */
+static int nhist, hist_dirty;
+static double hist_save_at;
+
+static struct {
+    char url[URL_MAX], title[200];
+} FV[MAX_FAVS];         /* in the order they were added */
+static int nfavs;
+
+static void hist_push(time_t t, const char *url, const char *ttl)
+{
+    if (nhist == MAX_HIST) { /* full: the oldest tenth goes */
+        memmove(HI, HI + MAX_HIST / 10, sizeof HI[0] * (MAX_HIST - MAX_HIST / 10));
+        nhist -= MAX_HIST / 10;
+    }
+    HI[nhist].t = t;
+    snprintf(HI[nhist].url, sizeof HI[0].url, "%s", url);
+    snprintf(HI[nhist].title, sizeof HI[0].title, "%s", ttl);
+    one_line(HI[nhist].title);
+    nhist++;
+}
+
+static void hist_changed(void)
+{
+    if (!hist_dirty)
+        hist_save_at = now_s() + 3; /* a page loading changes it several times: one write for them */
+    hist_dirty = 1;
+    panel_refresh();
+}
+
+/* A tab went to url. The title comes later (hist_title): what DevTools says now may be the last page's. */
+static void hist_add(const char *url)
+{
+    if (!is_web(url) || strlen(url) >= URL_MAX || strchr(url, '\t') || strchr(url, '\n'))
+        return;
+    if (nhist && !strcmp(HI[nhist - 1].url, url)) /* the same page again: a reload */
+        return;
+    hist_push(time(NULL), url, "");
+    hist_changed();
+}
+
+/* A page's title for the history. Not one that is only its address, which Chromium shows while it loads. */
+static void hist_title(const char *url, const char *ttl)
+{
+    const char *bare = url ? strstr(url, "://") : NULL;
+    if (!url || !*url || !ttl || !*ttl || !strcmp(url, ttl) || (bare && !strcmp(bare + 3, ttl)))
+        return;
+    for (int i = nhist - 1; i >= 0 && i >= nhist - 50; i--)
+        if (!strcmp(HI[i].url, url)) {
+            if (strcmp(HI[i].title, ttl)) {
+                snprintf(HI[i].title, sizeof HI[i].title, "%s", ttl);
+                one_line(HI[i].title);
+                hist_changed();
+            }
+            return;
+        }
+}
+
+static void hist_save(void)
+{
+    char p[PATH_MAX], tmp[PATH_MAX + 8];
+    hist_dirty = 0;
+    upath(p, sizeof p, "history");
+    FILE *f = save_begin(p, tmp, sizeof tmp);
+    for (int i = 0; f && i < nhist; i++)
+        fprintf(f, "%lld\t%s\t%s\n", (long long)HI[i].t, HI[i].url, HI[i].title);
+    save_end(f, tmp, p);
+}
+
+static void favs_save(void)
+{
+    char p[PATH_MAX], tmp[PATH_MAX + 8];
+    upath(p, sizeof p, "favourites");
+    FILE *f = save_begin(p, tmp, sizeof tmp);
+    for (int i = 0; f && i < nfavs; i++)
+        fprintf(f, "%s\t%s\n", FV[i].url, FV[i].title);
+    save_end(f, tmp, p);
+}
+
+/* history and favourites of the user in use, from their files */
+static void lists_load(void)
+{
+    static char line[URL_MAX + 400];
+    char p[PATH_MAX];
+    nhist = nfavs = hist_dirty = 0;
+    upath(p, sizeof p, "history");
+    FILE *f = fopen(p, "r");
+    while (f && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *u = strchr(line, '\t'), *t = u ? strchr(u + 1, '\t') : NULL;
+        if (!t)
+            continue;
+        *u++ = 0;
+        *t++ = 0;
+        hist_push((time_t)atoll(line), u, t);
+    }
+    if (f)
+        fclose(f);
+    upath(p, sizeof p, "favourites");
+    f = fopen(p, "r");
+    while (f && fgets(line, sizeof line, f) && nfavs < MAX_FAVS) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *t = strchr(line, '\t');
+        if (t)
+            *t++ = 0;
+        if (!*line)
+            continue;
+        snprintf(FV[nfavs].url, sizeof FV[0].url, "%s", line);
+        snprintf(FV[nfavs].title, sizeof FV[0].title, "%s", t ? t : "");
+        nfavs++;
+    }
+    if (f)
+        fclose(f);
+}
+
+static int fav_find(const char *url)
+{
+    for (int i = 0; url && i < nfavs; i++)
+        if (!strcmp(FV[i].url, url))
+            return i;
+    return -1;
+}
+
+static void fav_delete(int i)
+{
+    if (i < 0 || i >= nfavs)
+        return;
+    memmove(&FV[i], &FV[i + 1], sizeof FV[0] * (size_t)(nfavs - i - 1));
+    nfavs--;
+    favs_save();
+}
 
 /* ---------------- the browser ---------------- */
 
@@ -219,7 +469,7 @@ static void random_seed(char *out, size_t cap)
 /* host and port out of socks5://[user:pass@]host:port (or http://…) */
 static int proxy_hostport(char *host, size_t hcap, char *port, size_t pcap)
 {
-    const char *p = conf("proxy", "");
+    const char *p = uconf("proxy", "");
     const char *s = strstr(p, "://");
     s = s ? s + 3 : p;
     const char *at = strrchr(s, '@');
@@ -245,28 +495,32 @@ static int proxy_hostport(char *host, size_t hcap, char *port, size_t pcap)
     return 0;
 }
 
-static char **browser_argv(const char *url, int devtools)
+/* urls: the tabs to open (none: the home page) */
+static char **browser_argv(const char *const *urls, int nurls, int devtools)
 {
-    static char args[40][600];
-    static char *argv[48];
+    static char args[40 + MAX_TABS_OPEN][URL_MAX];
+    static char *argv[48 + MAX_TABS_OPEN];
     int n = 0;
 #define ARG(...) snprintf(args[n], sizeof args[n], __VA_ARGS__), argv[n] = args[n], n++
     ARG("%s", conf("browser", "/opt/cloakbrowser/chrome"));
-    ARG("--fingerprint-platform=%s", conf("platform", "windows"));
+    ARG("--fingerprint-platform=%s", uconf("platform", "windows"));
     ARG("--fingerprint=%s", BR.seed);
-    const char *proxy = conf("proxy", "");
+    const char *proxy = uconf("proxy", "");
     if (*proxy) {
         char host[256], port[16];
         ARG("--proxy-server=%s", proxy);
         if (!proxy_hostport(host, sizeof host, port, sizeof port)) /* no lookups but the proxy's own name */
             ARG("--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE %s", host);
         ARG("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
-        ARG("--fingerprint-webrtc-ip=%s", conf("webrtc_ip", "auto")); /* the proxy's exit address, not ours */
+        ARG("--fingerprint-webrtc-ip=%s", uconf("webrtc_ip", "auto")); /* the proxy's exit address, not ours */
     }
     ARG("--kiosk");
     ARG("--force-device-scale-factor=%d", S);
     ARG("--touch-events=enabled");
-    ARG("--user-data-dir=%s", conf("profile", "/tmp/profile"));
+    char profile[PATH_MAX];
+    upath(profile, sizeof profile, "profile");
+    ARG("--user-data-dir=%s", profile);
+    ARG("--disk-cache-dir=%s", conf("cache", "/tmp/rd-cache")); /* tmpfs: emptied when the user changes */
     ARG("--disable-dev-shm-usage");
     /* No GPU here, but a page without WebGL looks like a bot: SwiftShader draws it on the CPU.
      * webgl = 0 turns the GPU process off instead (cheaper on the OECT's cores). */
@@ -280,7 +534,7 @@ static char **browser_argv(const char *url, int devtools)
     ARG("--no-default-browser-check");
     if (devtools)
         ARG("--remote-debugging-pipe"); /* fds 3 and 4: see spawn */
-    const char *lang = conf("lang", ""), *tz = conf("timezone", "");
+    const char *lang = uconf("lang", ""), *tz = uconf("timezone", "");
     if (*lang) {
         ARG("--lang=%s", lang);
         ARG("--fingerprint-locale=%s", lang);
@@ -292,8 +546,10 @@ static char **browser_argv(const char *url, int devtools)
     snprintf(extra, sizeof extra, "%s", conf("args", ""));
     for (char *save = NULL, *t = strtok_r(extra, " ", &save); t && n < 44; t = strtok_r(NULL, " ", &save))
         ARG("%s", t);
-    if (url && *url)
-        ARG("%s", url);
+    for (int i = 0; i < nurls && i < MAX_TABS_OPEN; i++)
+        ARG("%s", urls[i]);
+    if (!nurls)
+        ARG("%s", uconf("home", "about:blank"));
 #undef ARG
     argv[n] = NULL;
     return argv;
@@ -310,7 +566,7 @@ static pid_t spawn(char **argv, int to, int from)
             if (a < 0 || b < 0 || dup2(a, 3) < 0 || dup2(b, 4) < 0)
                 _exit(127);
         }
-        const char *tz = conf("timezone", ""), *lang = conf("lang", "");
+        const char *tz = uconf("timezone", ""), *lang = uconf("lang", "");
         if (*tz)
             setenv("TZ", tz, 1);
         if (*lang) {
@@ -344,10 +600,12 @@ static struct {
     int list_id;        /* the getTargets asked for when the menu opens: the titles as they are now */
     char replace[40];
     struct {
-        char id[40], title[200];
+        char id[40], title[200], url[URL_MAX];
     } tab[MAX_TABS];
     int ntabs;          /* page tabs, in the order they opened; -1: not known (no DevTools) */
     char cur[40];       /* the one in front, as far as can be told */
+    int dirty;          /* the user's tabs file is behind: written at save_at */
+    double save_at;
 } T = { .wfd = -1, .rfd = -1, .ntabs = -1 };
 
 static int cdp_send(const char *method, cJSON *params)
@@ -391,16 +649,46 @@ static int tab_find(const char *id)
     return -1;
 }
 
+static const char *cur_url(void)
+{
+    int i = T.cur[0] ? tab_find(T.cur) : -1;
+    return i >= 0 && T.tab[i].url[0] ? T.tab[i].url : NULL;
+}
+
 static void tabs_changed(void)
 {
     if (menu_open) {
         menu_layout();
         draw_menu();
     }
+    if (!BR.stopping && T.ntabs > 0) {
+        if (!T.dirty)
+            T.save_at = now_s() + 2;
+        T.dirty = 1;
+    }
+    draw_bar(); /* the star: is the page in front a favourite */
 }
 
-/* Target.targetCreated / targetInfoChanged: a page tab, new or retitled. A new one is in front: tabs a
- * page opens (target=_blank, window.open) and the ones opened from the bar all come up in front. */
+/* The user's open tabs, one URL a line, the one in front marked "* ": opened again on the next start. */
+static void tabs_save(void)
+{
+    char p[PATH_MAX], tmp[PATH_MAX + 8];
+    T.dirty = 0;
+    if (T.ntabs <= 0) /* not known: what the file says stays */
+        return;
+    upath(p, sizeof p, "tabs");
+    FILE *f = save_begin(p, tmp, sizeof tmp);
+    for (int i = 0; f && i < T.ntabs; i++)
+        if (T.tab[i].url[0] && strncmp(T.tab[i].url, "devtools:", 9) && !strchr(T.tab[i].url, '\n'))
+            fprintf(f, "%s%s\n", strcmp(T.tab[i].id, T.cur) ? "" : "* ", T.tab[i].url);
+    save_end(f, tmp, p);
+}
+
+static void tab_select(int i);
+
+/* Target.targetCreated / targetInfoChanged: a page tab, new, retitled or gone to another address. A new one is
+ * in front: tabs a page opens (target=_blank, window.open) and the ones opened from the bar all come up in
+ * front. Each new address goes into the history. */
 static void tab_info(const cJSON *info, int created)
 {
     const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(info, "type"));
@@ -415,10 +703,28 @@ static void tab_info(const cJSON *info, int created)
             return;
         i = T.ntabs++;
         snprintf(T.tab[i].id, sizeof T.tab[i].id, "%s", id);
+        T.tab[i].url[0] = 0;
     }
     snprintf(T.tab[i].title, sizeof T.tab[i].title, "%s", t && *t ? t : url ? url : "");
+    if (url && strcmp(T.tab[i].url, url)) {
+        int again = 0; /* a tab of the user's opened again at the start */
+        for (int k = 0; !is_web(T.tab[i].url) && k < BR.nrestored && now_s() < BR.restore_until; k++)
+            again |= !strcmp(BR.restored[k], url);
+        snprintf(T.tab[i].url, sizeof T.tab[i].url, "%s", url);
+        if (!again)
+            hist_add(url);
+    } else if (url) {
+        hist_title(url, t);
+    }
     if (created)
         snprintf(T.cur, sizeof T.cur, "%s", id);
+    if (BR.restore_n && T.ntabs >= BR.restore_n) /* the user's tabs are all open: the one they left in front */
+        for (int k = 0; k < T.ntabs; k++)
+            if (!strcmp(T.tab[k].url, BR.front)) {
+                BR.restore_n = 0;
+                tab_select(k);
+                break;
+            }
     tabs_changed();
 }
 
@@ -490,6 +796,9 @@ static void cdp_message(char *msg)
 
 static void cdp_close(void)
 {
+    if (T.dirty && !BR.stopping) /* the browser died: its tabs as they were last */
+        tabs_save();
+    T.dirty = 0;
     if (T.wfd >= 0)
         close(T.wfd);
     if (T.rfd >= 0)
@@ -550,22 +859,40 @@ static void browser_start(void)
         return;
     BR.want = 1;
     message[0] = 0;
-    if (!*conf("proxy", "") && strcmp(conf("allow_direct", "0"), "1")) {
+    if (!*uconf("proxy", "") && strcmp(conf("allow_direct", "0"), "1")) {
         snprintf(message, sizeof message, "No proxy set in %s", C.path);
         LOG("%s: not starting the browser (allow_direct = 1 to start it anyway)", message);
         draw_bar();
         return;
     }
-    if (!BR.seed[0]) {
-        const char *s = conf("seed", "");
-        if (*s)
-            snprintf(BR.seed, sizeof BR.seed, "%s", s);
-        else
-            random_seed(BR.seed, sizeof BR.seed);
+    /* the user's tabs from last time; after quick deaths in a row only the home page, in case one of them
+     * is what kills the browser */
+    char (*urls)[URL_MAX] = BR.restored;
+    const char *u[MAX_TABS_OPEN];
+    char tabs[PATH_MAX], line[URL_MAX + 4];
+    int nurls = 0;
+    BR.front[0] = 0;
+    upath(tabs, sizeof tabs, "tabs");
+    FILE *f = BR.fails < 3 ? fopen(tabs, "r") : NULL;
+    while (f && nurls < MAX_TABS_OPEN && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        const char *url = !strncmp(line, "* ", 2) ? line + 2 : line;
+        if (!*url)
+            continue;
+        if (url != line)
+            snprintf(BR.front, sizeof BR.front, "%s", url);
+        snprintf(urls[nurls], sizeof urls[0], "%s", url);
+        u[nurls] = urls[nurls];
+        nurls++;
     }
+    if (f)
+        fclose(f);
+    BR.nrestored = nurls;
+    BR.restore_n = nurls > 1 && BR.front[0] ? nurls : 0;
+    BR.restore_until = now_s() + 15;
     int to[2] = { -1, -1 }, from[2] = { -1, -1 };
     int devtools = !pipe2(to, O_CLOEXEC) && !pipe2(from, O_CLOEXEC);
-    BR.pid = spawn(browser_argv(conf("home", "about:blank"), devtools), devtools ? to[0] : -1, devtools ? from[1] : -1);
+    BR.pid = spawn(browser_argv(u, nurls, devtools), devtools ? to[0] : -1, devtools ? from[1] : -1);
     if (to[0] >= 0)
         close(to[0]);
     if (from[1] >= 0)
@@ -585,54 +912,155 @@ static void browser_start(void)
             close(from[0]);
     }
     BR.started = time(NULL);
-    LOG("browser started (pid %d, seed %s)", (int)BR.pid, BR.seed);
+    LOG("browser started for %s (pid %d, seed %s, %d tab%s)", user(), (int)BR.pid, BR.seed, nurls ? nurls : 1,
+        nurls > 1 ? "s" : "");
     draw_bar();
 }
 
+/* Waits up to ms for the browser to exit, without reaping it: until it is reaped its pid can't be reused,
+ * so the SIGKILL to its process group can't reach anyone else's. */
+static int browser_wait(int ms)
+{
+    for (int i = 0; i < ms / 50; i++) {
+        siginfo_t si = { 0 };
+        if (!waitid(P_PID, (id_t)BR.pid, &si, WEXITED | WNOHANG | WNOWAIT) && si.si_pid == BR.pid)
+            return 1;
+        usleep(50000);
+    }
+    return 0;
+}
+
+/* Browser.close first: Chromium writes its cookies and closes the profile as on a normal quit. A signal if
+ * that doesn't do, and at the end SIGKILL for whatever is left of its process group (renderers, the zygote):
+ * nothing of the user keeps running. */
 static void browser_stop(void)
 {
     BR.want = 0;
     BR.restart_at = 0;
     if (BR.pid <= 0)
         return;
-    kill(-BR.pid, SIGTERM);
-    for (int i = 0; i < 50; i++) { /* up to 5 s for it to save nothing and leave */
-        if (waitpid(BR.pid, NULL, WNOHANG) == BR.pid) {
-            BR.pid = 0;
-            break;
-        }
-        usleep(100000);
-    }
-    if (BR.pid > 0) {
-        kill(-BR.pid, SIGKILL);
-        waitpid(BR.pid, NULL, 0);
-        BR.pid = 0;
-    }
+    tabs_save(); /* before Browser.close closes them one by one */
+    BR.stopping = 1;
+    int exited = (cdp_send("Browser.close", NULL) > 0 && browser_wait(8000)) ||
+                 (kill(-BR.pid, SIGTERM) == 0 && browser_wait(5000));
+    kill(-BR.pid, SIGKILL);
+    waitpid(BR.pid, NULL, 0);
+    BR.pid = 0;
     cdp_close();
-    LOG("browser stopped");
+    BR.stopping = 0;
+    BR.restore_n = 0;
+    LOG("browser stopped%s", exited ? "" : " (killed)");
 }
 
-static int rm_entry(const char *path, const struct stat *st, int flag, struct FTW *ftw)
+/* the user's fingerprint seed: made the first time and kept in their directory */
+static void seed_load(int fresh)
 {
-    if (remove(path))
-        LOG("rm %s: %s", path, strerror(errno));
-    return 0;
+    char p[PATH_MAX];
+    upath(p, sizeof p, "seed");
+    if (!fresh)
+        read_line(p, BR.seed, sizeof BR.seed);
+    if (!BR.seed[0] || fresh || strspn(BR.seed, "0123456789") != strlen(BR.seed)) {
+        random_seed(BR.seed, sizeof BR.seed);
+        write_line(p, BR.seed);
+    }
 }
 
+/* Makes U.cur the user in use: their directory, fingerprint, history and favourites. The disk cache is
+ * shared by everyone, so it is emptied: one user's cache must not show up in another's pages. */
+static void user_open(void)
+{
+    char p[PATH_MAX];
+    snprintf(p, sizeof p, "%s/%s", U.dir, user());
+    if (mkdir(p, 0700) && errno != EEXIST)
+        LOG("mkdir %s: %s", p, strerror(errno));
+    BR.seed[0] = 0;
+    seed_load(0);
+    lists_load();
+    rm_tree(conf("cache", "/tmp/rd-cache"));
+    snprintf(p, sizeof p, "%s/current", U.dir);
+    write_line(p, user());
+    const char *tz = uconf("timezone", ""); /* the history's times in the user's zone */
+    if (*tz)
+        setenv("TZ", tz, 1);
+    else
+        unsetenv("TZ");
+    tzset();
+    PX.ok = -1; /* the user may have a proxy of their own */
+    PX.next = 0;
+    LOG("user %s: %d in the history, %d favourites", user(), nhist, nfavs);
+}
+
+static void user_switch(int i)
+{
+    if (i < 0 || i >= U.n || i == U.cur)
+        return;
+    browser_stop();
+    if (hist_dirty)
+        hist_save();
+    U.cur = i;
+    user_open();
+    title[0] = 0;
+    BR.fails = 0;
+    browser_start();
+    char s[80];
+    snprintf(s, sizeof s, "Now %s", user());
+    show_note(s);
+}
+
+/* the user's profile, the cache and the user's tabs: the next start is an empty browser */
+static void profile_wipe(void)
+{
+    char p[PATH_MAX];
+    upath(p, sizeof p, "profile");
+    rm_tree(p);
+    rm_tree(conf("cache", "/tmp/rd-cache"));
+    upath(p, sizeof p, "tabs");
+    unlink(p);
+}
+
+/* New identity: a new fingerprint and an empty profile for the user; the history and favourites are
+ * rd-shell's own, never seen by a page, and stay. */
 static void new_identity(void)
 {
     browser_stop();
-    const char *profile = conf("profile", "/tmp/profile");
-    if (strlen(profile) > 1) /* never "/" */
-        nftw(profile, rm_entry, 16, FTW_DEPTH | FTW_PHYS | FTW_MOUNT);
-    random_seed(BR.seed, sizeof BR.seed);
-    if (!strcmp(conf("seed_mode", "session"), "sticky")) {
-        conf_store("seed", BR.seed);
-        conf_load();
-    }
-    LOG("new identity: seed %s, empty profile", BR.seed);
+    profile_wipe();
+    seed_load(1);
+    LOG("new identity for %s: seed %s, empty profile", user(), BR.seed);
     BR.fails = 0;
     browser_start();
+}
+
+/* Clear history & data: the history, and everything a site left (cookies, storage, cache); the fingerprint
+ * and the favourites stay. */
+static void clear_all(void)
+{
+    browser_stop();
+    profile_wipe();
+    nhist = 0;
+    hist_save();
+    LOG("%s: history and site data cleared", user());
+    BR.fails = 0;
+    browser_start();
+    show_note("History and data cleared");
+}
+
+/* Clear cookies: through DevTools while the browser runs (its tabs stay); without it, the cookie files go
+ * with the browser stopped. */
+static void clear_cookies(void)
+{
+    if (T.wfd < 0 || cdp_send("Storage.clearCookies", NULL) < 0) {
+        char p[PATH_MAX];
+        int was = BR.pid > 0;
+        browser_stop();
+        upath(p, sizeof p, "profile/Default/Cookies");
+        unlink(p);
+        upath(p, sizeof p, "profile/Default/Cookies-journal");
+        unlink(p);
+        if (was)
+            browser_start();
+    }
+    LOG("%s: cookies cleared", user());
+    show_note("Cookies cleared");
 }
 
 /* Kiosk has no address bar to type into, so a URL opens in a new tab (Target.createTarget), and with one_tab
@@ -661,7 +1089,7 @@ static void browser_open(const char *url, int replace)
         }
         return;
     }
-    if (spawn(browser_argv(url, 0), -1, -1) > 0 && one) {
+    if (spawn(browser_argv(&url, 1, 0), -1, -1) > 0 && one) {
         OPEN.until = now_s() + 5;
         snprintf(OPEN.before, sizeof OPEN.before, "%s", title);
     }
@@ -671,6 +1099,11 @@ static void reap(void)
 {
     int st;
     pid_t p;
+    siginfo_t si = { 0 };
+    /* the browser died: what is left of its process group (renderers, the zygote) goes too, before its
+     * profile is used again; it isn't reaped yet, so its pid can't be someone else's */
+    if (BR.pid > 0 && !waitid(P_PID, (id_t)BR.pid, &si, WEXITED | WNOHANG | WNOWAIT) && si.si_pid == BR.pid)
+        kill(-BR.pid, SIGKILL);
     while ((p = waitpid(-1, &st, WNOHANG)) > 0) {
         if (p != BR.pid)
             continue; /* a URL handed over */
@@ -694,7 +1127,7 @@ static void probe_start(void)
 {
     PX.next = now_s() + 10;
     char host[256], port[16];
-    if (!*conf("proxy", "") || proxy_hostport(host, sizeof host, port, sizeof port))
+    if (!*uconf("proxy", "") || proxy_hostport(host, sizeof host, port, sizeof port))
         return;
     struct addrinfo hints = { .ai_socktype = SOCK_STREAM }, *ai = NULL;
     if (getaddrinfo(host, port, &hints, &ai) || !ai) {
@@ -727,13 +1160,14 @@ static void probe_done(int ok)
 
 /* ---------------- drawing ---------------- */
 
-static XftFont *font_for(FcChar32 c)
+/* fs: a pair, the main font and the CJK one for what it lacks (font, or font_s: the small size) */
+static XftFont *font_for(XftFont **fs, FcChar32 c)
 {
-    if (font[0] && XftCharExists(dpy, font[0], c))
-        return font[0];
-    if (font[1] && XftCharExists(dpy, font[1], c))
-        return font[1];
-    return font[0];
+    if (fs[0] && XftCharExists(dpy, fs[0], c))
+        return fs[0];
+    if (fs[1] && XftCharExists(dpy, fs[1], c))
+        return fs[1];
+    return fs[0];
 }
 
 static int utf8_next(const char *s, FcChar32 *c)
@@ -743,20 +1177,20 @@ static int utf8_next(const char *s, FcChar32 *c)
 }
 
 /* width of s in pixels, or draws it at x (baseline y) when d is given; stops at maxw with an ellipsis */
-static int text(XftDraw *d, XftColor *col, int x, int y, const char *s, int maxw)
+static int text_in(XftFont **fs, XftDraw *d, XftColor *col, int x, int y, const char *s, int maxw)
 {
     int w = 0;
     XGlyphInfo gi;
-    XftTextExtentsUtf8(dpy, font[0], (const FcChar8 *)"…", (int)strlen("…"), &gi);
+    XftTextExtentsUtf8(dpy, fs[0], (const FcChar8 *)"…", (int)strlen("…"), &gi);
     int ell = gi.xOff;
     for (const char *p = s; *p;) {
         FcChar32 c;
         int n = utf8_next(p, &c);
-        XftFont *f = font_for(c);
+        XftFont *f = font_for(fs, c);
         XftTextExtentsUtf8(dpy, f, (const FcChar8 *)p, n, &gi);
         if (maxw > 0 && w + gi.xOff > maxw - (p[n] ? ell : 0)) {
             if (d)
-                XftDrawStringUtf8(d, col, font[0], x + w, y, (const FcChar8 *)"…", (int)strlen("…"));
+                XftDrawStringUtf8(d, col, fs[0], x + w, y, (const FcChar8 *)"…", (int)strlen("…"));
             return w + ell;
         }
         if (d)
@@ -767,12 +1201,63 @@ static int text(XftDraw *d, XftColor *col, int x, int y, const char *s, int maxw
     return w;
 }
 
+static int text(XftDraw *d, XftColor *col, int x, int y, const char *s, int maxw)
+{
+    return text_in(font, d, col, x, y, s, maxw);
+}
+
 static void icon_triangle(Drawable dr, GC gc, int cx, int cy, int r, int dir)
 {
     XPoint p[3] = { { (short)(cx + dir * r / 2), (short)cy }, /* the tip, pointing dir */
                     { (short)(cx - dir * r / 2), (short)(cy - r) },
                     { (short)(cx - dir * r / 2), (short)(cy + r) } };
     XFillPolygon(dpy, dr, gc, p, 3, Convex, CoordModeOrigin);
+}
+
+/* five points around (cx, cy): filled for a favourite, an outline otherwise */
+static void icon_star(Drawable dr, GC gc, int cx, int cy, int r, int filled)
+{
+    XPoint p[11];
+    for (int i = 0; i < 10; i++) {
+        double a = -M_PI / 2 + i * M_PI / 5, rr = i % 2 ? r * 0.45 : r;
+        p[i].x = (short)lround(cx + rr * cos(a));
+        p[i].y = (short)lround(cy + rr * sin(a));
+    }
+    p[10] = p[0];
+    if (filled)
+        XFillPolygon(dpy, dr, gc, p, 10, Nonconvex, CoordModeOrigin);
+    else
+        XDrawLines(dpy, dr, gc, p, 11, CoordModeOrigin);
+}
+
+/* The pages drawn over the browser, below the bar. Drawn into a pixmap first: a drag redraws the whole
+ * page for every move, and the video would show it half drawn. */
+enum { P_NONE, P_USERS, P_HISTORY, P_FAVS };
+static const char *PAGE_NAME[] = { "", "Users", "History", "Favourites" };
+
+static struct {
+    int kind;
+    Window w;
+    Pixmap pm;
+    XftDraw *d;
+    int scroll, total;            /* the list's offset at the top, its height */
+    int down, down_y, down_scroll, moved; /* a finger on it: where it started, and has it dragged */
+    int confirm;                  /* a Clear row tapped once: a second tap within 4 s does it */
+    double confirm_until;
+    int utabs[MAX_USERS], ufavs[MAX_USERS];
+} P;
+
+/* The page's own title: the window's, without the browser's name after it. */
+static void page_title(char *out, size_t cap)
+{
+    static const char *names[] = { "Chromium", "Google Chrome", "Chrome", "CloakBrowser" };
+    snprintf(out, cap, "%s", title);
+    char *last = NULL;
+    for (char *p = strstr(out, " - "); p; p = strstr(p + 1, " - "))
+        last = p;
+    for (size_t i = 0; last && i < sizeof names / sizeof names[0]; i++)
+        if (!strcmp(last + 3, names[i]))
+            *last = 0;
 }
 
 static void draw_bar(void)
@@ -784,9 +1269,10 @@ static void draw_bar(void)
     XFillRectangle(dpy, bar, gc, 0, 0, (unsigned)W, (unsigned)B);
     XSetForeground(dpy, gc, px_line);
     XFillRectangle(dpy, bar, gc, 0, B - S, (unsigned)W, (unsigned)S);
-    int r = B / 6, cy = B / 2, on = BR.pid > 0;
-    XSetForeground(dpy, gc, on ? c_text.pixel : c_dim.pixel);
-    icon_triangle(bar, gc, B / 2, cy, r, -1);       /* back */
+    int r = B / 6, cy = B / 2, on = BR.pid > 0, page = P.kind != P_NONE;
+    XSetForeground(dpy, gc, on || page ? c_text.pixel : c_dim.pixel);
+    icon_triangle(bar, gc, B / 2, cy, r, -1);       /* back; with a page open, it closes the page */
+    XSetForeground(dpy, gc, on && !page ? c_text.pixel : c_dim.pixel);
     icon_triangle(bar, gc, B + B / 2, cy, r, 1);    /* forward */
     XSetLineAttributes(dpy, gc, (unsigned)(S * 2), LineSolid, CapRound, JoinRound);
     XDrawArc(dpy, bar, gc, 2 * B + B / 2 - r, cy - r, (unsigned)(2 * r), (unsigned)(2 * r), 90 * 64, 270 * 64);
@@ -794,13 +1280,17 @@ static void draw_bar(void)
                        { (short)(2 * B + B / 2 + r / 2 + S), (short)(cy - r) },
                        { (short)(2 * B + B / 2), (short)(cy - r + r / 2) } };
     XFillPolygon(dpy, bar, gc, head, 3, Convex, CoordModeOrigin); /* reload */
+    const char *url = cur_url();
+    int fav = url && fav_find(url) >= 0;
+    XSetForeground(dpy, gc, fav ? c_star.pixel : on && !page && url && is_web(url) ? c_text.pixel : c_dim.pixel);
+    icon_star(bar, gc, W - B - B / 2, cy, B / 5, fav);
     XSetLineAttributes(dpy, gc, 0, LineSolid, CapButt, JoinMiter);
     XSetForeground(dpy, gc, c_text.pixel);
     for (int i = -1; i <= 1; i++) /* the menu */
         XFillArc(dpy, bar, gc, W - B / 2 + i * r - S * 2, cy - S * 2, (unsigned)(S * 4), (unsigned)(S * 4), 0, 360 * 64);
 
     /* the field: the title, or what is being typed */
-    int fx = 3 * B + S * 2, fw = W - 4 * B - S * 4, fh = B - S * 14, fy = (B - fh) / 2;
+    int fx = 3 * B + S * 2, fw = W - 5 * B - S * 4, fh = B - S * 14, fy = (B - fh) / 2;
     XSetForeground(dpy, gc, editing ? px_press : px_field);
     XFillRectangle(dpy, bar, gc, fx, fy, (unsigned)fw, (unsigned)fh);
     int dot = S * 4, base = cy + (font[0]->ascent - font[0]->descent) / 2, tx = fx + S * 6;
@@ -817,10 +1307,18 @@ static void draw_bar(void)
         XftDrawSetClip(bar_draw, NULL);
         XSetForeground(dpy, gc, c_text.pixel);
         XFillRectangle(dpy, bar, gc, tx + (*edit ? w - shift : 0) + S, fy + S * 6, (unsigned)S, (unsigned)(fh - S * 12));
+    } else if (note[0]) {
+        text(bar_draw, &c_ok, tx, base, note, maxw);
+    } else if (page) {
+        char s[80];
+        snprintf(s, sizeof s, "%s · %s", PAGE_NAME[P.kind], user());
+        text(bar_draw, &c_text, tx, base, P.kind == P_USERS ? PAGE_NAME[P.kind] : s, maxw);
     } else if (message[0]) {
         text(bar_draw, &c_bad, tx, base, message, maxw);
     } else {
-        text(bar_draw, on ? &c_text : &c_dim, tx, base, title[0] ? title : on ? "Loading…" : "Stopped — tap ⋯ to start", maxw);
+        char pt[sizeof title];
+        page_title(pt, sizeof pt);
+        text(bar_draw, on ? &c_text : &c_dim, tx, base, pt[0] ? pt : on ? "Loading…" : "Stopped — tap ⋯ to start", maxw);
     }
     /* the proxy: green when it answers, red when it doesn't */
     XftColor *pc = PX.ok > 0 ? &c_ok : PX.ok == 0 ? &c_bad : &c_dim;
@@ -829,13 +1327,101 @@ static void draw_bar(void)
     XFlush(dpy);
 }
 
+/* ---------------- the container's CPU, memory and disk, in the menu ---------------- */
+
+static struct {
+    double next;
+    unsigned long long busy, total; /* the last CPU reading: time used, time there was, in one unit */
+    int cpu;                        /* percent; -1 until there are two readings */
+    unsigned long long mem, mem_max, disk, disk_max;
+} ST = { .cpu = -1 };
+
+/* A number from a cgroup or /proc file: the first in it, or the one after key. 0 when there is none, as for
+ * a limit of "max". */
+static int read_num(const char *path, const char *key, unsigned long long *v)
+{
+    char line[256];
+    FILE *f = fopen(path, "r");
+    int ok = 0;
+    size_t kl = key ? strlen(key) : 0;
+    while (f && !ok && fgets(line, sizeof line, f))
+        if (!key || (!strncmp(line, key, kl) && (line[kl] == ' ' || line[kl] == '\t')))
+            ok = sscanf(line + kl, " %llu", v) == 1;
+    if (f)
+        fclose(f);
+    return ok;
+}
+
+/* In the container, its own cgroup: CPU time against what its share of the cores could do, and memory
+ * without the page cache it can give back (as `docker stats` counts). Outside one, the whole machine's.
+ * The disk is the one the users' profiles are on. */
+static void stats_sample(void)
+{
+    unsigned long long v, busy = 0, total = 0, avail = 0;
+    if (read_num("/sys/fs/cgroup/cpu.stat", "usage_usec", &v)) {
+        double cores = (double)sysconf(_SC_NPROCESSORS_ONLN);
+        char q[32];
+        unsigned long long per = 0;
+        FILE *f = fopen("/sys/fs/cgroup/cpu.max", "r");
+        if (f && fscanf(f, "%31s %llu", q, &per) == 2 && strcmp(q, "max") && per)
+            cores = strtod(q, NULL) / (double)per;
+        if (f)
+            fclose(f);
+        busy = v;
+        total = (unsigned long long)(now_s() * 1e6 * cores);
+    } else {
+        unsigned long long c[8] = { 0 };
+        FILE *f = fopen("/proc/stat", "r");
+        if (f && fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu", &c[0], &c[1], &c[2], &c[3], &c[4], &c[5],
+                        &c[6], &c[7]) >= 5) {
+            for (int i = 0; i < 8; i++)
+                total += c[i];
+            busy = total - c[3] - c[4]; /* all but idle and iowait */
+        }
+        if (f)
+            fclose(f);
+    }
+    if (ST.total && total > ST.total && busy >= ST.busy) {
+        int pc = (int)(100.0 * (double)(busy - ST.busy) / (double)(total - ST.total) + 0.5);
+        ST.cpu = pc > 100 ? 100 : pc;
+    }
+    ST.busy = busy;
+    ST.total = total;
+
+    if (read_num("/sys/fs/cgroup/memory.current", NULL, &v)) {
+        unsigned long long inactive = 0;
+        read_num("/sys/fs/cgroup/memory.stat", "inactive_file", &inactive);
+        ST.mem = v > inactive ? v - inactive : v;
+        if (!read_num("/sys/fs/cgroup/memory.max", NULL, &ST.mem_max) && read_num("/proc/meminfo", "MemTotal:", &v))
+            ST.mem_max = v * 1024;
+    } else if (read_num("/proc/meminfo", "MemTotal:", &v) && read_num("/proc/meminfo", "MemAvailable:", &avail)) {
+        ST.mem_max = v * 1024;
+        ST.mem = (v - avail) * 1024;
+    }
+    struct statvfs fs;
+    if (!statvfs(U.dir, &fs)) {
+        ST.disk_max = (unsigned long long)fs.f_blocks * fs.f_frsize;
+        ST.disk = (unsigned long long)(fs.f_blocks - fs.f_bfree) * fs.f_frsize;
+    }
+}
+
+static void size_str(unsigned long long v, char *out, size_t cap)
+{
+    if (v < 1024ULL * 1024 * 1024)
+        snprintf(out, cap, "%llu MB", v >> 20);
+    else
+        snprintf(out, cap, "%.1f GB", (double)v / (1024.0 * 1024 * 1024));
+}
+
 /* The menu's rows. The tabs are listed only when there is more than one, with Close tab under them; one tab
- * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W). */
-enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_NEW_ID, M_RESTART, M_STARTSTOP, M_PROXY };
+ * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W).
+ * The last three only show the container's CPU, memory and disk. */
+enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_NEW_ID, M_RESTART,
+       M_STARTSTOP, M_PROXY, M_CPU, M_MEM, M_DISK };
 
 static struct {
     int kind, tab;
-} items[MAX_TABS + 8];
+} items[MAX_TABS + 16];
 static int nitems;
 
 static int menu_w(void) { return W * 3 / 5; }
@@ -848,7 +1434,7 @@ static void menu_layout(void)
     if (BR.pid > 0)
         ITEM(M_NEW_TAB, -1);
     if (T.ntabs > 1) {
-        int room = (H - B) / B - 7; /* the rows that fit on the screen beside the others */
+        int room = (H - B) / B - 13; /* the rows that fit on the screen beside the others */
         for (int i = 0; i < T.ntabs && i < room; i++)
             ITEM(M_TAB, i);
         ITEM(M_CLOSE_TAB, -1);
@@ -856,10 +1442,16 @@ static void menu_layout(void)
         ITEM(M_NEXT_TAB, -1);
         ITEM(M_CLOSE_TAB, -1);
     }
+    ITEM(M_FAVS, -1);
+    ITEM(M_HISTORY, -1);
+    ITEM(M_USER, -1);
     ITEM(M_NEW_ID, -1);
     ITEM(M_RESTART, -1);
     ITEM(M_STARTSTOP, -1);
     ITEM(M_PROXY, -1);
+    ITEM(M_CPU, -1);
+    ITEM(M_MEM, -1);
+    ITEM(M_DISK, -1);
 #undef ITEM
     XResizeWindow(dpy, menu, (unsigned)menu_w(), (unsigned)(B * nitems));
 }
@@ -872,12 +1464,35 @@ static void menu_label(int i, char *out, size_t cap)
     case M_TAB: snprintf(out, cap, "%s", T.tab[items[i].tab].title[0] ? T.tab[items[i].tab].title : "New tab"); break;
     case M_NEXT_TAB: snprintf(out, cap, "Next tab"); break;
     case M_CLOSE_TAB: snprintf(out, cap, "Close tab"); break;
+    case M_FAVS: snprintf(out, cap, "Favourites"); break;
+    case M_HISTORY: snprintf(out, cap, "History"); break;
+    case M_USER: snprintf(out, cap, "User: %s", user()); break;
     case M_NEW_ID: snprintf(out, cap, "New identity"); break;
     case M_RESTART: snprintf(out, cap, "Restart browser"); break;
     case M_STARTSTOP: snprintf(out, cap, BR.pid > 0 ? "Stop browser" : "Start browser"); break;
     case M_PROXY:
-        snprintf(out, cap, "Proxy: %s", !*conf("proxy", "") ? "none set" : PX.ok > 0 ? "ok" : PX.ok == 0 ? "down" : "…");
+        snprintf(out, cap, "Proxy: %s", !*uconf("proxy", "") ? "none set" : PX.ok > 0 ? "ok" : PX.ok == 0 ? "down" : "…");
         break;
+    case M_CPU: snprintf(out, cap, "CPU"); break;
+    case M_MEM: snprintf(out, cap, "Memory"); break;
+    case M_DISK: snprintf(out, cap, "Disk"); break;
+    }
+}
+
+/* a gauge row: the name, the value at the right, and a bar under them, amber past 70 %, red past 90 % */
+static void draw_gauge(int i, const char *name, const char *value, double frac)
+{
+    GC gc = DefaultGC(dpy, DefaultScreen(dpy));
+    int mw = menu_w(), x = S * 12, y = i * B, gw = mw - 2 * x, gy = y + B - S * 12;
+    int base = y + B / 2 - S * 4 + (font[0]->ascent - font[0]->descent) / 2;
+    text(menu_draw, &c_dim, x, base, name, gw / 2);
+    int vw = text_in(font_s, NULL, NULL, 0, 0, value, 0);
+    text_in(font_s, menu_draw, &c_text, mw - x - vw, base, value, 0);
+    XSetForeground(dpy, gc, px_line);
+    XFillRectangle(dpy, menu, gc, x, gy, (unsigned)gw, (unsigned)(S * 3));
+    if (frac > 0) {
+        XSetForeground(dpy, gc, frac < 0.7 ? c_ok.pixel : frac < 0.9 ? c_star.pixel : c_bad.pixel);
+        XFillRectangle(dpy, menu, gc, x, gy, (unsigned)(gw * (frac < 1 ? frac : 1)), (unsigned)(S * 3));
     }
 }
 
@@ -890,21 +1505,32 @@ static void draw_menu(void)
     XSetForeground(dpy, gc, px_field);
     XFillRectangle(dpy, menu, gc, 0, 0, (unsigned)mw, (unsigned)(B * nitems));
     for (int i = 0; i < nitems; i++) {
-        char l[220];
+        char l[220], v[64], a[24], b[24];
         menu_label(i, l, sizeof l);
-        int tab = items[i].kind == M_TAB, front = tab && !strcmp(T.tab[items[i].tab].id, T.cur);
+        int kind = items[i].kind, tab = kind == M_TAB, front = tab && !strcmp(T.tab[items[i].tab].id, T.cur);
         if (front) { /* the tab in front */
             XSetForeground(dpy, gc, px_press);
             XFillRectangle(dpy, menu, gc, 0, i * B, (unsigned)mw, (unsigned)B);
             XSetForeground(dpy, gc, c_ok.pixel);
             XFillRectangle(dpy, menu, gc, 0, i * B, (unsigned)(S * 3), (unsigned)B);
         }
-        int base = i * B + B / 2 + (font[0]->ascent - font[0]->descent) / 2, x = tab ? S * 24 : S * 12;
-        text(menu_draw, items[i].kind == M_PROXY ? &c_dim : &c_text, x, base, l, mw - x - S * 12);
+        if (kind == M_CPU) {
+            snprintf(v, sizeof v, ST.cpu < 0 ? "…" : "%d %%", ST.cpu);
+            draw_gauge(i, l, v, ST.cpu / 100.0);
+        } else if (kind == M_MEM || kind == M_DISK) {
+            unsigned long long used = kind == M_MEM ? ST.mem : ST.disk, max = kind == M_MEM ? ST.mem_max : ST.disk_max;
+            size_str(used, a, sizeof a);
+            size_str(max, b, sizeof b);
+            snprintf(v, sizeof v, max ? "%s of %s" : "…", a, b);
+            draw_gauge(i, l, v, max ? (double)used / (double)max : 0);
+        } else {
+            int base = i * B + B / 2 + (font[0]->ascent - font[0]->descent) / 2, x = tab ? S * 24 : S * 12;
+            text(menu_draw, kind == M_PROXY ? &c_dim : &c_text, x, base, l, mw - x - S * 12);
+        }
         int after_front = i && items[i - 1].kind == M_TAB && !strcmp(T.tab[items[i - 1].tab].id, T.cur);
         if (i && !front && !after_front) { /* no line against the highlighted row */
             XSetForeground(dpy, gc, px_line);
-            XFillRectangle(dpy, menu, gc, S * 12, i * B, (unsigned)(mw - S * 12), (unsigned)S);
+            XFillRectangle(dpy, menu, gc, S * 12, i * B, (unsigned)(mw - S * 12), (unsigned)(kind == M_CPU ? S * 3 : S));
         }
     }
     XFlush(dpy);
@@ -919,6 +1545,8 @@ static void menu_show(int on)
         /* the events carry a tab's title only when it navigates, not when the page sets it */
         if (T.ntabs > 1)
             T.list_id = cdp_send("Target.getTargets", NULL);
+        stats_sample(); /* the CPU needs a second reading: in a second, then every two */
+        ST.next = now_s() + 1;
         menu_layout();
         XMapRaised(dpy, menu);
         draw_menu();
@@ -930,6 +1558,276 @@ static void menu_show(int on)
         XUnmapWindow(dpy, menu);
     }
     XFlush(dpy);
+}
+
+/* ---------------- the pages: Users, History, Favourites ---------------- */
+
+enum { R_HEAD, R_CLEAR_ALL, R_CLEAR_COOKIES, R_USER, R_HIST, R_FAV, R_EMPTY };
+
+static struct {
+    int kind, ref, y, h; /* ref: the user, history entry or favourite; y: from the top of the list */
+} rows[MAX_HIST * 2 + 8];
+static int nrows;
+
+static void panel_clamp(void)
+{
+    int max_scroll = P.total - (H - B);
+    if (P.scroll > max_scroll)
+        P.scroll = max_scroll;
+    if (P.scroll < 0)
+        P.scroll = 0;
+}
+
+static void panel_layout(void)
+{
+    int y = 0, tall = B + B / 3, day = -1;
+    nrows = 0;
+#define ROW(k, r, hh) (rows[nrows].kind = (k), rows[nrows].ref = (r), rows[nrows].y = y, rows[nrows].h = (hh), \
+                       y += (hh), nrows++)
+    switch (P.kind) {
+    case P_USERS:
+        for (int i = 0; i < U.n; i++)
+            ROW(R_USER, i, tall);
+        break;
+    case P_HISTORY: /* newest first, under a heading for each day */
+        ROW(R_CLEAR_ALL, 0, B);
+        ROW(R_CLEAR_COOKIES, 0, B);
+        if (!nhist)
+            ROW(R_EMPTY, 0, B);
+        for (int i = nhist - 1; i >= 0; i--) {
+            struct tm tm;
+            localtime_r(&HI[i].t, &tm);
+            if (tm.tm_year * 400 + tm.tm_yday != day) {
+                day = tm.tm_year * 400 + tm.tm_yday;
+                ROW(R_HEAD, i, B * 2 / 3);
+            }
+            ROW(R_HIST, i, tall);
+        }
+        break;
+    case P_FAVS: /* the newest first */
+        if (!nfavs)
+            ROW(R_EMPTY, 0, B);
+        for (int i = nfavs - 1; i >= 0; i--)
+            ROW(R_FAV, i, tall);
+        break;
+    }
+#undef ROW
+    P.total = y;
+    panel_clamp();
+}
+
+static void day_name(time_t t, char *out, size_t cap)
+{
+    struct tm a, b, c;
+    time_t now = time(NULL), yesterday = now - 86400;
+    localtime_r(&t, &a);
+    localtime_r(&now, &b);
+    localtime_r(&yesterday, &c);
+    if (a.tm_year == b.tm_year && a.tm_yday == b.tm_yday)
+        snprintf(out, cap, "Today");
+    else if (a.tm_year == c.tm_year && a.tm_yday == c.tm_yday)
+        snprintf(out, cap, "Yesterday");
+    else
+        strftime(out, cap, a.tm_year == b.tm_year ? "%A, %e %B" : "%A, %e %B %Y", &a);
+}
+
+static const char *no_scheme(const char *url)
+{
+    const char *u = strstr(url, "://");
+    return u ? u + 3 : url;
+}
+
+static void panel_draw(void)
+{
+    if (!P.kind)
+        return;
+    GC gc = DefaultGC(dpy, DefaultScreen(dpy));
+    int ph = H - B, x = S * 12, tw = W - 2 * x;
+    int confirm = P.confirm && now_s() < P.confirm_until ? P.confirm : 0;
+    XSetForeground(dpy, gc, px_bg);
+    XFillRectangle(dpy, P.pm, gc, 0, 0, (unsigned)W, (unsigned)ph);
+    for (int i = 0; i < nrows; i++) {
+        int y = rows[i].y - P.scroll, h = rows[i].h, ref = rows[i].ref, kind = rows[i].kind;
+        if (y + h <= 0 || y >= ph)
+            continue;
+        int mid = y + h / 2;
+        int one = mid + (font[0]->ascent - font[0]->descent) / 2; /* a row of one line: its baseline */
+        int top = mid - S * 2, low = mid + font_s[0]->ascent + S * 3; /* of two lines */
+        char s[300], hm[16];
+        struct tm tm;
+        switch (kind) {
+        case R_HEAD:
+            day_name(HI[ref].t, s, sizeof s);
+            text_in(font_s, P.d, &c_dim, x, y + h - S * 8, s, tw);
+            break;
+        case R_CLEAR_ALL:
+            text(P.d, &c_bad, x, one, confirm == kind ? "Tap again: history, cookies, site data, cache" : "Clear history & data", tw);
+            break;
+        case R_CLEAR_COOKIES:
+            text(P.d, &c_bad, x, one, confirm == kind ? "Tap again: every site's cookies" : "Clear cookies", tw);
+            break;
+        case R_EMPTY:
+            text(P.d, &c_dim, x, one, P.kind == P_FAVS ? "None yet: the star on the bar adds the page" : "No history yet", tw);
+            break;
+        case R_USER:
+            if (ref == U.cur) {
+                XSetForeground(dpy, gc, px_press);
+                XFillRectangle(dpy, P.pm, gc, 0, y, (unsigned)W, (unsigned)h);
+                XSetForeground(dpy, gc, c_ok.pixel);
+                XFillRectangle(dpy, P.pm, gc, 0, y, (unsigned)(S * 3), (unsigned)h);
+            }
+            text(P.d, &c_text, x, top, U.name[ref], tw);
+            snprintf(s, sizeof s, "%s%d tab%s · %d favourite%s", ref == U.cur ? "In use · " : "", P.utabs[ref],
+                     P.utabs[ref] == 1 ? "" : "s", P.ufavs[ref], P.ufavs[ref] == 1 ? "" : "s");
+            text_in(font_s, P.d, &c_dim, x, low, s, tw);
+            break;
+        case R_HIST:
+            localtime_r(&HI[ref].t, &tm);
+            strftime(hm, sizeof hm, "%H:%M", &tm);
+            text(P.d, &c_text, x, top, HI[ref].title[0] ? HI[ref].title : no_scheme(HI[ref].url), tw);
+            snprintf(s, sizeof s, "%s · %s", hm, no_scheme(HI[ref].url));
+            text_in(font_s, P.d, &c_dim, x, low, s, tw);
+            break;
+        case R_FAV: { /* and a close button at the right, which deletes it */
+            int cx = W - B / 2, r = B / 9;
+            text(P.d, &c_text, x, top, FV[ref].title[0] ? FV[ref].title : no_scheme(FV[ref].url), tw - B);
+            text_in(font_s, P.d, &c_dim, x, low, no_scheme(FV[ref].url), tw - B);
+            XSetForeground(dpy, gc, c_dim.pixel);
+            XSetLineAttributes(dpy, gc, (unsigned)(S * 2), LineSolid, CapRound, JoinRound);
+            XDrawLine(dpy, P.pm, gc, cx - r, mid - r, cx + r, mid + r);
+            XDrawLine(dpy, P.pm, gc, cx - r, mid + r, cx + r, mid - r);
+            XSetLineAttributes(dpy, gc, 0, LineSolid, CapButt, JoinMiter);
+            break;
+        }
+        }
+        if (kind != R_HEAD && i + 1 < nrows && rows[i + 1].kind != R_HEAD) { /* a line under it */
+            XSetForeground(dpy, gc, px_line);
+            XFillRectangle(dpy, P.pm, gc, x, y + h - S, (unsigned)(W - x), (unsigned)S);
+        }
+    }
+    XCopyArea(dpy, P.pm, P.w, gc, 0, 0, (unsigned)W, (unsigned)ph, 0, 0);
+    XFlush(dpy);
+}
+
+static int count_lines(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    int n = 0, c, last = '\n';
+    while (f && (c = getc(f)) != EOF) {
+        n += c == '\n';
+        last = c;
+    }
+    if (f)
+        fclose(f);
+    return n + (last != '\n');
+}
+
+static void panel_show(int kind)
+{
+    if (kind == P_USERS) /* each user's tabs and favourites, as their files say */
+        for (int i = 0; i < U.n; i++) {
+            char p[PATH_MAX];
+            snprintf(p, sizeof p, "%s/%s/tabs", U.dir, U.name[i]);
+            P.utabs[i] = i == U.cur && T.ntabs >= 0 ? T.ntabs : count_lines(p);
+            snprintf(p, sizeof p, "%s/%s/favourites", U.dir, U.name[i]);
+            P.ufavs[i] = i == U.cur ? nfavs : count_lines(p);
+        }
+    P.kind = kind;
+    P.scroll = P.confirm = P.down = 0;
+    if (kind) {
+        panel_layout();
+        XMapRaised(dpy, P.w);
+        if (menu_open)
+            XRaiseWindow(dpy, menu);
+        panel_draw();
+    } else {
+        XUnmapWindow(dpy, P.w);
+    }
+    draw_bar();
+}
+
+static void panel_refresh(void)
+{
+    if (P.kind) {
+        panel_layout();
+        panel_draw();
+    }
+}
+
+static void panel_tap(int x, int y)
+{
+    int i = 0;
+    while (i < nrows && y >= rows[i].y + rows[i].h)
+        i++;
+    if (i >= nrows || y < rows[i].y)
+        return;
+    int kind = rows[i].kind, ref = rows[i].ref;
+    char url[URL_MAX];
+    switch (kind) {
+    case R_CLEAR_ALL:
+    case R_CLEAR_COOKIES:
+        if (P.confirm == kind && now_s() < P.confirm_until) {
+            P.confirm = 0;
+            if (kind == R_CLEAR_ALL) {
+                clear_all();
+                panel_refresh();
+            } else {
+                clear_cookies();
+                panel_draw();
+            }
+        } else {
+            P.confirm = kind;
+            P.confirm_until = now_s() + 4;
+            panel_draw();
+        }
+        break;
+    case R_USER:
+        panel_show(P_NONE);
+        user_switch(ref);
+        break;
+    case R_HIST:
+        snprintf(url, sizeof url, "%s", HI[ref].url);
+        panel_show(P_NONE);
+        browser_open(url, 1);
+        break;
+    case R_FAV:
+        if (x >= W - B) {
+            fav_delete(ref);
+            panel_refresh();
+            draw_bar();
+        } else {
+            snprintf(url, sizeof url, "%s", FV[ref].url);
+            panel_show(P_NONE);
+            browser_open(url, 1);
+        }
+        break;
+    }
+}
+
+/* The star: the page in front into the favourites, or out of them. */
+static void fav_toggle(void)
+{
+    const char *url = cur_url();
+    int i = fav_find(url);
+    if (i >= 0) {
+        fav_delete(i);
+        show_note("Removed from favourites");
+        return;
+    }
+    if (!url || !is_web(url) || strlen(url) >= URL_MAX || strchr(url, '\t')) {
+        show_note(T.wfd < 0 ? "Favourites need the browser's tab list" : "Only a web page can be a favourite");
+        return;
+    }
+    if (nfavs == MAX_FAVS) {
+        show_note("The favourites are full");
+        return;
+    }
+    snprintf(FV[nfavs].url, sizeof FV[0].url, "%s", url);
+    page_title(FV[nfavs].title, sizeof FV[0].title);
+    one_line(FV[nfavs].title);
+    nfavs++;
+    favs_save();
+    show_note("Added to favourites");
 }
 
 /* ---------------- the window manager ---------------- */
@@ -981,6 +1879,8 @@ static void focus(Window w)
         XSetInputFocus(dpy, w, RevertToPointerRoot, CurrentTime);
     }
     XChangeProperty(dpy, root, A[A_NET_ACTIVE], XA_WINDOW, 32, PropModeReplace, (unsigned char *)&w, w ? 1 : 0);
+    if (P.kind)
+        XRaiseWindow(dpy, P.w);
     if (menu_open)
         XRaiseWindow(dpy, menu);
     read_title();
@@ -1006,7 +1906,7 @@ static void place(Window w, int transient)
 static void manage(Window w)
 {
     XWindowAttributes a;
-    if (!XGetWindowAttributes(dpy, w, &a) || a.override_redirect || find(w) >= 0 || w == bar || w == menu)
+    if (!XGetWindowAttributes(dpy, w, &a) || a.override_redirect || find(w) >= 0 || w == bar || w == menu || w == P.w)
         return;
     if (nclients == MAX_CLIENTS) {
         XMapWindow(dpy, w);
@@ -1191,10 +2091,17 @@ static void menu_action(int i)
 {
     KeySym ctrl = XK_Control_L;
     int kind = items[i].kind, tab = items[i].tab;
+    if (kind == M_CPU || kind == M_MEM || kind == M_DISK) /* nothing to do: the menu stays */
+        return;
     menu_show(0);
+    if (kind == M_FAVS || kind == M_HISTORY || kind == M_USER) {
+        panel_show(kind == M_FAVS ? P_FAVS : kind == M_HISTORY ? P_HISTORY : P_USERS);
+        return;
+    }
+    panel_show(P_NONE);
     switch (kind) {
-    case M_HOME: browser_open(conf("home", "about:blank"), 1); break;
-    case M_NEW_TAB: browser_open(conf("home", "about:blank"), 0); break;
+    case M_HOME: browser_open(uconf("home", "about:blank"), 1); break;
+    case M_NEW_TAB: browser_open(uconf("home", "about:blank"), 0); break;
     case M_TAB: tab_select(tab); break;
     case M_NEXT_TAB: send_keys(&ctrl, 1, XK_Tab); break;
     case M_CLOSE_TAB:
@@ -1226,8 +2133,14 @@ static void menu_action(int i)
 static void bar_tap(int x)
 {
     KeySym alt = XK_Alt_L;
-    if (editing && (x < 3 * B || x >= W - B))
+    if (editing && (x < 3 * B || x >= W - 2 * B))
         edit_end(0);
+    if (P.kind && x < W - B) { /* a page is open: back closes it, and so does the field, to type a URL */
+        panel_show(P_NONE);
+        if (x >= 3 * B && x < W - 2 * B && BR.pid > 0)
+            edit_begin();
+        return;
+    }
     if (x < B)
         send_keys(&alt, 1, XK_Left);
     else if (x < 2 * B)
@@ -1236,6 +2149,8 @@ static void bar_tap(int x)
         send_keys(NULL, 0, XK_F5);
     else if (x >= W - B)
         menu_show(!menu_open);
+    else if (x >= W - 2 * B)
+        fav_toggle();
     else if (!editing && BR.pid > 0)
         edit_begin();
 }
@@ -1304,7 +2219,11 @@ int main(int argc, char **argv)
     font[0] = XftFontOpenName(dpy, scr, fn);
     snprintf(fn, sizeof fn, "Noto Sans CJK SC:pixelsize=%d", 15 * S);
     font[1] = XftFontOpenName(dpy, scr, fn);
-    if (!font[0]) {
+    snprintf(fn, sizeof fn, "%s:pixelsize=%d", conf("font", "Noto Sans"), 12 * S);
+    font_s[0] = XftFontOpenName(dpy, scr, fn);
+    snprintf(fn, sizeof fn, "Noto Sans CJK SC:pixelsize=%d", 12 * S);
+    font_s[1] = XftFontOpenName(dpy, scr, fn);
+    if (!font[0] || !font_s[0]) {
         LOG("no font");
         return 1;
     }
@@ -1312,6 +2231,7 @@ int main(int argc, char **argv)
     c_dim = color("#8e8e93");
     c_ok = color("#30d158");
     c_bad = color("#ff6961");
+    c_star = color("#ffd60a");
     px_bg = color("#1c1c1e").pixel;
     px_field = color("#2c2c2e").pixel;
     px_line = color("#38383a").pixel;
@@ -1327,6 +2247,11 @@ int main(int argc, char **argv)
     XStoreName(dpy, bar, "rd-shell");
     menu = XCreateWindow(dpy, root, W - menu_w(), B, (unsigned)menu_w(), (unsigned)B, 0, CopyFromParent,
                          InputOutput, CopyFromParent, CWOverrideRedirect | CWBackPixel | CWEventMask, &wa);
+    wa.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask | Button1MotionMask;
+    P.w = XCreateWindow(dpy, root, 0, B, (unsigned)W, (unsigned)(H - B), 0, CopyFromParent, InputOutput,
+                        CopyFromParent, CWOverrideRedirect | CWBackPixel | CWEventMask, &wa);
+    P.pm = XCreatePixmap(dpy, P.w, (unsigned)W, (unsigned)(H - B), (unsigned)DefaultDepth(dpy, scr));
+    P.d = XftDrawCreate(dpy, P.pm, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
     bar_draw = XftDrawCreate(dpy, bar, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
     menu_draw = XftDrawCreate(dpy, menu, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
     if ((xim = XOpenIM(dpy, NULL, NULL, NULL)))
@@ -1355,6 +2280,8 @@ int main(int argc, char **argv)
     sigaction(SIGINT, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
 
+    users_load();
+    user_open();
     draw_bar();
     if (strcmp(conf("autostart", "1"), "0"))
         browser_start();
@@ -1403,6 +2330,9 @@ int main(int argc, char **argv)
                     (ev.xproperty.atom == A[A_NET_NAME] || ev.xproperty.atom == XA_WM_NAME)) {
                     read_title();
                     tab_match(title);
+                    char pt[200];
+                    page_title(pt, sizeof pt);
+                    hist_title(cur_url(), pt);
                     if (OPEN.until && strcmp(title, OPEN.before)) { /* the new tab is in front */
                         KeySym ctrl = XK_Control_L;
                         OPEN.until = 0;
@@ -1414,8 +2344,36 @@ int main(int argc, char **argv)
                 }
                 break;
             case Expose:
-                if (!ev.xexpose.count)
-                    ev.xexpose.window == menu ? draw_menu() : draw_bar();
+                if (ev.xexpose.count)
+                    break;
+                if (ev.xexpose.window == menu)
+                    draw_menu();
+                else if (ev.xexpose.window == P.w)
+                    panel_draw();
+                else
+                    draw_bar();
+                break;
+            case ButtonPress: /* a finger on a page: a tap, or the start of a drag */
+                if (ev.xbutton.window == P.w && ev.xbutton.button == Button1 && !menu_open) {
+                    P.down = 1;
+                    P.down_y = ev.xbutton.y;
+                    P.down_scroll = P.scroll;
+                    P.moved = 0;
+                }
+                break;
+            case MotionNotify:
+                if (ev.xmotion.window == P.w && P.down) {
+                    while (XCheckTypedWindowEvent(dpy, P.w, MotionNotify, &ev)) { /* only the latest */
+                    }
+                    int dy = ev.xmotion.y - P.down_y;
+                    if (dy > S * 6 || dy < -S * 6)
+                        P.moved = 1;
+                    if (P.moved) {
+                        P.scroll = P.down_scroll - dy;
+                        panel_clamp();
+                        panel_draw();
+                    }
+                }
                 break;
             case ButtonRelease:
                 if (ev.xbutton.button != Button1)
@@ -1430,6 +2388,10 @@ int main(int argc, char **argv)
                         menu_show(0);
                 } else if (ev.xbutton.window == bar) {
                     bar_tap(ev.xbutton.x);
+                } else if (ev.xbutton.window == P.w && P.down) {
+                    P.down = 0;
+                    if (!P.moved)
+                        panel_tap(ev.xbutton.x, ev.xbutton.y + P.scroll);
                 }
                 break;
             case KeyPress:
@@ -1450,6 +2412,37 @@ int main(int argc, char **argv)
             probe_start();
         if (PX.fd >= 0 && t >= PX.deadline)
             probe_done(0);
+        if (hist_dirty && t >= hist_save_at)
+            hist_save();
+        if (BR.restore_n && t >= BR.restore_until)
+            BR.restore_n = 0; /* the tab to put in front never showed up */
+        if (T.dirty && !BR.restore_n && t >= T.save_at)
+            tabs_save();
+        if (note[0] && t >= note_until) {
+            note[0] = 0;
+            draw_bar();
+        }
+        if (P.confirm && t >= P.confirm_until) {
+            P.confirm = 0;
+            panel_draw();
+        }
+        if (menu_open && t >= ST.next) {
+            stats_sample();
+            ST.next = t + 2;
+            draw_menu();
+        }
+        if (hist_dirty && hist_save_at < next)
+            next = hist_save_at;
+        if (T.dirty && T.save_at < next)
+            next = T.save_at;
+        if (BR.restore_n && BR.restore_until < next)
+            next = BR.restore_until;
+        if (note[0] && note_until < next)
+            next = note_until;
+        if (P.confirm && P.confirm_until < next)
+            next = P.confirm_until;
+        if (menu_open && ST.next < next)
+            next = ST.next;
         if (BR.restart_at && BR.restart_at < next)
             next = BR.restart_at;
         if (PX.fd < 0 && PX.next < next)
@@ -1478,6 +2471,8 @@ int main(int argc, char **argv)
         }
     }
     browser_stop();
+    if (hist_dirty)
+        hist_save();
     XCloseDisplay(dpy);
     return 0;
 }

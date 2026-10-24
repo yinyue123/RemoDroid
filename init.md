@@ -21,8 +21,15 @@ The stats didn't show the webrtc mode. I can't lock the phone or reconnect the p
 
 The phone part works really well. However, I need agents for Windows, macOS and Linux. They should share the Android native libraries as .so lib or .dll libs. There's also a dedicated app with pairing UI written in C or Object-c calling system UI APIs and has no external library dependencies. It has a menu bar icon and support web browser remote control with mouse and keyboard input. Ensure they share as much of the common library code as possible. They don't need adb. They are seperate tools-a remote desktop tool for each platform. The Adb tool is only for andriod. In total, the remote agent supports for platforms: android, windows, macos, linux.
 
-Read the browser/remote-browser-plan.md. Could you update the plan. We don't use scrcpy, we use remodroid. 
+Read the browser/remote-browser-plan.md. Could you update the plan. We don't use scrcpy, we use remodroid instead. 
 Help me write the uinput plan and Xorg plan
 We use hqnode as the container. You could refer to /root/Documents/sh0u/quadlet/hqnode.
-Should I choose android adb or desktop linux. Help me make the choise and plan.
-Inside a Xorg, I hope that I could have a controler bar to run the cloak browser.
+Should I choose android adb or desktop linux. Help me make the choise and develop a plan.
+Inside Xorg, I'd like to have a controler bar to run the cloak browser.
+
+My OECT box has arrived, but the SSD is still on its way. Help me with following tasks:
+1. Check the system and figure out how it works. Verify whether the browser/remote-browser-plan.md plan functions correctly.
+2. Determine the boot process. I want to use the SSD as the main disk and the eMMC as a backup. If the main disk fails, I plan to remove the SSD and use the eMMC for recovery. Write me a plan for this.
+3. Document this plan in browser/backup.md. Explain how the whole system boots, with every detail so I can understand it: disk partation, mount process. U-Boot, and rootfs. Please provide your plan.
+
+Help me improve the browser further. It should support 6 users: Alice, Bob, Charlie, David, Eve, Frank. Each user will have their own cookies, history files and fingerprint data. Users can switch profile seamlessly. When I switch to another user, the previous profile closes completely, and the new user's profile loads along with their previously opened tabs. Additionally, add a history page. Include options to clear history and data as well as clear cookies. On the settings(...) page, add displays for cpu usage, memory usage, and disk usage. Add a favorite button so users can save bookmarks to their favourites list. Include a close button in the favourites section to allow  users to delete items.
