@@ -29,6 +29,7 @@
 #define _GNU_SOURCE
 #endif
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -495,7 +496,7 @@ static int proxy_hostport(char *host, size_t hcap, char *port, size_t pcap)
     return 0;
 }
 
-/* urls: the tabs to open (none: the home page) */
+/* urls: the tabs to open (0: the home page; -1: none, Chromium reopens the last session) */
 static char **browser_argv(const char *const *urls, int nurls, int devtools)
 {
     static char args[40 + MAX_TABS_OPEN][URL_MAX];
@@ -853,6 +854,69 @@ static void tab_close_current(void)
         cdp_send("Target.closeTarget", target("targetId", T.cur));
 }
 
+/* Chromium keeps a profile's session cookies (a login without "remember me") across a restart only when it
+ * restores the last session, so the user's profile is set to: switching away and back mustn't log them out.
+ * It then reopens the tabs itself, each with its back/forward history. restore = 0 turns it off for one
+ * start (the home page instead), after quick deaths in a row. */
+static void profile_prefs(int restore)
+{
+    char p[PATH_MAX], tmp[PATH_MAX + 8];
+    upath(p, sizeof p, "profile");
+    mkdir(p, 0700);
+    upath(p, sizeof p, "profile/Default");
+    mkdir(p, 0700);
+    upath(p, sizeof p, "profile/Default/Preferences");
+    cJSON *prefs = NULL;
+    FILE *f = fopen(p, "r");
+    if (f) {
+        char *buf = NULL;
+        size_t cap = 0, n = 0, r;
+        do {
+            if (n + 65536 > cap && !(buf = realloc(buf, cap = cap * 2 + 65536)))
+                break;
+            r = fread(buf + n, 1, cap - n - 1, f);
+            n += r;
+        } while (r > 0);
+        fclose(f);
+        if (buf) {
+            buf[n] = 0;
+            prefs = cJSON_Parse(buf);
+            free(buf);
+        }
+    }
+    if (!cJSON_IsObject(prefs)) {
+        cJSON_Delete(prefs);
+        prefs = cJSON_CreateObject();
+    }
+    cJSON *session = cJSON_GetObjectItem(prefs, "session");
+    if (!cJSON_IsObject(session)) {
+        cJSON_DeleteItemFromObject(prefs, "session");
+        session = cJSON_AddObjectToObject(prefs, "session");
+    }
+    cJSON_DeleteItemFromObject(session, "restore_on_startup");
+    cJSON_AddNumberToObject(session, "restore_on_startup", restore ? 1 : 5); /* 1: the last session; 5: the URLs given */
+    char *out = cJSON_PrintUnformatted(prefs);
+    cJSON_Delete(prefs);
+    if (out && (f = save_begin(p, tmp, sizeof tmp)))
+        fputs(out, f);
+    save_end(f, tmp, p);
+    free(out);
+}
+
+/* a session Chromium will reopen: the profile's Sessions directory has a file in it */
+static int profile_has_session(void)
+{
+    char p[PATH_MAX];
+    upath(p, sizeof p, "profile/Default/Sessions");
+    DIR *d = opendir(p);
+    int found = 0;
+    for (struct dirent *e; d && !found && (e = readdir(d));)
+        found = !strncmp(e->d_name, "Session_", 8);
+    if (d)
+        closedir(d);
+    return found;
+}
+
 static void browser_start(void)
 {
     if (BR.pid > 0)
@@ -887,9 +951,15 @@ static void browser_start(void)
     }
     if (f)
         fclose(f);
-    BR.nrestored = nurls;
+    BR.nrestored = nurls; /* reopened either way: not visits */
     BR.restore_n = nurls > 1 && BR.front[0] ? nurls : 0;
     BR.restore_until = now_s() + 15;
+    int restore = BR.fails < 3;
+    profile_prefs(restore);
+    if (restore && profile_has_session()) { /* Chromium reopens them, the one in front in front */
+        nurls = -1;
+        BR.restore_n = 0;
+    }
     int to[2] = { -1, -1 }, from[2] = { -1, -1 };
     int devtools = !pipe2(to, O_CLOEXEC) && !pipe2(from, O_CLOEXEC);
     BR.pid = spawn(browser_argv(u, nurls, devtools), devtools ? to[0] : -1, devtools ? from[1] : -1);
@@ -912,8 +982,8 @@ static void browser_start(void)
             close(from[0]);
     }
     BR.started = time(NULL);
-    LOG("browser started for %s (pid %d, seed %s, %d tab%s)", user(), (int)BR.pid, BR.seed, nurls ? nurls : 1,
-        nurls > 1 ? "s" : "");
+    LOG("browser started for %s (pid %d, seed %s, %s)", user(), (int)BR.pid, BR.seed,
+        nurls < 0 ? "its last session" : nurls > 1 ? "its tabs" : nurls ? "its tab" : "the home page");
     draw_bar();
 }
 
