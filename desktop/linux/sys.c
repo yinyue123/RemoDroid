@@ -72,7 +72,8 @@ int dsk_problem(char *out, size_t cap)
         Display *d;
         if (getenv("RD_ALLOW_WAYLAND") == NULL && wayland_session())
             snprintf(last, sizeof last,
-                     "this is a Wayland session; choose \"GNOME on Xorg\" (or another X11 session) at login");
+                     "this is a Wayland session; click \"Switch to X11\" in RemoDroid on this computer, "
+                     "or choose \"GNOME on Xorg\" at login");
         else if (!(d = x11_open()))
             snprintf(last, sizeof last, "no X11 display (DISPLAY=%s)", getenv("DISPLAY") ? getenv("DISPLAY") : "unset");
         else

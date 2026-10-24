@@ -325,7 +325,7 @@ const DESK_OS = {
   macos: { name: 'macOS', files: 'RemoDroid-…-macos.zip',
     steps: 'Unzip it, move <b>RemoDroid.app</b> to Applications and open it (the first time: right-click → Open). It lives in the menu bar. macOS 12.3 or newer.' },
   linux: { name: 'Linux', files: 'remodroid-desktop_…_amd64.deb / .rpm (or the …linux-x86_64.tar.gz)',
-    steps: 'Install the package, then start <b>RemoDroid</b> from the app menu. It needs an X11 session (on GNOME: “GNOME on Xorg” at login); its icon sits in the tray.' },
+    steps: 'Install the package, then start <b>RemoDroid</b> from the app menu. It needs an X11 session: on a GNOME Wayland session it offers to switch for you (or choose “GNOME on Xorg” at login); its icon sits in the tray.' },
 };
 let deskOs = /Mac/.test(navigator.platform) ? 'macos' : /Linux/.test(navigator.platform) && !/Android/.test(navigator.userAgent) ? 'linux' : 'windows';
 const OS = {

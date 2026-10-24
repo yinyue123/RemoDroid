@@ -14,7 +14,7 @@
 #include "rd_agent.h"
 #include "sni.h"
 
-enum { M_STATUS = 1, M_VIEWER, M_DISCONNECT, M_VIEWONLY, M_OPEN, M_WINDOW, M_LOG, M_LOGIN, M_QUIT };
+enum { M_STATUS = 1, M_VIEWER, M_DISCONNECT, M_VIEWONLY, M_OPEN, M_WINDOW, M_LOG, M_X11, M_LOGIN, M_QUIT };
 
 static struct {
     GtkApplication *app;
@@ -84,6 +84,160 @@ static void set_login(int on)
     g_free(p);
 }
 
+/* ---------------- Wayland → X11 ----------------
+ * Screen capture needs X11 (the portal path isn't there yet). On GNOME with GDM
+ * the app offers to switch: one pkexec run installs the GNOME on Xorg session and
+ * Xorg if missing, sets WaylandEnable=false in GDM and makes the X11 session this
+ * user's default in AccountsService, so the next login is already X11. */
+
+static int wayland_session(void)
+{
+    const char *t = getenv("XDG_SESSION_TYPE"), *w = getenv("WAYLAND_DISPLAY");
+    return !getenv("RD_ALLOW_WAYLAND") && ((t && !strcmp(t, "wayland")) || (w && *w));
+}
+
+static int can_switch_x11(void)
+{
+    const char *d = getenv("XDG_CURRENT_DESKTOP");
+    return d && strstr(d, "GNOME") && (g_file_test("/etc/gdm3", G_FILE_TEST_IS_DIR) || g_file_test("/etc/gdm", G_FILE_TEST_IS_DIR));
+}
+
+/* run as root: $1 user, $2 session name (DESKTOP_SESSION) */
+static const char X11_SCRIPT[] =
+    "set -e\n"
+    "user=$1 xs=$2-xorg\n"
+    "[ -e /usr/share/xsessions/$xs.desktop ] || xs=gnome-xorg\n"
+    "if [ ! -e /usr/share/xsessions/$xs.desktop ] || ! command -v Xorg >/dev/null; then\n"
+    "  echo 'Installing the GNOME on Xorg session and the X server…'\n"
+    "  if command -v apt-get >/dev/null; then\n"
+    "    export DEBIAN_FRONTEND=noninteractive\n"
+    "    apt-get update || true\n"
+    "    pk=xserver-xorg\n"
+    "    apt-cache show gnome-session-xsession >/dev/null 2>&1 && pk=\"$pk gnome-session-xsession\"\n"
+    "    apt-get install -y $pk\n"
+    "  elif command -v dnf >/dev/null; then dnf install -y gnome-session-xsession xorg-x11-server-Xorg\n"
+    "  elif command -v pacman >/dev/null; then pacman -S --noconfirm --needed xorg-server\n"
+    "  elif command -v zypper >/dev/null; then zypper --non-interactive install xorg-x11-server\n"
+    "  fi\n"
+    "fi\n"
+    "if [ ! -e /usr/share/xsessions/$xs.desktop ]; then\n"
+    "  echo 'There is no GNOME on Xorg session for this system: GNOME 49 and later have only Wayland.' >&2; exit 3\n"
+    "fi\n"
+    "command -v Xorg >/dev/null || { echo 'The X server (Xorg) could not be installed.' >&2; exit 3; }\n"
+    "f=\n"
+    "for c in /etc/gdm3/daemon.conf /etc/gdm3/custom.conf /etc/gdm/custom.conf; do [ -e $c ] && { f=$c; break; }; done\n"
+    "[ -n \"$f\" ] || for d in /etc/gdm3 /etc/gdm; do [ -d $d ] && { f=$d/custom.conf; break; }; done\n"
+    "touch $f\n"
+    "[ -e $f.bak-remodroid ] || cp -p $f $f.bak-remodroid\n"
+    /* WaylandEnable=false in [daemon]: in place of an existing (or commented-out) line, else first in the section */
+    "awk '\n"
+    "/^[ \\t]*\\[/ { if (in_d && !done) { print \"WaylandEnable=false\"; done = 1 } in_d = /^[ \\t]*\\[daemon\\]/; print; next }\n"
+    "in_d && /^[ \\t#]*WaylandEnable[ \\t]*=/ { if (!done) print \"WaylandEnable=false\"; done = 1; next }\n"
+    "{ print }\n"
+    "END { if (!done) { if (!in_d) print \"[daemon]\"; print \"WaylandEnable=false\" } }\n"
+    "' $f > $f.remodroid-new\n"
+    "chmod --reference=$f $f.remodroid-new && mv $f.remodroid-new $f\n"
+    "echo \"WaylandEnable=false in $f\"\n"
+    "u=/org/freedesktop/Accounts/User$(id -u \"$user\")\n"
+    "for m in SetXSession SetSession; do\n"
+    "  busctl call org.freedesktop.Accounts $u org.freedesktop.Accounts.User $m s $xs 2>/dev/null || true\n"
+    "done\n"
+    "echo \"$xs is $user's session\"\n";
+
+static GtkWidget *x11_dialog;
+
+static void x11_done(GObject *src, GAsyncResult *res, gpointer ud)
+{
+    GSubprocess *p = G_SUBPROCESS(src);
+    char *out = NULL;
+    GError *err = NULL;
+    g_subprocess_communicate_utf8_finish(p, res, &out, NULL, &err);
+    int code = !err && g_subprocess_get_if_exited(p) ? g_subprocess_get_exit_status(p) : -1;
+    gtk_widget_destroy(x11_dialog);
+    x11_dialog = NULL;
+    if (code == 126 || code == 127) { /* the password prompt was dismissed */
+        g_free(out);
+        g_clear_error(&err);
+        return;
+    }
+    GtkWidget *d;
+    if (code == 0) {
+        d = gtk_message_dialog_new(NULL, 0, GTK_MESSAGE_INFO, GTK_BUTTONS_NONE, "This computer now logs in to X11");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d),
+                                                 "Log out and log back in, and RemoDroid can show and control the screen.");
+        gtk_dialog_add_buttons(GTK_DIALOG(d), "Later", GTK_RESPONSE_CANCEL, "Log out", GTK_RESPONSE_OK, NULL);
+        gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_OK);
+    } else {
+        d = gtk_message_dialog_new(NULL, 0, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Could not switch to X11");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d), "%s",
+                                                 err ? err->message : out && *out ? out : "pkexec failed");
+    }
+    gtk_window_set_keep_above(GTK_WINDOW(d), TRUE);
+    if (gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_OK && code == 0) {
+        /* GNOME's own log-out dialog: it lists apps with unsaved work */
+        char *argv[] = { "gnome-session-quit", "--logout", NULL };
+        g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL);
+    }
+    gtk_widget_destroy(d);
+    g_free(out);
+    g_clear_error(&err);
+}
+
+static void switch_x11(void)
+{
+    if (x11_dialog)
+        return;
+    const char *ds = getenv("DESKTOP_SESSION");
+    GError *err = NULL;
+    GSubprocess *p = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_MERGE, &err, "pkexec",
+                                      "/bin/sh", "-c", X11_SCRIPT, "remodroid-x11", g_get_user_name(),
+                                      ds && *ds && !strchr(ds, '/') ? ds : "gnome", NULL);
+    if (!p) {
+        GtkWidget *d = gtk_message_dialog_new(NULL, 0, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Could not switch to X11");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d), "%s", err->message);
+        gtk_dialog_run(GTK_DIALOG(d));
+        gtk_widget_destroy(d);
+        g_error_free(err);
+        return;
+    }
+    x11_dialog = gtk_message_dialog_new(NULL, 0, GTK_MESSAGE_OTHER, GTK_BUTTONS_NONE, "Switching to X11…");
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(x11_dialog),
+                                             "Enter your password when asked. Installing the X11 session can take a minute.");
+    GtkWidget *spin = gtk_spinner_new();
+    gtk_spinner_start(GTK_SPINNER(spin));
+    gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(x11_dialog))), spin, FALSE, FALSE, 8);
+    gtk_widget_show_all(x11_dialog);
+    g_subprocess_communicate_utf8_async(p, NULL, NULL, x11_done, NULL);
+    g_object_unref(p);
+}
+
+/* asked once per start, on a Wayland session */
+static gboolean offer_x11(gpointer ud)
+{
+    int can = can_switch_x11();
+    GtkWidget *d = gtk_message_dialog_new(NULL, 0, GTK_MESSAGE_WARNING, GTK_BUTTONS_NONE,
+                                          "RemoDroid can't show this screen on Wayland");
+    if (can) {
+        gtk_message_dialog_format_secondary_text(
+            GTK_MESSAGE_DIALOG(d), "Switch this computer to GNOME on Xorg? RemoDroid installs the X11 session if it is "
+                                   "missing, turns Wayland off in the login screen (GDM) and asks for your password once. "
+                                   "It takes effect when you log in again.");
+        gtk_dialog_add_buttons(GTK_DIALOG(d), "Not now", GTK_RESPONSE_CANCEL, "Switch to X11", GTK_RESPONSE_OK, NULL);
+        gtk_dialog_set_default_response(GTK_DIALOG(d), GTK_RESPONSE_OK);
+    } else {
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d),
+                                                 "Log out, and on the login screen choose an X11 (Xorg) session for "
+                                                 "your desktop, for example “Plasma (X11)”, then log in.");
+        gtk_dialog_add_buttons(GTK_DIALOG(d), "OK", GTK_RESPONSE_CANCEL, NULL);
+    }
+    gtk_window_set_keep_above(GTK_WINDOW(d), TRUE);
+    int r = gtk_dialog_run(GTK_DIALOG(d));
+    gtk_widget_destroy(d);
+    if (r == GTK_RESPONSE_OK)
+        switch_x11();
+    return G_SOURCE_REMOVE;
+}
+
 /* ---------------- notifications (org.freedesktop.Notifications) ---------------- */
 
 static void notify(const char *text)
@@ -124,7 +278,7 @@ static void tray_refresh(void)
     char status[160], viewer[120];
     snprintf(status, sizeof status, "RemoDroid — %s", state_text());
     snprintf(viewer, sizeof viewer, "Viewer: %s", U.st.viewer[0] ? U.st.viewer : "someone");
-    sni_item_t items[12];
+    sni_item_t items[13];
     int n = 0;
     items[n++] = (sni_item_t){ M_STATUS, status, 0, 0, 0 };
     if (U.st.state == RD_IN_SESSION)
@@ -137,6 +291,8 @@ static void tray_refresh(void)
         items[n++] = (sni_item_t){ M_OPEN, "Open panel", 1, 0, 0 };
     items[n++] = (sni_item_t){ M_WINDOW, U.st.state == RD_UNPAIRED ? "Pair with a panel…" : "Pairing & status…", 1, 0, 0 };
     items[n++] = (sni_item_t){ M_LOG, "Show log", 1, 0, 0 };
+    if (wayland_session() && can_switch_x11())
+        items[n++] = (sni_item_t){ M_X11, "Switch to X11…", 1, 0, 0 };
     items[n++] = (sni_item_t){ 0, NULL, 0, 0, 0 };
     items[n++] = (sni_item_t){ M_LOGIN, "Start at login", 1, 1, login_enabled() };
     items[n++] = (sni_item_t){ M_QUIT, "Quit RemoDroid", 1, 0, 0 };
@@ -151,6 +307,7 @@ static void on_menu(int id)
     case M_OPEN: open_panel(); break;
     case M_WINDOW: show_window(); break;
     case M_LOG: show_log(); break;
+    case M_X11: switch_x11(); break;
     case M_LOGIN: set_login(!login_enabled()); tray_refresh(); break;
     case M_QUIT: g_application_quit(G_APPLICATION(U.app)); break;
     }
@@ -348,6 +505,7 @@ static void show_log(void)
 }
 
 static void do_show_log(GtkWidget *w, gpointer ud) { show_log(); }
+static void do_switch_x11(GtkWidget *w, gpointer ud) { switch_x11(); }
 
 static GtkWidget *add_label(GtkWidget *grid, const char *text, int row)
 {
@@ -444,11 +602,19 @@ static void build_window(void)
     U.login = gtk_check_button_new_with_label("Start RemoDroid when I log in");
     g_signal_connect(U.login, "toggled", G_CALLBACK(login_toggled), NULL);
     gtk_box_pack_start(GTK_BOX(box), U.login, FALSE, FALSE, 0);
+    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *log = gtk_button_new_with_label("Show log");
-    gtk_widget_set_halign(log, GTK_ALIGN_START);
     g_signal_connect(log, "clicked", G_CALLBACK(do_show_log), NULL);
-    gtk_box_pack_start(GTK_BOX(box), log, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(row), log, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), row, FALSE, FALSE, 0);
     gtk_widget_show_all(box);
+    if (wayland_session() && can_switch_x11()) {
+        GtkWidget *x11 = gtk_button_new_with_label("Switch to X11…");
+        gtk_style_context_add_class(gtk_widget_get_style_context(x11), "suggested-action");
+        g_signal_connect(x11, "clicked", G_CALLBACK(do_switch_x11), NULL);
+        gtk_box_pack_end(GTK_BOX(row), x11, FALSE, FALSE, 0);
+        gtk_widget_show(x11);
+    }
 }
 
 static void show_window(void)
@@ -519,6 +685,8 @@ static void on_startup(GApplication *a, gpointer ud)
     }
     rd_agent_status(&U.st);
     refresh();
+    if (wayland_session())
+        g_idle_add(offer_x11, NULL);
 }
 
 static int first_activation = 1;
