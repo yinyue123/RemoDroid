@@ -48,8 +48,12 @@ rm "$work/oci.tar"
 podman save --format oci-archive -o "$work/$ARCHIVE" "$IMAGE_REF"
 
 echo "==> sideloading onto $NODE_SSH"
-ssh "$NODE_SSH" "cat > /var/hqnode/sideload/$ARCHIVE.part && mv /var/hqnode/sideload/$ARCHIVE.part /var/hqnode/sideload/$ARCHIVE" <"$work/$ARCHIVE"
-ssh "$NODE_SSH" "curl -sS --noproxy '*' --unix-socket /run/hqnode.sock \
-	-H \"Authorization: Bearer \$(cat /etc/hqnode/cli-token)\" -H 'Content-Type: application/json' \
-	-d '{\"file\":\"$ARCHIVE\"}' -X POST http://localhost/v1/images/sideload; echo"
+# hqnode's API on the machine; its sideload directory is whatever its config says (images.sideload_dir,
+# else <root>/upload), so ask it rather than assume.
+api="curl -sS --noproxy '*' --unix-socket /run/hqnode.sock -H \"Authorization: Bearer \$(cat /etc/hqnode/cli-token)\" -H 'Content-Type: application/json'"
+dir=$(ssh "$NODE_SSH" "$api http://localhost/v1/images/sideload" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dir"])')
+[ -n "$dir" ] || { echo "the machine's hqnode named no sideload directory" >&2; exit 1; }
+echo "    into $dir"
+ssh "$NODE_SSH" "mkdir -p '$dir' && cat > '$dir/$ARCHIVE.part' && mv '$dir/$ARCHIVE.part' '$dir/$ARCHIVE'" <"$work/$ARCHIVE"
+ssh "$NODE_SSH" "$api -d '{\"file\":\"$ARCHIVE\"}' -X POST http://localhost/v1/images/sideload; echo"
 echo "==> done: create with IMAGE_REF=$IMAGE_REF ./browser/hqnode/create.sh, or reinstall with archive $ARCHIVE"
