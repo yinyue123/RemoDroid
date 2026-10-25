@@ -8,3 +8,6 @@ __pycache__/
 # wrangler (Cloudflare Pages / Worker deploys)
 .wrangler/
 /worker/package-lock.json
+
+# the remote browser's live settings (deploy.sh pushes them; the example is browser.conf.example)
+browser/hqnode/browser.conf

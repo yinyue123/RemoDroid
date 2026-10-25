@@ -1,0 +1,45 @@
+# Builds the remote browser's hqnode image (browser/hqnode/Dockerfile) for the OECT, natively on an
+# arm64 runner: MPP, the agent and rd-shell compile in minutes here instead of an hour under qemu.
+#
+# The image holds CloakBrowser, whose licence allows no redistribution, and this repository is public:
+# its artifacts can be downloaded by anyone. So the image leaves the runner only encrypted, with the
+# BROWSER_IMAGE_KEY secret, and only as an artifact kept for three days. Fetch and decrypt it with
+# browser/hqnode/fetch-image.sh, which also sideloads it onto the machine.
+name: browser-image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        run: |
+          docker buildx build --platform linux/arm64 --build-arg CLOAKBROWSER=free \
+            -f browser/hqnode/Dockerfile -t localhost/remote-browser-hqnode:arm64 \
+            --output type=oci,dest=image.tar .
+          ls -la image.tar
+      - name: Encrypt
+        env:
+          KEY: ${{ secrets.BROWSER_IMAGE_KEY }}
+        run: |
+          [ -n "$KEY" ] || { echo "BROWSER_IMAGE_KEY is not set: refusing to upload the image unencrypted" >&2; exit 1; }
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:KEY \
+            -in image.tar -out remote-browser-arm64.tar.enc
+          rm image.tar
+          sha256sum remote-browser-arm64.tar.enc | tee remote-browser-arm64.tar.enc.sha256
+      - uses: actions/upload-artifact@v5
+        with:
+          name: remote-browser-arm64
+          path: |
+            remote-browser-arm64.tar.enc
+            remote-browser-arm64.tar.enc.sha256
+          retention-days: 3
+          compression-level: 0
