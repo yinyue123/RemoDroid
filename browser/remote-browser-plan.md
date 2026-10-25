@@ -899,7 +899,7 @@ the RemoDroid panel at `47.107.89.35:5580` as **browser-oect**.
 | Part | As built | Checked |
 |---|---|---|
 | Image | `.github/workflows/browser-image.yml` builds it on GitHub's arm64 runner (under 2 min), encrypted with the `BROWSER_IMAGE_KEY` secret because CloakBrowser's binary licence allows internal Docker images but not redistribution. `browser/hqnode/fetch-image.sh` downloads, decrypts and sideloads it | `localhost/remote-browser-hqnode:arm64`, 1.35 GB unpacked |
-| Container | `ARCHIVE=remote-browser-arm64.tar MACHINE=oect NODE_SSH=root@192.168.10.15 ./browser/hqnode/create.sh`: 64 cores and 64 GB (no limit in effect), 10 GB root and 10 GB `/data` (both grown live: `hqnode portal set browser-oect --disk 10G --data 10G`), `devices: rkmpp` | Xorg, rd-shell, CloakBrowser and the agent run |
+| Container | `ARCHIVE=remote-browser-arm64.tar MACHINE=oect NODE_SSH=root@192.168.10.15 ./browser/hqnode/create.sh`: 64 cores (no CPU limit in effect) and 4 GB of memory (all the box has), 10 GB root and 10 GB `/data` (both grown live: `hqnode portal set browser-oect --disk 10G --data 10G`), `devices: rkmpp` | Xorg, rd-shell, CloakBrowser and the agent run |
 | Encoder | MPP in the container, from BGRA, through the `rkmpp` nodes | **H.265 at 880×1904: 35.5 fps** including drawing. BGRA input and the portrait height both work |
 | Proxy | sing-box on the host (`sing-box-reality.service`, the REALITY servers of `/etc/reality.json`), browser-only port **1090** → the us exit (Los Angeles), private addresses refused, nothing direct. The container reaches it at `192.168.10.1:1090` (pasta's `--map-gw`) | `loc=US`; `timezone = America/Los_Angeles`, `lang = en-US` |
 | Kill switch | `rd-killswitch` with `/etc/rd-killswitch.conf`: `127.0.0.1:1090` (+ UDP for the relay), the RemoDroid server, the host's resolver | Direct internet, the LAN and the other proxy ports refused; proxy, DNS and the agent work |
@@ -915,7 +915,7 @@ What the OECT needed on the way:
   finishes anyway: three containers the panel never recorded (an hqnode panel bug; its own
   docs/portal-cli.md §8 says a create must survive its caller). `hqnode portal create` avoids it but has no
   `--devices` flag, so `create.sh` posts the same body to the agent's `/v1/portal/containers` relay.
-- Limits: 64 cores and 64 GB, far above the box (4 cores, 4 GB): in effect none. The panel has no "no
+- Limits: 64 cores, far above the box's 4: in effect none. Memory 4 GB, the box's whole RAM (throttled from 3.6 GB, `memory.high`). The panel has no "no
   limit" (a zero means "keep the default").
 - If the container is ever made anew, put its new cid in `/etc/rd-killswitch.conf`.
 
