@@ -17,7 +17,10 @@
 # (`context deadline exceeded` there is the CLI's own deadline; the pull goes on. Don't retry.)
 # Or from the image fetch-image.sh sideloaded (built by the browser-image workflow):
 #
-#     ARCHIVE=remote-browser-arm64.tar MACHINE=oect ./browser/hqnode/create.sh
+#     ARCHIVE=remote-browser-arm64.tar MACHINE=oect NODE_SSH=root@192.168.10.15 ./browser/hqnode/create.sh
+#
+# NODE_SSH sends the create through the machine's own link to the panel rather than straight to the
+# panel's web address: a create from an archive outlasts the 100 s Cloudflare allows a request there.
 #
 # After this, ./deploy.sh: the settings and the pairing.
 
@@ -154,7 +157,21 @@ main() {
         [[ "$confirm" =~ ^[Yy]$ ]] || { echo -e "${YELLOW}cancelled${NC}"; exit 0; }
     fi
 
-    if ! panel_api POST "/machines/${mid}/containers" "$body"; then
+    # The panel ties the create to this request: a client that hangs up cancels it on the panel while
+    # the machine finishes anyway, leaving a container the panel never recorded. Formatting the disks
+    # and unpacking the image takes 90-100 s on the OECT, past Cloudflare's 100 s in front of the panel
+    # (HTTP 520). With NODE_SSH the request goes through the machine's own link to the panel instead
+    # (hqnode's /v1/portal relay: the same body, 40 minutes, not cancelled by the caller).
+    local created=0
+    if [[ -n "${NODE_SSH:-}" ]]; then
+        PANEL_BODY=$(printf '%s' "$body" | ssh -o BatchMode=yes "$NODE_SSH" \
+            'curl -sS --noproxy "*" --max-time 2700 --unix-socket /run/hqnode.sock -H "Authorization: Bearer $(cat /etc/hqnode/cli-token)" -H "Content-Type: application/json" -X POST -d @- -w "\n%{http_code}" http://localhost/v1/portal/containers')
+        PANEL_STATUS=${PANEL_BODY##*$'\n'}; PANEL_BODY=${PANEL_BODY%$'\n'*}
+        panel_ok && created=1
+    elif PANEL_MAX_TIME=2400 panel_api POST "/machines/${mid}/containers" "$body"; then
+        created=1
+    fi
+    if (( ! created )); then
         echo -e "${RED}✗ not created: $(panel_err)${NC}"
         case "$PANEL_BODY" in
             *catalog*|*image*)

@@ -99,7 +99,7 @@ panel_api() {
         -sS -b "$PANEL_JAR" -c "$PANEL_JAR"
         -X "$method" -H 'Content-Type: application/json'
         -o "$tmp" -w '%{http_code}'
-        --connect-timeout 10 --max-time 60
+        --connect-timeout 10 --max-time "${PANEL_MAX_TIME:-60}"
     )
     [[ -n "$body" ]] && args+=(-d "$body")
     PANEL_STATUS=$(curl "${args[@]}" "${PANEL_URL}/api/v1${path}" 2>/dev/null)
