@@ -82,7 +82,16 @@ select_modify (EV_P_ int fd, int oev, int nev)
     int handle = fd;
     #endif
 
+    /* RemoDroid: not on Winsock. desktop.mk makes EV_FD_TO_WIN32_HANDLE the
+     * identity, so "fd" is the SOCKET handle itself — an arbitrary kernel
+     * handle value, routinely above FD_SETSIZE. A Winsock fd_set is a count
+     * plus an array of handles, so FD_SETSIZE caps how many sockets it holds,
+     * not how large their values are, and select() ignores nfds there. The
+     * assert aborted the Windows agent the moment its server socket's handle
+     * reached 1024. */
+    #if !EV_SELECT_IS_WINSOCKET
     assert (("libev: fd >= FD_SETSIZE passed to fd_set-based select backend", fd < FD_SETSIZE));
+    #endif
 
     /* FD_SET is broken on windows (it adds the fd to a set twice or more,
      * which eventually leads to overflows). Need to call it only on changes.
