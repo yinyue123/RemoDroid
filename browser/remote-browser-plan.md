@@ -893,13 +893,13 @@ the phone's multi-touch path for this computer.
 
 ## Running on the OECT (2026-10-25)
 
-The remote browser runs on the OECT as hqnode container **`browser-oect`** (`0bb53f608258`), paired with
+The remote browser runs on the OECT as hqnode container **`browser-oect`** (`d1300c7e471d`), paired with
 the RemoDroid panel at `47.107.89.35:5580` as **browser-oect**.
 
 | Part | As built | Checked |
 |---|---|---|
 | Image | `.github/workflows/browser-image.yml` builds it on GitHub's arm64 runner (under 2 min), encrypted with the `BROWSER_IMAGE_KEY` secret because CloakBrowser's binary licence allows internal Docker images but not redistribution. `browser/hqnode/fetch-image.sh` downloads, decrypts and sideloads it | `localhost/remote-browser-hqnode:arm64`, 1.35 GB unpacked |
-| Container | `ARCHIVE=remote-browser-arm64.tar MACHINE=oect ./browser/hqnode/create.sh`: 4 cores, 1.5 GB, 8 GB root, 4 GB `/data`, `devices: rkmpp` | Xorg, rd-shell, CloakBrowser and the agent run |
+| Container | `ARCHIVE=remote-browser-arm64.tar MACHINE=oect NODE_SSH=root@192.168.10.15 ./browser/hqnode/create.sh`: 64 cores and 64 GB (no limit in effect), 8 GB root, 4 GB `/data`, `devices: rkmpp` | Xorg, rd-shell, CloakBrowser and the agent run |
 | Encoder | MPP in the container, from BGRA, through the `rkmpp` nodes | **H.265 at 880×1904: 35.5 fps** including drawing. BGRA input and the portrait height both work |
 | Proxy | sing-box on the host (`sing-box-reality.service`, the REALITY servers of `/etc/reality.json`), browser-only port **1090** → the us exit (Los Angeles), private addresses refused, nothing direct. The container reaches it at `192.168.10.1:1090` (pasta's `--map-gw`) | `loc=US`; `timezone = America/Los_Angeles`, `lang = en-US` |
 | Kill switch | `rd-killswitch` with `/etc/rd-killswitch.conf`: `127.0.0.1:1090` (+ UDP for the relay), the RemoDroid server, the host's resolver | Direct internet, the LAN and the other proxy ports refused; proxy, DNS and the agent work |
@@ -909,8 +909,14 @@ What the OECT needed on the way:
 - **The watchdog daemon isn't real-time** (`realtime = no` in `/etc/watchdog.conf`). The vendor kernel has
   `CONFIG_RT_GROUP_SCHED=y`, so one real-time task outside the root cgroup keeps cgroup v2's `cpu`
   controller off, and hqnode then can't start any container (`cpu.max: permission denied`).
-- A create from a 1.3 GB archive outlasts the panel request's timeout (`HTTP 000`); the container is made
-  anyway, stopped. `hqnode start <cid>` once.
+- **Create through the machine's link, not hqno.de's web address** (`NODE_SSH=root@192.168.10.15` for
+  `create.sh`). A create from the archive takes ~100 s, past Cloudflare's limit in front of the panel
+  (HTTP 520), and the panel's create handler is cancelled when its client hangs up while the machine
+  finishes anyway: three containers the panel never recorded (an hqnode panel bug; its own
+  docs/portal-cli.md §8 says a create must survive its caller). `hqnode portal create` avoids it but has no
+  `--devices` flag, so `create.sh` posts the same body to the agent's `/v1/portal/containers` relay.
+- Limits: 64 cores and 64 GB, far above the box (4 cores, 4 GB): in effect none. The panel has no "no
+  limit" (a zero means "keep the default").
 - If the container is ever made anew, put its new cid in `/etc/rd-killswitch.conf`.
 
 Still to do from the build order: the iPhone (steps 6–7: touch, keyboard), measuring `light` against
