@@ -49,6 +49,7 @@
   <button type="button" role="menuitem" data-act="screen" id="menuScreen"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M4 4l16 16"/></svg><span>Screen off</span></button>
   <button type="button" role="menuitem" data-act="lock" id="menuLock"><svg viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg><span>Lock</span></button>
   <button type="button" role="menuitem" data-act="monitor" id="menuMonitor" hidden><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.8"/><path d="M9 20h6M12 16v4"/></svg><span>Next screen</span></button>
+  <button type="button" role="menuitem" data-act="turn" id="menuTurn"><svg viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="2.2"/><circle cx="18.5" cy="12" r="2.2"/><path d="M7.7 12h3M13.3 12h3"/><path d="M12 5.5v13"/><path d="M9.5 8L12 5.5 14.5 8"/></svg>Relay</button>
   <button type="button" role="menuitem" data-act="reconnect"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/></svg>Reconnect</button>
   <button type="button" role="menuitem" data-act="fullscreen" id="menuFull"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Full screen</button>
   <button type="button" role="menuitem" data-act="stats" id="menuStats"><svg viewBox="0 0 24 24"><path d="M5 20V12M10 20V6M15 20v-9M20 20V4"/></svg>Stats</button>
@@ -130,6 +131,15 @@
       <li>Open <b>RemoDroid</b> from the Home Screen. It runs full screen, with no address bar or toolbar, and the phone's picture uses the whole display.</li>
     </ol>
     <p class="note">You stay logged in: the Home Screen app takes Safari's login with it.</p>
+  </div>
+</section>
+
+<!-- Relay: which TURN server carries the video -->
+<section class="sheet" id="sheet-turn" hidden aria-labelledby="tu-title">
+  <header><h2 id="tu-title">Relay<small id="turnSub">Auto</small></h2><button class="btn" type="button" id="turnTest">Test</button><button class="x" type="button" data-close aria-label="Close">×</button></header>
+  <div class="body">
+    <div class="turn-list" id="turnList"></div>
+    <p class="note">Each server's time is how long it takes this phone to get a relay from it. Pick one to send the video through it at both ends; it applies at once (the stream reconnects). A direct path is still used when one exists.</p>
   </div>
 </section>
 

@@ -239,6 +239,49 @@ static cJSON *ice_servers(const char *user)
     return arr;
 }
 
+static int is_turn_url(const char *u)
+{
+    return !strncmp(u, "turn:", 5) || !strncmp(u, "turns:", 6);
+}
+
+/* The viewer's relay pick (the floating ball's Relay sheet): "turn" lists the TURN URLs to keep, and
+ * both ends of the session get only those, so the phone and the agent relay through the same server.
+ * STUN stays (a direct path is still tried first). No pick, or one that names nothing offered any more
+ * (a server removed in the panel since), keeps them all. */
+static void pick_turn(cJSON *ice, const cJSON *pick)
+{
+    if (!cJSON_IsArray(pick) || !cJSON_GetArraySize(pick))
+        return;
+    int offered = 0;
+    const cJSON *srv, *u;
+    cJSON_ArrayForEach(srv, ice) {
+        cJSON_ArrayForEach(u, cJSON_GetObjectItemCaseSensitive(srv, "urls")) {
+            const cJSON *p;
+            cJSON_ArrayForEach(p, pick)
+                offered |= cJSON_IsString(p) && cJSON_IsString(u) && !strcmp(p->valuestring, u->valuestring);
+        }
+    }
+    if (!offered)
+        return;
+    for (cJSON *s = ice->child, *ns; s; s = ns) {
+        ns = s->next;
+        cJSON *urls = cJSON_GetObjectItemCaseSensitive(s, "urls");
+        for (cJSON *x = urls ? urls->child : NULL, *nx; x; x = nx) {
+            nx = x->next;
+            if (!cJSON_IsString(x) || !is_turn_url(x->valuestring))
+                continue;
+            int keep = 0;
+            const cJSON *p;
+            cJSON_ArrayForEach(p, pick)
+                keep |= cJSON_IsString(p) && !strcmp(p->valuestring, x->valuestring);
+            if (!keep)
+                cJSON_Delete(cJSON_DetachItemViaPointer(urls, x));
+        }
+        if (!cJSON_GetArraySize(urls))
+            cJSON_Delete(cJSON_DetachItemViaPointer(ice, s));
+    }
+}
+
 static void viewer_session_request(conn_t *c, cJSON *m)
 {
     long id = msg_id(m);
@@ -265,7 +308,8 @@ static void viewer_session_request(conn_t *c, cJSON *m)
     dev->vs = vs;
     c->vs = vs;
 
-    cJSON *ice = ice_servers(c->user);
+    cJSON *choices = ice_servers(c->user), *ice = cJSON_Duplicate(choices, 1);
+    pick_turn(ice, cJSON_GetObjectItemCaseSensitive(d, "turn"));
     cJSON *start = msg_new("session.start", 0, vs->sid);
     cJSON *sd = msg_d(start);
     cJSON_AddStringToObject(sd, "sid", vs->sid);
@@ -283,6 +327,7 @@ static void viewer_session_request(conn_t *c, cJSON *m)
     ws_send_json(c, msg_ack(id, ack));
     cJSON *im = msg_new("session.ice", 0, vs->sid);
     cJSON_AddItemToObject(msg_d(im), "ice_servers", ice);
+    cJSON_AddItemToObject(msg_d(im), "ice_choices", choices); /* every server, for the Relay sheet's tests */
     ws_send_json(c, im);
     LOGI("session %s: %s -> %s", vs->sid, c->user, dev->id);
     hub_device_changed(dev);

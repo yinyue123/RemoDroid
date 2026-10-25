@@ -15,7 +15,7 @@ const DEFAULTS = {
   mode: 'auto', preset: '720p', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: false,
   screenOff: true, lockOnDisc: true, grace: 10, rotation: 'auto', clipSync: true, autoPaste: false, overheat: 45,
   destDir: '/sdcard/DCIM/RemoDroid', mediaScan: true, overwrite: false, maxMb: 2048, route: 'auto', relay: false,
-  audio: true, sound: true, device: '', swapCmd: 'auto'
+  audio: true, sound: true, device: '', swapCmd: 'auto', turn: ''
 };
 const S = Object.assign({}, DEFAULTS);
 /* The gamepad's settings (layout, edited positions, see-through, swipe speed, zoom) also live in a cookie,
@@ -203,7 +203,7 @@ function onWs(m) {
       if (d.kind === 'phone.locked') st.locked = true;
     }
     break;
-  case 'session.ice': startPeer(d.ice_servers || []); break;
+  case 'session.ice': st.iceChoices = d.ice_choices || d.ice_servers || []; startPeer(d.ice_servers || []); break;
   case 'signal': onSignal(d); break;
   case 'session.ended': sessionEnded(d.reason || 'ended'); break;
   case 'ack': case 'error': {
@@ -249,7 +249,7 @@ async function startSession(takeover) {
   st.sid = 'pending';
   setOverlay('Connecting', `Connecting to ${st.device.name}…`);
   try {
-    const r = await request('session.request', { device: st.device.id, quality: quality(), force_relay: S.relay, ...(takeover ? { takeover: true } : {}) });
+    const r = await request('session.request', { device: st.device.id, quality: quality(), force_relay: S.relay, ...(S.turn ? { turn: [S.turn] } : {}), ...(takeover ? { takeover: true } : {}) });
     st.sid = r.sid;
     st.ended = false;
   } catch (e) {
@@ -1037,7 +1037,7 @@ menu.addEventListener('click', e => {
   const a = b.dataset.act;
   if (a === 'keys' && desk()) { closeMenu(); fkb.el.hidden ? showFkb() : hideFkb(); }
   else if (a === 'gamepad') { closeMenu(); gpad.hidden ? showGpad() : hideGpad(); }
-  else if (['photo', 'clip', 'settings', 'keys'].includes(a)) { closeMenu(); openSheet(a); }
+  else if (['photo', 'clip', 'settings', 'keys', 'turn'].includes(a)) { closeMenu(); openSheet(a); }
   else if (['back', 'home', 'recents'].includes(a)) { sendCtrl('nav', { button: a }).catch(() => toast('Not connected')); closeMenu(); }
   else if (a === 'screen') {
     const on = st.panel === 'off', what = desk() ? 'Display' : 'Phone screen';
@@ -1069,6 +1069,7 @@ function openSheet(id) {
   $('#sheet-' + id).hidden = false;
   if (id === 'clip') refreshClip();
   if (id === 'settings') renderTab(currentTab);
+  if (id === 'turn') { renderTurn(); testTurns(); }
   if (id === 'photo') $('#ph-dest').textContent = desk() ? `to ${uploadDir()}` : `to ${S.destDir}${S.mediaScan ? ' · added to Gallery' : ''}`;
   $('#photoInput').accept = desk() ? '' : 'image/*';
   ball.hidden = true;
@@ -1081,6 +1082,72 @@ function closeSheet() {
 }
 $('#backdrop').addEventListener('click', closeSheet);
 $$('[data-close]').forEach(b => b.addEventListener('click', closeSheet));
+
+/* ================= relay picker: which TURN server carries the video ================= */
+/* Like picking a node in a proxy app: every TURN server the panel offers, its latency from this phone,
+ * and one to use (or Auto: all of them, WebRTC takes the best). The pick goes with the next session
+ * request, and the server hands the same narrowed list to the computer or phone, so both ends relay
+ * through it. The list and credentials are the last session's (ice_choices). */
+function turnServers() {
+  const out = [];
+  for (const s of st.iceChoices || [])
+    for (const url of [].concat(s.urls || []))
+      if (/^turns?:/.test(url) && !out.some(t => t.url === url)) out.push({ url, username: s.username, credential: s.credential });
+  return out;
+}
+const turnMs = new Map(); /* url → ms, null (no answer) or 'testing' */
+const esc = v => String(v).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+function turnName(url) {
+  const m = /^(turns?):(\[[^\]]+\]|[^:?]+)(?::(\d+))?(?:\?transport=(\w+))?/i.exec(url) || [];
+  const own = st.device && location.hostname && m[2] === location.hostname;
+  return { host: `${m[2] || url}${m[3] ? ':' + m[3] : ''}`, sub: `${(m[1] || 'turn').toUpperCase()} · ${(m[4] || (m[1] === 'turns' ? 'tcp' : 'udp')).toUpperCase()}${own ? ' · this server' : ''}` };
+}
+/* The time to get a relay allocated from that server, alone: its round trip plus its answer. */
+function turnPing(t) {
+  return new Promise(res => {
+    let pc;
+    try { pc = new RTCPeerConnection({ iceServers: [{ urls: t.url, username: t.username, credential: t.credential }], iceTransportPolicy: 'relay' }); }
+    catch (e) { res(null); return; }
+    const t0 = performance.now();
+    const done = v => { clearTimeout(to); try { pc.close(); } catch (_) {} res(v); };
+    const to = setTimeout(() => done(null), 5000);
+    pc.onicecandidate = e => { if (e.candidate && / typ relay /.test(e.candidate.candidate)) done(Math.round(performance.now() - t0)); };
+    pc.createDataChannel('t');
+    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => done(null));
+  });
+}
+async function testTurns() {
+  const list = turnServers();
+  for (const t of list) turnMs.set(t.url, 'testing');
+  renderTurn();
+  await Promise.all(list.map(t => turnPing(t).then(ms => { turnMs.set(t.url, ms); if (openId === 'turn') renderTurn(); })));
+}
+function renderTurn() {
+  const list = turnServers(), body = $('#turnList');
+  const using = S.turn && list.some(t => t.url === S.turn) ? S.turn : '';
+  $('#turnSub').textContent = using ? `Using ${turnName(using).host}` : 'Auto · every server, the best path wins';
+  const badge = url => {
+    const v = turnMs.get(url);
+    if (v === 'testing') return '<span class="pill">…</span>';
+    if (v === undefined) return '';
+    if (v === null) return '<span class="pill bad">timeout</span>';
+    return `<span class="pill ${v < 300 ? 'ok' : v < 800 ? 'warn' : 'bad'}">${v} ms</span>`;
+  };
+  const row = (url, title, sub, right) => `<button type="button" class="turn-row" data-url="${esc(url)}" aria-pressed="${url === using}">
+    <span class="lbl"><b>${esc(title)}</b><small>${esc(sub)}</small></span>${right}<span class="tick" aria-hidden="true"></span></button>`;
+  body.innerHTML = row('', 'Auto', 'All of them; WebRTC keeps the fastest that works', '') +
+    (list.length ? list.map(t => { const n = turnName(t.url); return row(t.url, n.host, n.sub, badge(t.url)); }).join('')
+      : '<p class="note">No TURN servers yet: they arrive with a session. Connect first, or add them in the panel (Server → STUN/TURN).</p>');
+}
+$('#turnList').addEventListener('click', e => {
+  const b = e.target.closest('.turn-row'); if (!b) return;
+  const url = b.dataset.url;
+  if (url === (S.turn || '')) { closeSheet(); return; }
+  S.turn = url; save(); renderTurn(); closeSheet();
+  toast(url ? `Relay: ${turnName(url).host} — reconnecting` : 'Relay: Auto — reconnecting');
+  reconnectStream();
+});
+$('#turnTest').addEventListener('click', () => testTurns());
 
 /* ================= clipboard (§4.8) ================= */
 let androidClip = '';

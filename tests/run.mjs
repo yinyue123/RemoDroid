@@ -145,6 +145,8 @@ uionly = ${sha(uiToken)} ui
 urls = turn:127.0.0.1:3478?transport=udp
 shared_secret = turnsecret
 credential_ttl_minutes = 60
+[ice]
+extra = turn:192.0.2.9:3478?transport=udp alt altpw
 [keepalive]
 ping_seconds = 2
 timeout_seconds = 6
@@ -454,17 +456,26 @@ interval_seconds = 2
   second.send({ t: 'session.request', id: 3, d: { device: 'router1' } });
   const busy = await second.wait(m => m.t === 'error' && m.id === 3);
   ok(busy.d.code === 'busy', 'a second viewer gets busy');
-  second.send({ t: 'session.request', id: 4, d: { device: 'router1', takeover: true } });
+  const alt = 'turn:192.0.2.9:3478?transport=udp';
+  second.send({ t: 'session.request', id: 4, d: { device: 'router1', takeover: true, turn: [alt] } });
   const took = await second.wait(m => m.t === 'ack' && m.id === 4);
+  const ice2 = await second.wait(m => m.t === 'session.ice');
   const kicked = await viewer.wait(m => m.t === 'session.ended');
   ok(kicked.sid === sid && kicked.d.reason === 'taken_over', 'take over: the first viewer is told why it was disconnected');
   await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.end' && e.data.sid === sid);
   const st2 = await phone.waitFor(e => e.kind === 'ctrl' && e.data.t === 'session.start' && e.data.sid === took.d.sid);
   ok(st2 && took.d.sid !== sid, 'take over: the phone ends the old session and starts the new one');
+  const turns = list => list.flatMap(x => [].concat(x.urls)).filter(u => /^turns?:/.test(u));
+  ok(JSON.stringify(turns(st2.data.d.ice_servers)) === JSON.stringify([alt]) && JSON.stringify(turns(ice2.d.ice_servers)) === JSON.stringify([alt]),
+    'a relay pick: the phone and the viewer both get only the picked TURN server');
+  ok(turns(ice2.d.ice_choices).length === 2 && ice2.d.ice_servers.find(x => [].concat(x.urls).includes(alt)).credential === 'altpw',
+    'a relay pick: the viewer still gets every server to test, with credentials');
   const upd2 = await viewer.wait(m => m.t === 'device.update' && m.d.patch.session.sid === took.d.sid);
   ok(upd2.d.patch.session.viewer === 'me', 'the device shows who holds the session');
-  viewer.send({ t: 'session.request', id: 5, d: { device: 'router1', takeover: true } }); // and back, for the lifecycle checks
+  viewer.send({ t: 'session.request', id: 5, d: { device: 'router1', takeover: true, turn: ['turn:203.0.113.1:3478'] } }); // and back, for the lifecycle checks
   const back = await viewer.wait(m => m.t === 'ack' && m.id === 5);
+  const ice5 = await viewer.wait(m => m.t === 'session.ice' && m.sid === back.d.sid);
+  ok(turns(ice5.d.ice_servers).length === 2, 'a relay pick naming nothing offered keeps every server');
   await second.wait(m => m.t === 'session.ended' && m.d.reason === 'taken_over');
   second.close();
 
