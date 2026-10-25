@@ -311,11 +311,11 @@ the plan adds a small `local-top` script.
 ### 5.1 Layout
 
 ```
-eMMC (8 GB) — always boots; unchanged partition table           SSD (64 GB, SATA)
+eMMC (8 GB) — always boots; unchanged partition table           SSD (128 GB, SATA)
 ┌─────────────────────────────────────────────┐                ┌──────────────────────────────────┐
 │ 0–180 MiB  idblock, vendor storage,         │                │ GPT                              │
 │            uboot.itb, U-Boot env            │                │ p1 ssdroot  16 GiB  ext4  →  /   │
-│ p1 BOOT    511 MiB  ext4  → /boot (SHARED)  │◀── kernel ─────│ p2 hqnode   ~43 GiB ext4         │
+│ p1 BOOT    511 MiB  ext4  → /boot (SHARED)  │◀── kernel ─────│ p2 hqnode  ~103 GiB ext4         │
 │            extlinux.conf, Image, initrd,    │    from here   │        → /var/hqnode             │
 │            dtb  — used by BOTH systems      │                │   (images, container disks,      │
 │ p2 ROOTFS  6.6 GiB  ext4                    │                │    swap file)                    │
@@ -565,7 +565,8 @@ For example the U-Boot environment is damaged, or `/boot` is unreadable.
 
 ## 8. Setup, in order
 
-Nothing below has been done yet. Steps 0–1 can be done now; the rest waits for the SSD.
+Steps 0–8 were done on 2026-10-25, except the USB rescue stick and the unplug test; section 9 has what
+was done and what differed from this list. Step 9's hqnode part is still to do.
 
 0. **Safety net first** (no SSD needed):
    - Keep the 180 MiB boot-area copy off the box (taken 2026-10-24; see the hand-over note).
@@ -599,3 +600,66 @@ Nothing below has been done yet. Steps 0–1 can be done now; the rest waits for
    - a restore drill: run `oect-backup` once, then in rescue restore into a scratch directory and diff.
 9. **Main system only:** hqnode, the browser plan's host steps (MPP, `rd-killswitch`, zram + swap file),
    and the `oect-backup.timer` (nightly).
+
+---
+
+## 9. Done on 2026-10-25
+
+The box now runs the main system from the SSD (`oect`), with the eMMC as the rescue system
+(`oect-rescue`). Every step was checked on the box; the results are below.
+
+### 9.1 The SSD
+
+| | |
+|---|---|
+| Drive | Intel 545s (Pro 5450s label), `SSDSC2KF128G8L`, serial `PHLA802303ET128BGN`, firmware `LHFL05N`, 128 GB |
+| Health before use | SMART passed; extended self-test **completed without error**; a full read of all 128 GB at 485 MB/s with no I/O or link errors; reallocated, uncorrectable, end-to-end and CRC counts all 0; wear indicator 90 |
+| Real writes so far | **10.6 TB** (device statistics log: 20 688 264 034 sectors). Attributes 241/242 count in **GiB** on this firmware, not the 32 MiB that smartctl and CrystalDiskInfo assume, so those tools show 32× too little (the seller's "304 GB written") |
+| `p1` `ssdroot` | 16 GiB, ext4, UUID `e778b293-1b64-460e-8056-2a842a4b1a8c` → `/` |
+| `p2` `hqnode` | 103.2 GiB, ext4, UUID `60773114-34b0-4808-bef2-5b9572d4ad6a` → `/var/hqnode` |
+
+The NTFS partitions it arrived with were empty (the seller had formatted them) and were wiped.
+
+### 9.2 What differed from the plan
+
+- **The initrd was rebuilt from this box's own packages.** The one ophub shipped was built on their (Ubuntu)
+  build host, so the new one differs in many files, not only `ssdroot`:
+  - **busybox isn't installed**, so the initramfs uses klibc's tools (`sh`, `cat`, `sleep`, `mount`).
+    It boots fine. `blkid` (util-linux) is there, and `resolve_device` was tested in a chroot of the
+    new initrd before the first reboot;
+  - it now contains **`e2fsck`**. The old one didn't, so `fsck.repair=yes` did nothing before. The root is
+    now checked in the initramfs on every boot (`/run/initramfs/fsck-root`);
+  - `/etc/initramfs-tools/conf.d/compress` sets `COMPRESS=xz`, as shipped (`initramfs.conf` says gzip).
+- After `update-initramfs`, the `99-uboot` hook re-points `/boot/uInitrd` to the `mkimage`-wrapped file.
+  It was pointed back at the plain initrd. `extlinux.conf` doesn't use `/uInitrd` any more, so this only
+  matters if the old file is restored.
+- **`extlinux.conf` keeps the `oect.entry=ssd|emmc` markers**, so `/proc/cmdline` shows which entry
+  booted. `bootsplash.bootfile=…` is kept; `rootflags=data=writeback` is dropped, so both roots are
+  now `data=ordered`.
+- **`/var/hqnode` is `nofail,x-systemd.device-timeout=10s`** in the main `fstab`. A missing `hqnode`
+  partition keeps hqnode from starting (`RequiresMountsFor`) instead of dropping the boot to emergency
+  mode.
+- **The USB rescue stick wasn't made.** Every change was checked first and tested one reboot at a time.
+  Make the stick anyway (7.5): it's still the only hands-free way back if `/boot` ever breaks.
+
+### 9.3 Tests
+
+| Test | Result |
+|---|---|
+| Two labels, both on the eMMC: `DEFAULT ssd`, then `oect-boot emmc` | `oect.entry=ssd`, then `oect.entry=emmc`: **`DEFAULT` works on this U-Boot** |
+| SSD on: `ssdroot=` in `LABEL ssd` | `oect`, `/` = `/dev/sda1`, `/var/hqnode` = `/dev/sda2`, same IP, no failed units, back 47 s after `reboot` |
+| SSD in, `oect-boot emmc` | `oect-rescue` from `mmcblk0p2`, `sda` visible and nothing on it mounted; `oect-boot ssd` → `oect` |
+| `oect-backup` + restore drill | first mirror 63 s, 1.9 GB; restored into a scratch directory and compared by checksum with the live root: only the mount-point directories' times differ |
+| Power off, unplug the SSD, power on | **not done yet**: it needs hands at the box |
+
+### 9.4 On the box now
+
+| Where | What |
+|---|---|
+| eMMC `/boot/extlinux/extlinux.conf` | the two labels; `.orig` is the file as shipped, `.step1` is the version with both labels on the eMMC |
+| eMMC `/boot/initrd.img-6.1.141-rk35xx-ophub.orig` | the initrd as shipped (known to boot) |
+| both roots `/etc/initramfs-tools/scripts/local-top/ssdroot`, `/usr/local/sbin/oect-boot` | 5.3 and 5.4 |
+| main `/usr/local/sbin/oect-backup`, `oect-backup.{service,timer}` | 6.1, nightly at 03:30 (+ up to 30 min). Takes a lock, runs only when `/` is on the SSD, and refuses if less than 1 GiB would stay free on the eMMC |
+| main `/var/hqnode/oect-boot-area/` | the 180 MiB boot-area image of 2026-10-24, sha256 checked (6.2) |
+| rescue `/etc/update-motd.d/01-oect-rescue`, `/root/.bashrc` | red `RESCUE` banner and prompt |
+| both | `nftables` and `passt` installed; `rpcbind`, `nfs-client.target` and `openvpn` disabled |
