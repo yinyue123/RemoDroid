@@ -36,11 +36,14 @@ home = https://www.google.com/
 search = https://duckduckgo.com/?q=%s
 
 # The browser, and anything to add to its command line (space-separated).
+# --disable-gpu-compositing: with no GPU, Chrome otherwise composites every frame through SwiftShader
+# (GL emulated on the CPU). On the OECT that was ~43% of a core with the page idle; Chrome's own
+# software compositor takes ~3%. WebGL stays (SwiftShader still serves it), so pages still see a GPU.
 browser = /opt/cloakbrowser/chrome
 # The system CloakBrowser presents (--fingerprint-platform): windows (its advice on a Linux machine: the
 # most common one, the hardest to single out), macos, or linux.
 platform = windows
-args =
+args = --disable-gpu-compositing
 renderer_process_limit = 2
 # A URL opened from the bar replaces the tab (1), or opens beside it (0).
 one_tab = 1
