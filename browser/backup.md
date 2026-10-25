@@ -565,7 +565,7 @@ For example the U-Boot environment is damaged, or `/boot` is unreadable.
 
 ## 8. Setup, in order
 
-Steps 0–8 were done on 2026-10-25, except the USB rescue stick and the unplug test; section 9 has what
+Steps 0–8 were done on 2026-10-25, except the USB rescue stick; section 9 has what
 was done and what differed from this list. Step 9's hqnode part is still to do.
 
 0. **Safety net first** (no SSD needed):
@@ -650,7 +650,7 @@ The NTFS partitions it arrived with were empty (the seller had formatted them) a
 | SSD on: `ssdroot=` in `LABEL ssd` | `oect`, `/` = `/dev/sda1`, `/var/hqnode` = `/dev/sda2`, same IP, no failed units, back 47 s after `reboot` |
 | SSD in, `oect-boot emmc` | `oect-rescue` from `mmcblk0p2`, `sda` visible and nothing on it mounted; `oect-boot ssd` → `oect` |
 | `oect-backup` + restore drill | first mirror 63 s, 1.9 GB; restored into a scratch directory and compared by checksum with the live root: only the mount-point directories' times differ |
-| Power off, unplug the SSD, power on | **not done yet**: it needs hands at the box |
+| Power off, unplug the SSD, power on | `oect-rescue` on the same IP: `ata1: SATA link down`, then the eMMC root mounted at 27 s instead of ~16 s. SSD back in → `oect` again |
 
 ### 9.4 On the box now
 
