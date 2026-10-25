@@ -15,6 +15,10 @@
 #     ssh -p 36000 root@<oect> 'hqnode pull docker.io/yinyue123/hub:remote-browser-hqnode'
 #
 # (`context deadline exceeded` there is the CLI's own deadline; the pull goes on. Don't retry.)
+# Or from the image fetch-image.sh sideloaded (built by the browser-image workflow):
+#
+#     ARCHIVE=remote-browser-arm64.tar MACHINE=oect ./browser/hqnode/create.sh
+#
 # After this, ./deploy.sh: the settings and the pairing.
 
 set -uo pipefail
@@ -27,6 +31,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 trap panel_cleanup EXIT
 
 IMAGE_REF="${IMAGE_REF:-docker.io/yinyue123/hub:remote-browser-hqnode}"
+# A file in the machine's sideload directory to build from instead of IMAGE_REF (fetch-image.sh).
+ARCHIVE="${ARCHIVE:-}"
 SSH_USERNAME="${SSH_USERNAME:-browser}"
 MACHINE="${MACHINE:-}"
 CONTAINER_NAME="${CONTAINER_NAME:-}"
@@ -102,7 +108,12 @@ main() {
 
     local cname image ssh_user cpu mem disk data quota ports devices
     cname=$(ask "container name" "${CONTAINER_NAME:-browser-${mname}}")
-    image=$(ask "image ref"      "$IMAGE_REF")
+    local source=ref
+    if [[ -n "$ARCHIVE" ]]; then
+        source=archive; image="$ARCHIVE"
+    else
+        image=$(ask "image ref"  "$IMAGE_REF")
+    fi
     ssh_user=$(ask "gateway user" "$SSH_USERNAME")
     cpu=$(ask   "CPU cores"      "$CPU_CORES")
     mem=$(to_bytes  "$(ask "memory" "$MEM")")   || { echo -e "${RED}memory like 1536M${NC}"; exit 1; }
@@ -126,7 +137,7 @@ main() {
     done
 
     local body
-    body=$(printf '{"name":"%s","ssh_username":"%s","ssh_password":"%s","ref":"%s","limits":{"cpu_cores":%s,"mem_bytes":%s,"disk_bytes":%s,"data_bytes":%s,"net_quota_bytes":%s},"ports":[%s]%s}' \
+    body=$(printf '{"name":"%s","ssh_username":"%s","ssh_password":"%s","'"$source"'":"%s","limits":{"cpu_cores":%s,"mem_bytes":%s,"disk_bytes":%s,"data_bytes":%s,"net_quota_bytes":%s},"ports":[%s]%s}' \
         "$(panel_json_str "$cname")" "$(panel_json_str "$ssh_user")" \
         "$(panel_json_str "$cpass")" "$(panel_json_str "$image")" \
         "$cpu" "$mem" "$disk" "$data" "$quota" "$ports_json" \
@@ -135,7 +146,7 @@ main() {
     echo -e "\n${BLUE}=== to create ===${NC}"
     echo "  machine  ${mname} (${mid})"
     echo "  name     ${cname}    gateway user ${ssh_user}"
-    echo "  image    ${image}"
+    echo "  image    ${image} (${source})"
     echo "  limits   ${cpu} cores / $((mem/1024/1024))M memory / $((disk/1024/1024))M root / $((data/1024/1024))M /data"
     echo "  traffic  $((quota/1024/1024/1024))G/month   ports ${ports_json}   devices ${devices:-none}"
     if [[ -z "$ASSUME_YES" ]]; then

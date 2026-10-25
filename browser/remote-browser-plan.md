@@ -888,3 +888,30 @@ the phone's multi-touch path for this computer.
 - **Proxy UDP:** WebRTC through the proxy requires SOCKS5 UDP support on the proxy.
 - **The kill switch's cgroup match:** it depends on pasta's cgroup path per container staying stable.
   `rd-killswitch` re-applies on container restart, and there is the coarser whole-box fallback.
+
+---
+
+## Running on the OECT (2026-10-25)
+
+The remote browser runs on the OECT as hqnode container **`browser-oect`** (`0bb53f608258`), paired with
+the RemoDroid panel at `47.107.89.35:5580` as **browser-oect**.
+
+| Part | As built | Checked |
+|---|---|---|
+| Image | `.github/workflows/browser-image.yml` builds it on GitHub's arm64 runner (under 2 min), encrypted with the `BROWSER_IMAGE_KEY` secret because CloakBrowser's binary licence allows internal Docker images but not redistribution. `browser/hqnode/fetch-image.sh` downloads, decrypts and sideloads it | `localhost/remote-browser-hqnode:arm64`, 1.35 GB unpacked |
+| Container | `ARCHIVE=remote-browser-arm64.tar MACHINE=oect ./browser/hqnode/create.sh`: 4 cores, 1.5 GB, 8 GB root, 4 GB `/data`, `devices: rkmpp` | Xorg, rd-shell, CloakBrowser and the agent run |
+| Encoder | MPP in the container, from BGRA, through the `rkmpp` nodes | **H.265 at 880×1904: 35.5 fps** including drawing. BGRA input and the portrait height both work |
+| Proxy | sing-box on the host (`sing-box-reality.service`, the REALITY servers of `/etc/reality.json`), browser-only port **1090** → the us exit (Los Angeles), private addresses refused, nothing direct. The container reaches it at `192.168.10.1:1090` (pasta's `--map-gw`) | `loc=US`; `timezone = America/Los_Angeles`, `lang = en-US` |
+| Kill switch | `rd-killswitch` with `/etc/rd-killswitch.conf`: `127.0.0.1:1090` (+ UDP for the relay), the RemoDroid server, the host's resolver | Direct internet, the LAN and the other proxy ports refused; proxy, DNS and the agent work |
+
+What the OECT needed on the way:
+- **hqnode's SSH gateway listens on `:2222`**: the host's own sshd keeps 22.
+- **The watchdog daemon isn't real-time** (`realtime = no` in `/etc/watchdog.conf`). The vendor kernel has
+  `CONFIG_RT_GROUP_SCHED=y`, so one real-time task outside the root cgroup keeps cgroup v2's `cpu`
+  controller off, and hqnode then can't start any container (`cpu.max: permission denied`).
+- A create from a 1.3 GB archive outlasts the panel request's timeout (`HTTP 000`); the container is made
+  anyway, stopped. `hqnode start <cid>` once.
+- If the container is ever made anew, put its new cid in `/etc/rd-killswitch.conf`.
+
+Still to do from the build order: the iPhone (steps 6–7: touch, keyboard), measuring `light` against
+`small` (step 8), and the fingerprint and leak tests (step 9).
