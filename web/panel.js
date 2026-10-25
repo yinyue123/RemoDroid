@@ -543,6 +543,7 @@ function renderServer() {
       item({ html: '<span class="txt"><b>Built-in STUN/TURN</b><small>Relays the video when a network blocks a direct path</small></span>', right: `<input class="sw" type="checkbox" data-k="turn_enabled" aria-label="Built-in STUN/TURN" ${cfg.turn_enabled ? 'checked' : ''}>` }),
       cfg.turn_enabled ? item({ act: 'turn_port', html: '<span class="txt"><b>Port (UDP)</b></span>', val: cfg.turn_port }) : '',
       cfg.turn_enabled ? item({ act: 'public_ip', html: '<span class="txt"><b>Public IPv4</b></span>', val: cfg.public_ip || 'not set' }) : '',
+      cfg.turn_enabled ? item({ act: 'turn_login', html: '<span class="txt"><b>Fixed login</b><small>For another server\'s STUN/TURN list to use this relay</small></span>', val: cfg.turn_login || 'none' }) : '',
     ].filter(Boolean), cfg.turn_enabled ? `Open UDP ${esc(cfg.turn_port)} and UDP 49152–49252 (relay ports) in the firewall.` : '');
   } else {
     const t = cfg.turn || {};
@@ -600,6 +601,11 @@ function editServer(what) {
       save: v => { if (v.password !== v.repeat) throw new Error('The new passwords don\'t match'); return patch({ current_password: v.current_password, password: v.password }); } }),
     turn_port: () => sheet({ title: 'STUN/TURN port', fields: [{ k: 'turn_port', label: 'Port (UDP)', type: 'number', value: cfg.turn_port, hint: 'Usually 3478.' }], save: v => patch(v) }),
     public_ip: () => sheet({ title: 'Public IPv4', fields: [{ k: 'public_ip', label: 'Public IPv4 address', value: cfg.public_ip || cfg.host_hint, placeholder: '203.0.113.10', hint: 'On AWS/GCP this is the elastic/external IP, not the private one.' }], save: v => patch(v) }),
+    turn_login: () => sheet({ title: 'Fixed TURN login', fields: [
+      { k: 'username', label: 'Username', value: cfg.turn_login || '', placeholder: 'relay', hint: 'Empty removes it.' },
+      { k: 'password', label: 'Password', type: 'password', placeholder: cfg.turn_login ? 'unchanged' : '' }],
+      note: 'Another RemoDroid server can then list this relay under Other STUN/TURN servers: turn:this-address:port, with this username and password.',
+      save: v => patch({ turn_login: { username: v.username.trim(), password: v.password } }) }),
     turn_on: () => sheet({ title: 'Built-in STUN/TURN', saveLabel: 'Turn on', fields: [
       { k: 'public_ip', label: 'Public IPv4 address', value: cfg.public_ip || (/^\d+\.\d+\.\d+\.\d+$/.test(cfg.host_hint || '') ? cfg.host_hint : ''), placeholder: '203.0.113.10' },
       { k: 'turn_port', label: 'Port (UDP)', type: 'number', value: cfg.turn_port || 3478 }],

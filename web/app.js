@@ -1143,6 +1143,9 @@ $('#turnList').addEventListener('click', e => {
   const b = e.target.closest('.turn-row'); if (!b) return;
   const url = b.dataset.url;
   if (url === (S.turn || '')) { closeSheet(); return; }
+  /* a relay that didn't answer this phone would leave the video with no path: say so, don't switch */
+  if (url && turnMs.get(url) === null) { toast(`${turnName(url).host} didn't answer — check its username and password, or tap Test`); return; }
+  if (url && turnMs.get(url) === 'testing') { toast('Still testing — a moment'); return; }
   S.turn = url; save(); renderTurn(); closeSheet();
   toast(url ? `Relay: ${turnName(url).host} — reconnecting` : 'Relay: Auto — reconnecting');
   reconnectStream();

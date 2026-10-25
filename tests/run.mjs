@@ -34,6 +34,30 @@ async function until(fn, ms = 5000, what = 'condition') {
     await sleep(50);
   }
 }
+/* One TURN Allocate (RFC 8656) with long-term credentials: the 401 challenge, then the signed request.
+ * Resolves to 200 or the error code. */
+function turnAllocate(port, user, pass) {
+  const sock = dgram.createSocket('udp4');
+  const attr = (t, v) => { const h = Buffer.alloc(4); h.writeUInt16BE(t, 0); h.writeUInt16BE(v.length, 2); return Buffer.concat([h, v, Buffer.alloc((4 - v.length % 4) % 4)]); };
+  const msg = (attrs, key) => {
+    const tid = crypto.randomBytes(12), body = Buffer.concat(attrs);
+    const head = len => { const h = Buffer.alloc(20); h.writeUInt16BE(0x0003, 0); h.writeUInt16BE(len, 2); h.writeUInt32BE(0x2112A442, 4); tid.copy(h, 8); return h; };
+    if (!key) return Buffer.concat([head(body.length), body]);
+    const mac = crypto.createHmac('sha1', key).update(Buffer.concat([head(body.length + 24), body])).digest();
+    return Buffer.concat([head(body.length + 24), body, attr(0x0008, mac)]);
+  };
+  const read = b => { const out = {}; for (let o = 20; o + 4 <= b.length;) { const t = b.readUInt16BE(o), l = b.readUInt16BE(o + 2); out[t] = b.subarray(o + 4, o + 4 + l); o += 4 + l + ((4 - l % 4) % 4); } return { type: b.readUInt16BE(0), a: out }; };
+  const code = r => r.type === 0x0103 ? 200 : r.a[0x0009] ? r.a[0x0009][2] * 100 + r.a[0x0009][3] : 0;
+  const transport = attr(0x0019, Buffer.from([17, 0, 0, 0]));
+  const ask = b => new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('no TURN answer')), 3000); sock.once('message', m => { clearTimeout(t); res(read(m)); }); sock.send(b, port, '127.0.0.1'); });
+  return ask(msg([transport])).then(r => {
+    const realm = r.a[0x0014], nonce = r.a[0x0015];
+    if (!realm || !nonce) return code(r);
+    const key = crypto.createHash('md5').update(`${user}:${realm}:${pass}`).digest();
+    return ask(msg([transport, attr(0x0006, Buffer.from(user)), attr(0x0014, realm), attr(0x0015, nonce)], key)).then(code);
+  }).finally(() => sock.close());
+}
+
 function freePort() {
   return new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 }
@@ -112,7 +136,7 @@ function wsConnect(port, pathname, headers = {}) {
 }
 
 async function main() {
-  const httpPort = await freePort(), apiPort = await freePort(), barkPort = await freePort();
+  const httpPort = await freePort(), apiPort = await freePort(), barkPort = await freePort(), turnPort = await freePort();
   const barkReqs = [];
   const barkSrv = http.createServer((req, res) => { let b = ''; req.on('data', d => b += d);
     req.on('end', () => { barkReqs.push({ url: req.url, body: b, ctype: req.headers['content-type'] }); res.writeHead(200); res.end('{"code":200}'); }); });
@@ -144,6 +168,8 @@ uionly = ${sha(uiToken)} ui
 [turn]
 urls = turn:127.0.0.1:3478?transport=udp
 shared_secret = turnsecret
+listen = 127.0.0.1:${turnPort}
+users = fixed:fixedpw
 credential_ttl_minutes = 60
 [ice]
 extra = turn:192.0.2.9:3478?transport=udp alt altpw
@@ -435,6 +461,13 @@ interval_seconds = 2
   ok((await until(() => barkReqs[2], 5000, 'bark per-router')).url === '/routerKey1234', 'the router\'s own URL wins over [notify] bark_url');
   r = await devPatch({ bark_url: '' });
   ok(r.status === 200 && (await r.json()).notify.bark_url === '' && !/routerKey/.test(fs.readFileSync(path.join(dir, 'server.ini'), 'utf8')), 'clearing it falls back to the server default');
+
+  console.log('turn: fixed logins and REST credentials');
+  ok(await turnAllocate(turnPort, 'fixed', 'fixedpw') === 200, 'a fixed TURN login ([turn] users) gets a relay');
+  ok(await turnAllocate(turnPort, 'fixed', 'wrong') === 401, 'a fixed login with the wrong password is refused');
+  const restUser = `${Math.floor(Date.now() / 1000) + 600}:me`;
+  ok(await turnAllocate(turnPort, restUser, crypto.createHmac('sha1', 'turnsecret').update(restUser).digest('base64')) === 200, 'a TURN REST login still gets a relay');
+  ok(await turnAllocate(turnPort, 'admin', 'fixedpw') === 401, 'a name that is no fixed login and no REST username is refused');
 
   console.log('session: signaling, UDP relay');
   viewer.send({ t: 'session.request', id: 1, d: { device: 'router1', quality: { mode: 'auto', codec: 'auto' } } });

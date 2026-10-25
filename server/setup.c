@@ -83,6 +83,9 @@ static cJSON *current(const http_req_t *r, const char *user)
     cJSON_AddBoolToObject(j, "turn_enabled", *tl != 0);
     cJSON_AddNumberToObject(j, "turn_port", listen_port(tl, 3478));
     cJSON_AddStringToObject(j, "public_ip", rd_conf_get(S.conf, "turn", "public_ip", ""));
+    char tlu[65] = ""; /* the fixed TURN login's name ([turn] users = name:password, …); never its password */
+    sscanf(rd_conf_get(S.conf, "turn", "users", ""), " %64[^:, ]", tlu);
+    cJSON_AddStringToObject(j, "turn_login", tlu);
     cJSON_AddStringToObject(j, "ice_extra", rd_conf_get(S.conf, "ice", "extra", ""));
     size_t hl = 0;
     const char *h = r ? req_header(r, "Host", &hl) : NULL;
@@ -353,6 +356,24 @@ static void settings_patch(conn_t *c, cJSON *in, const char *user)
         }
     }
 
+    /* the built-in TURN's fixed login, for other servers' viewers and agents: {username, password};
+     * an empty username removes it, an empty password keeps the one this name has */
+    char tlogin[300] = "";
+    cJSON *tl_in = cJSON_GetObjectItemCaseSensitive(in, "turn_login");
+    if (tl_in) {
+        const char *lu = msg_str(tl_in, "username", ""), *lp = msg_str(tl_in, "password", "");
+        char oldp[160] = "", oldu[65] = "";
+        sscanf(rd_conf_get(S.conf, "turn", "users", ""), " %64[^:, ]:%159[^, ]", oldu, oldp);
+        if (*lu && !*lp && !strcmp(lu, oldu))
+            lp = oldp;
+        if (*lu && (!ice_token_ok(lu, 64) || strchr(lu, ':') || !*lp || !ice_token_ok(lp, 128))) {
+            http_error(c, 400, "bad_request", "the TURN login needs a name (no spaces, commas or colons) and a password (no spaces or commas)");
+            return;
+        }
+        if (*lu)
+            snprintf(tlogin, sizeof tlogin, "%s:%s", lu, lp);
+    }
+
     /* the ICE list: entries without a credential keep the one they had ("was" = their old URL) */
     char extra[2048] = "";
     cJSON *list = cJSON_GetObjectItemCaseSensitive(in, "ice_servers");
@@ -465,6 +486,8 @@ static void settings_patch(conn_t *c, cJSON *in, const char *user)
     }
     if (list) /* read for every new session: no restart */
         ok &= set_if_changed("ice", "extra", *extra ? extra : NULL, &changed) == 0;
+    if (tl_in) /* read by the TURN server for every allocation: no restart */
+        ok &= set_if_changed("turn", "users", *tlogin ? tlogin : NULL, &changed) == 0;
     int relogin = 0;
     if (account) {
         char *hash = *pw ? auth_hash_password(pw) : rd_strdup(old_hash);

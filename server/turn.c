@@ -1,6 +1,9 @@
 /* Built-in TURN relay (RFC 8656, UDP only) so the AWS server needs no coturn.
- * Credentials use the TURN REST format the control server already hands out:
- * username "<expiry>:<user>", password base64(HMAC-SHA1(shared_secret, username)).
+ * Two kinds of long-term credentials:
+ *  - the TURN REST format the control server hands out: username "<expiry>:<user>", password
+ *    base64(HMAC-SHA1(shared_secret, username));
+ *  - fixed logins, as coturn's user= lines: [turn] users = name:password, … (for another server's
+ *    viewers and agents to use this relay, entered there as an ordinary TURN username and password).
  * Also answers plain STUN Binding requests (server-reflexive candidates). */
 #include <arpa/inet.h>
 #include <errno.h>
@@ -109,7 +112,28 @@ static void error(const struct sockaddr_storage *to, const stun_view_t *v, int c
     reply(to, &m);
 }
 
-/* Long-term credentials with TURN REST usernames. Returns 1 when authenticated. */
+/* A fixed login's password from [turn] users = name:password, … (split at the first ':'). */
+static int fixed_pass(const char *user, char *pass, size_t cap)
+{
+    char *list = rd_strdup(rd_conf_get(S.conf, "turn", "users", "")), *save = NULL;
+    int found = 0;
+    for (char *e = strtok_r(list, ",", &save); e && !found; e = strtok_r(NULL, ",", &save)) {
+        e += strspn(e, " \t");
+        char *c = strchr(e, ':');
+        if (!c || c == e)
+            continue;
+        *c++ = 0;
+        c[strcspn(c, " \t")] = 0;
+        if (*c && !strcmp(e, user)) {
+            snprintf(pass, cap, "%s", c);
+            found = 1;
+        }
+    }
+    free(list);
+    return found;
+}
+
+/* Long-term credentials: a fixed login, else a TURN REST username. Returns 1 when authenticated. */
 static int authenticate(const struct sockaddr_storage *from, const stun_view_t *v, uint8_t key[16], char *user, size_t ucap)
 {
     size_t ul, nl;
@@ -123,15 +147,17 @@ static int authenticate(const struct sockaddr_storage *from, const stun_view_t *
         return 0;
     }
     snprintf(user, ucap, "%.*s", (int)RD_MIN(ul, ucap - 1), (const char *)u);
-    unsigned long long expiry = strtoull(user, NULL, 10);
-    if (!S.turn_secret || !*S.turn_secret || expiry * 1000 < rd_now_ms()) {
-        error(from, v, 401, "Unauthorized", 1);
-        return 0;
+    char pass[160];
+    if (!fixed_pass(user, pass, sizeof pass)) {
+        unsigned long long expiry = strtoull(user, NULL, 10);
+        if (!S.turn_secret || !*S.turn_secret || expiry * 1000 < rd_now_ms()) {
+            error(from, v, 401, "Unauthorized", 1);
+            return 0;
+        }
+        uint8_t mac[20];
+        rd_hmac_sha1(S.turn_secret, strlen(S.turn_secret), user, strlen(user), mac);
+        rd_b64_encode(mac, sizeof mac, pass, sizeof pass);
     }
-    uint8_t mac[20];
-    char pass[64];
-    rd_hmac_sha1(S.turn_secret, strlen(S.turn_secret), user, strlen(user), mac);
-    rd_b64_encode(mac, sizeof mac, pass, sizeof pass);
     stun_lt_key(user, T.realm, pass, key);
     if (!stun_check_integrity(v, key, 16)) {
         error(from, v, 401, "Unauthorized", 1);
@@ -458,7 +484,7 @@ int turn_start(void)
     ev_timer_start(S.loop, &T.sweep);
     LOGI("turn: relay on udp %s, ports %d-%d%s%s", listen, T.min_port, T.max_port, T.have_public ? ", public IP " : "",
          T.have_public ? pub : "");
-    if (!S.turn_secret || !*S.turn_secret)
-        LOGW("turn: [turn] shared_secret is empty; allocations will be refused");
+    if ((!S.turn_secret || !*S.turn_secret) && !*rd_conf_get(S.conf, "turn", "users", ""))
+        LOGW("turn: [turn] shared_secret and users are empty; allocations will be refused");
     return 0;
 }
