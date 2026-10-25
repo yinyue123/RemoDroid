@@ -894,7 +894,7 @@ the phone's multi-touch path for this computer.
 ## Running on the OECT (2026-10-25)
 
 The remote browser runs on the OECT as hqnode container **`browser-oect`** (`d1300c7e471d`), paired with
-the RemoDroid panel at `47.107.89.35:5580` as **browser-oect**.
+the RemoDroid panel at **https://rm.11100.top** as **browser-oect** (first paired with `47.107.89.35:5580`).
 
 | Part | As built | Checked |
 |---|---|---|
@@ -902,7 +902,7 @@ the RemoDroid panel at `47.107.89.35:5580` as **browser-oect**.
 | Container | `ARCHIVE=remote-browser-arm64.tar MACHINE=oect NODE_SSH=root@192.168.10.15 ./browser/hqnode/create.sh`: 64 cores (no CPU limit in effect) and 4 GB of memory (all the box has), 10 GB root and 10 GB `/data` (both grown live: `hqnode portal set browser-oect --disk 10G --data 10G`), `devices: rkmpp` | Xorg, rd-shell, CloakBrowser and the agent run |
 | Encoder | MPP in the container, from BGRA, through the `rkmpp` nodes | **H.265 at 880×1904: 35.5 fps** including drawing. BGRA input and the portrait height both work |
 | Proxy | sing-box on the host (`sing-box-reality.service`, the REALITY servers of `/etc/reality.json`), browser-only port **1090** → the us exit (Los Angeles), private addresses refused, nothing direct. The container reaches it at `192.168.10.1:1090` (pasta's `--map-gw`) | `loc=US`; `timezone = America/Los_Angeles`, `lang = en-US` |
-| Kill switch | `rd-killswitch` with `/etc/rd-killswitch.conf`: `127.0.0.1:1090` (+ UDP for the relay), the RemoDroid server, the host's resolver | Direct internet, the LAN and the other proxy ports refused; proxy, DNS and the agent work |
+| Kill switch | `rd-killswitch` with `/etc/rd-killswitch.conf`: `127.0.0.1:1090` (+ UDP for the relay), the RemoDroid server rm.11100.top (156.245.236.182), the host's resolver | Direct internet, the LAN and the other proxy ports refused; proxy, DNS and the agent work |
 
 What the OECT needed on the way:
 - **hqnode's SSH gateway listens on `:2222`**: the host's own sshd keeps 22.
