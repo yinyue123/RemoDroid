@@ -902,7 +902,7 @@ the RemoDroid panel at **https://rm.11100.top** as **browser-oect** (first paire
 | Container | `ARCHIVE=remote-browser-arm64.tar MACHINE=oect NODE_SSH=root@192.168.10.15 ./browser/hqnode/create.sh`: 64 cores (no CPU limit in effect) and 4 GB of memory (all the box has), 10 GB root and 10 GB `/data` (both grown live: `hqnode portal set browser-oect --disk 10G --data 10G`), `devices: rkmpp` | Xorg, rd-shell, CloakBrowser and the agent run |
 | Encoder | MPP in the container, from BGRA, through the `rkmpp` nodes | **H.265 at 880×1904: 35.5 fps** including drawing. BGRA input and the portrait height both work |
 | Proxy | sing-box on the host (`sing-box-reality.service`, the REALITY servers of `/etc/reality.json`), browser-only port **1090** → the us exit (Los Angeles), private addresses refused, nothing direct. The container reaches it at `192.168.10.1:1090` (pasta's `--map-gw`) | `loc=US`; `timezone = America/Los_Angeles`, `lang = en-US` |
-| Kill switch | `rd-killswitch` with `/etc/rd-killswitch.conf`: `127.0.0.1:1090` (+ UDP for the relay), the RemoDroid server rm.11100.top (156.245.236.182), the host's resolver | Direct internet, the LAN and the other proxy ports refused; proxy, DNS and the agent work |
+| Kill switch | `rd-killswitch` with `/etc/rd-killswitch.conf`: `127.0.0.1:1090` (+ UDP for the relay), the RemoDroid server rm.11100.top (156.245.236.182, TCP 443), TURN/STUN on port 3478 of **any public address** (`allow = udp public 3478`: the TURN servers are picked in the panel's settings, so switching them needs no change here), the host's resolver | Direct internet, the LAN and the other proxy ports refused; proxy, DNS and the agent work |
 
 What the OECT needed on the way:
 - **hqnode's SSH gateway listens on `:2222`**: the host's own sshd keeps 22.
@@ -918,6 +918,11 @@ What the OECT needed on the way:
 - Limits: 64 cores, far above the box's 4: in effect none. Memory 4 GB, the box's whole RAM (throttled from 3.6 GB, `memory.high`). The panel has no "no
   limit" (a zero means "keep the default").
 - If the container is ever made anew, put its new cid in `/etc/rd-killswitch.conf`.
+- **WebRTC and the GFW.** The OECT and the iPhone are both in China; with rm.11100.top's TURN (Taiwan) as
+  the only relay the video went China → Taiwan → China, and sessions died 15-45 s in (`ice: disconnected`,
+  then `ice_failed`): the GFW cuts a steady UDP flow to a foreign server. Pick a TURN server inside China in
+  the panel's "Other STUN/TURN servers" and untick the foreign one; the kill switch already lets the agent
+  reach any public TURN on 3478.
 
 Still to do from the build order: the iPhone (steps 6–7: touch, keyboard), measuring `light` against
 `small` (step 8), and the fingerprint and leak tests (step 9).

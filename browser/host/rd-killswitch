@@ -18,6 +18,9 @@
 #   allow = udp 203.0.113.10
 #   allow = tcp 198.51.100.7 443       the RemoDroid panel (the agent's WebSocket)
 #   allow = udp 198.51.100.7 3478      its TURN server (WebRTC then always relays)
+#   allow = udp public 3478            "public": any address that isn't private, loopback, link-local or
+#                                      CGNAT (IPv4 and IPv6) — here, whichever TURN servers the panel
+#                                      hands out today, so they can be switched there without this file
 #   allow = udp 192.168.10.1 53        the resolver pasta forwards the container's DNS to (the agent
 #                                      looks the panel up; the browser resolves nothing itself)
 #   scope = container                  or "box": every outgoing connection of the whole host is held to
@@ -47,13 +50,20 @@ rules() {
 	echo "  chain allow {"
 	echo "    ct state established,related accept"
 	val allow | while read -r proto addr port; do
-		case "$addr" in *:*) fam=ip6 ;; *) fam=ip ;; esac
 		case "$proto" in tcp|udp) ;; *) echo "rd-killswitch: bad allow line: $proto $addr $port" >&2; exit 1 ;; esac
-		if [ -n "$port" ]; then
-			echo "    $fam daddr $addr $proto dport $port accept"
+		if [ "$addr" = public ]; then
+			set -- "ip daddr != { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/3 }" \
+				"ip6 daddr != { ::/127, ::ffff:0:0/96, fc00::/7, fe80::/10, ff00::/8 }"
 		else
-			echo "    $fam daddr $addr meta l4proto $proto accept"
+			case "$addr" in *:*) set -- "ip6 daddr $addr" ;; *) set -- "ip daddr $addr" ;; esac
 		fi
+		for match in "$@"; do
+			if [ -n "$port" ]; then
+				echo "    $match $proto dport $port accept"
+			else
+				echo "    $match meta l4proto $proto accept"
+			fi
+		done
 	done
 	echo "    counter drop comment \"everything else\""
 	echo "  }"
