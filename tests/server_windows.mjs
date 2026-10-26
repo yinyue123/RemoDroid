@@ -19,6 +19,7 @@ const WIN = process.platform === 'win32';
 const EXE = path.join(BIN, 'remodroid-server' + (WIN ? '.exe' : ''));
 const VERBOSE = !!process.env.VERBOSE;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'remodroid-win-'));
+const ini = path.join(dir, 'server.ini');
 const procs = [];
 let failures = 0, passes = 0;
 const ok = (c, name) => { if (c) { passes++; console.log('  ✓ ' + name); } else { failures++; console.log('  ✗ ' + name); } };
@@ -83,7 +84,6 @@ function turnAllocate(port, user, pass) {
 
 async function main() {
   const p1 = await freePort(), p2 = await freePort(), tp = await freePort();
-  const ini = path.join(dir, 'server.ini');
   fs.writeFileSync(ini, `[server]\nstate_dir = ${dir}/state\n[http]\nlisten = 127.0.0.1:${p1}\nweb_root = ${ROOT}/web\n`);
   const A = `http://127.0.0.1:${p1}`, B = `http://127.0.0.1:${p2}`;
 
@@ -170,6 +170,12 @@ async function main() {
 }
 
 main().catch(e => { failures++; console.log('  ✗ ' + e.message); }).finally(() => {
+  if (failures) { /* why a server did not come up: how they ended, and the server itself, unsupervised */
+    const code = c => c === null ? 'running' : 'exit code ' + (c > 0xffff ? '0x' + (c >>> 0).toString(16) : c); /* 0xc0000005: a crash */
+    procs.forEach((p, i) => console.log(`--- process ${i}: ${code(p.exitCode)}`));
+    const r = spawnSync(EXE, ['-c', ini], { env: { ...process.env, RD_SUPERVISED: '1' }, input: 'stop\n', encoding: 'utf8', timeout: 5000 });
+    console.log(`--- the server without its supervisor: ${r.error ? r.error.message : code(r.status)}\n${r.stdout}${r.stderr}`);
+  }
   for (const p of procs) p.kill();
   if (failures || VERBOSE)
     for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.log')))
