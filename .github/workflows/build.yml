@@ -170,6 +170,11 @@ jobs:
           sudo udevadm control --reload-rules
           sudo chmod 666 /dev/uinput
           python3 tests/e2e_desktop.py --bin build/host
+      - name: End to end, files and clipboard (the GTK app; a real drag onto its window)
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get install -y --no-install-recommends xdotool dbus python3-gi gir1.2-gtk-3.0 >/dev/null
+          python3 tests/e2e_files.py --bin build/host
       - uses: actions/upload-artifact@v5
         with:
           name: desktop-linux-${{ matrix.arch }}

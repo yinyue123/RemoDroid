@@ -193,6 +193,7 @@ notify = false
                 launch["executable_path"] = args.chrome
             browser = await p.chromium.launch(**launch)
             ctx = await browser.new_context(viewport={"width": 1280, "height": 720})
+            await ctx.grant_permissions(["clipboard-read", "clipboard-write"], origin=f"http://127.0.0.1:{http_port}")
             await ctx.add_init_script("""(() => { const O = window.RTCPeerConnection; window.__pcs = [];
                 window.RTCPeerConnection = class extends O { constructor(...a) { super(...a); window.__pcs.push(this); } }; })()""")
             page = await ctx.new_page()
@@ -281,12 +282,14 @@ notify = false
             ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keycode"] == 54)
             res["ctrl_c_ok"] = bool(ev and ev["state"] & 4)
             await page.locator("#sheet-keys button[data-close]").click()
-            # clipboard: the computer copies → the viewer's clip bar shows it
+            # clipboard: the computer copies → this clipboard by itself, or the clip bar where the browser
+            # doesn't let the page write it (tests/e2e_files.py checks the automatic sync both ways)
             probe.send("setclip copied on linux")
             await probe.wait(lambda e: e["ev"] == "setclip")
             try:
-                await page.wait_for_function("() => (document.querySelector('#clipbarText') || {}).textContent === 'copied on linux'",
-                                             timeout=8000)
+                await page.wait_for_function(
+                    "async () => (document.querySelector('#clipbarText') || {}).textContent === 'copied on linux'"
+                    " || await navigator.clipboard.readText().catch(() => '') === 'copied on linux'", timeout=8000)
                 res["clip_to_viewer"] = True
             except Exception:
                 res["clip_to_viewer"] = False
