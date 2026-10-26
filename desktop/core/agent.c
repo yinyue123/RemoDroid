@@ -787,6 +787,36 @@ static void do_end(void *arg)
 
 void rd_agent_end_session(void) { rd_rtc_call(do_end, NULL); }
 
+typedef struct {
+    int n;
+    char **paths;
+} offer_t;
+
+static void do_offer(void *arg)
+{
+    offer_t *o = arg;
+    if (session_offer_files((const char *const *)o->paths, o->n) < 0)
+        LOGW("files: nobody is viewing; nothing sent");
+    for (int i = 0; i < o->n; i++)
+        free(o->paths[i]);
+    free(o->paths);
+    free(o);
+}
+
+int rd_agent_send_files(const char *const *paths, int n)
+{
+    rd_status_t st;
+    rd_agent_status(&st);
+    if (st.state != RD_IN_SESSION || n <= 0)
+        return -1;
+    offer_t *o = calloc(1, sizeof *o);
+    o->paths = calloc((size_t)n, sizeof *o->paths);
+    for (int i = 0; i < n; i++)
+        o->paths[o->n++] = rd_strdup(paths[i]);
+    rd_rtc_call(do_offer, o);
+    return 0;
+}
+
 static void do_confirm(void *arg) { start_held(arg != NULL); }
 
 void rd_agent_confirm(int allow) { rd_rtc_call(do_confirm, allow ? (void *)1 : NULL); }

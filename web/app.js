@@ -401,12 +401,14 @@ function onChannel(label, data) {
     st.ready = d;
     st.screen = d.screen || st.screen;
     PAD.sent = []; /* a new session starts with no pads plugged in */
+    offerQ.length = 0; offerBusy = 0; /* the computer's offers ended with the last session */
     $('#disc').hidden = true; ball.hidden = !!openId;
     toast(`Connected · ${codecLabel()}${d.caps && d.caps.view_only ? ' · view only' : ''}`);
     if (desk()) { renderQuickKeys(); if (document.fullscreenElement) lockKeys(true); }
     if (S.mode !== 'auto' || S.preset !== '720p') sendCtrl('quality.set', quality());
     if (!S.sound && d.caps && d.caps.audio) sendCtrl('audio.set', { on: false }); /* keep the phone's speaker */
     syncMenuStates();
+    syncClip();
     break;
   case 'audio.state': st.audioOn = d.on; syncMenuStates(); break;
   case 'quality.state': st.quality = d; break;
@@ -417,6 +419,7 @@ function onChannel(label, data) {
   case 'logcat.lines': { const s = st.logStreams.get(d.stream); if (s) s(d.lines || []); break; }
   case 'file.progress': { const u = uploads.get(d.xfer); if (u) u.phoneBytes = d.bytes; break; }
   case 'file.done': { const p = st.pulls.get(d.xfer); if (p) finishPull(d.xfer); break; }
+  case 'file.offer': receiveOffer(d.files || []); break;
   case 'ack': case 'error': {
     const p = st.pending.get(m.id);
     if (p) { st.pending.delete(m.id); m.t === 'ack' ? p.res(d) : p.rej(Object.assign(new Error(d.msg || d.code), d)); }
@@ -1190,9 +1193,39 @@ function androidCopied(text) {
   androidClip = text; pushHist('android', text);
   if (openId === 'clip') refreshClip();
   if (!S.clipSync) return;
-  $('#clipbarText').textContent = text; $('#clipbar').hidden = false;
-  clearTimeout(clipbarTimer); clipbarTimer = setTimeout(() => { $('#clipbar').hidden = true; }, 12000);
+  autoCopy(text).then(ok => {
+    if (ok) { $('#clipbar').hidden = true; return; }
+    $('#clipbarText').textContent = text; $('#clipbar').hidden = false; /* Safari: copying needs a tap */
+    clearTimeout(clipbarTimer); clipbarTimer = setTimeout(() => { $('#clipbar').hidden = true; }, 12000);
+  });
 }
+
+/* Automatic sync, where the browser allows it (Chrome, Edge; https): what the device copies lands in
+ * this clipboard, and what was copied here goes to the device whenever this page gets the focus back.
+ * Safari and Firefox ask before every read, so there the bar above and the Clipboard sheet remain. */
+let localClip = null, pendingCopy = null;
+async function autoCopy(text) {
+  pendingCopy = text;
+  if (!window.isSecureContext || !navigator.clipboard || !navigator.clipboard.writeText || !document.hasFocus()) return false;
+  try { await navigator.clipboard.writeText(text); localClip = text; pendingCopy = null; return true; } catch (_) { return false; }
+}
+async function canReadClip() {
+  if (!window.isSecureContext || !navigator.clipboard || !navigator.clipboard.readText || !navigator.permissions) return false;
+  try { return (await navigator.permissions.query({ name: 'clipboard-read' })).state !== 'denied'; } catch (_) { return false; }
+}
+async function syncClip() {
+  if (!S.clipSync || !st.ready || !document.hasFocus()) return;
+  let text = null;
+  if (await canReadClip()) try { text = await navigator.clipboard.readText(); } catch (_) {}
+  if (text && text !== localClip && text !== androidClip) { /* copied here since: to the device */
+    localClip = text; pendingCopy = null;
+    sendCtrl('clip.set', { text }, true).then(() => { androidClip = text; pushHist('iphone', text); if (openId === 'clip') refreshClip(); }).catch(() => {});
+  } else if (pendingCopy && await autoCopy(pendingCopy)) { /* the device copied while this page was in the back */
+    $('#clipbar').hidden = true;
+  }
+}
+window.addEventListener('focus', () => { syncClip(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncClip(); });
 $('#clipbarCopy').addEventListener('click', () => copyText(androidClip).then(ok => { toast(ok ? 'Copied to iPhone clipboard' : 'Copy blocked — open Clipboard to copy'); $('#clipbar').hidden = true; }));
 $('#clipbarClose').addEventListener('click', () => { $('#clipbar').hidden = true; });
 $('#clipSim').hidden = !DEMO;
@@ -1690,7 +1723,7 @@ function addUpload(f) {
   const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
   const name = /^image\.(jpe?g|heic|png)$/i.test(f.name) || !f.name ? `IMG_${stamp()}.${ext}` : f.name;
   const img = el('img', { alt: '' });
-  try { img.src = URL.createObjectURL(f); } catch (_) {}
+  if (!f.type || f.type.startsWith('image/')) try { img.src = URL.createObjectURL(f); } catch (_) {}
   const meta = el('div', { class: 'meta', text: `${fmtSize(f.size)} · ${f.type || 'image'} · waiting` });
   const fill = el('i'), stp = el('span', { class: 'pill', text: 'Queued' });
   $('#queue').prepend(el('li', { class: 'qi' }, img, el('div', { style: 'min-width:0' }, el('div', { class: 'nm', text: name }), meta, el('div', { class: 'bar' }, fill)), stp));
@@ -1732,6 +1765,33 @@ async function pumpUploads() {
   uploading = false;
 }
 
+/* ---- drop files on the viewer: they go to the device (computers: its upload folder) ---- */
+let dragDepth = 0;
+const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+window.addEventListener('dragenter', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  if (dragDepth++ === 0) {
+    const who = (st.device && st.device.name) || 'the device';
+    $('#dropzoneText').textContent = st.ready ? `Drop to send to ${who}` : `Not connected to ${who}`;
+    $('#dropzone').hidden = false;
+  }
+});
+window.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = st.ready ? 'copy' : 'none'; } });
+window.addEventListener('dragleave', e => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; $('#dropzone').hidden = true; } });
+window.addEventListener('drop', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0; $('#dropzone').hidden = true;
+  const files = Array.from(e.dataTransfer.files || []).filter(f => f.size > 0 || f.type); /* folders arrive as empty, typeless entries */
+  if (!st.ready) { toast('Not connected — nothing sent'); return; }
+  if (!files.length) { toast('Only files can be sent, not folders'); return; }
+  for (const f of files) addUpload(f);
+  pumpUploads();
+  const who = (st.device && st.device.name) || 'the device';
+  toast(files.length === 1 ? `Sending ${files[0].name} to ${who}` : `Sending ${files.length} files to ${who}`);
+});
+
 /* computers: the agent's upload folder (session.ready), "~" until it is known */
 const uploadDir = () => (st.ready && st.ready.upload_dir) || '~/Downloads/RemoDroid';
 
@@ -1746,17 +1806,37 @@ function onFileChunk(u8) {
 }
 function finishPull(xfer) {
   const p = st.pulls.get(xfer); st.pulls.delete(xfer);
-  const blob = new Blob(p.parts), a = el('a', { href: URL.createObjectURL(blob), download: p.name });
+  const url = URL.createObjectURL(new Blob(p.parts)), a = el('a', { href: url, download: p.name });
   document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
   if (p.meta) p.meta.textContent = fmtSize(p.size) + ' · saved';
   toast(p.name + ' downloaded');
+  if (p.done) p.done();
 }
-async function pull(path, name, meta) {
+async function pull(path, name, meta, done) {
   const xfer = xferId++;
   try {
     const r = await sendCtrl('file.pull', { xfer, path }, true);
-    st.pulls.set(xfer, { name, size: r.size || 0, parts: [], got: 0, meta });
-  } catch (e) { toast(e.msg || e.message); }
+    st.pulls.set(xfer, { name, size: r.size || 0, parts: [], got: 0, meta, done });
+  } catch (e) { toast(`${name}: ${e.msg || e.message}`); if (done) done(); }
+}
+
+/* ---- files the person at the computer dropped on its RemoDroid window: saved here at once ---- */
+const offerQ = [];
+let offerBusy = 0;
+function receiveOffer(files) {
+  if (!files.length) return;
+  const n = files.length, who = (st.device && st.device.name) || 'the computer';
+  toast(n === 1 ? `Receiving ${files[0].name} from ${who}` : `Receiving ${n} files from ${who}`);
+  offerQ.push(...files);
+  pumpOffers();
+}
+function pumpOffers() {
+  while (offerBusy < 3 && offerQ.length) {
+    const f = offerQ.shift();
+    offerBusy++;
+    pull(f.path, f.name, null, () => { offerBusy--; pumpOffers(); });
+  }
 }
 
 /* ================= settings (all of them) ================= */
@@ -1879,7 +1959,7 @@ function renderTab(id) {
     add(group('Sound',
       toggleRow('audio', 'Play the phone\'s sound here', 'Like scrcpy: the phone\'s speaker goes quiet while you\'re connected. Android 12 or newer.')));
     add(group('Clipboard',
-      toggleRow('clipSync', 'Clipboard sync', 'Show copied Android text here, ready to copy with one tap'),
+      toggleRow('clipSync', 'Clipboard sync', 'Copied text goes both ways by itself (Chrome, Edge); elsewhere it shows here, ready to copy with one tap'),
       toggleRow('autoPaste', 'Paste into focused field after sending')));
     add(group('Safety', stepRow('overheat', 'Overheat alert', 35, 60, 1, ' °C', 'Warn when the battery gets hotter than this.')));
     const confirmBox = el('div', { class: 'confirm', hidden: '' },

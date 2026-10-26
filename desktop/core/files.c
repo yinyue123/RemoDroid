@@ -41,6 +41,11 @@ typedef struct {
 } xfer_t;
 
 static xfer_t X[MAX_XFERS];
+/* files the person at the computer offered this session (dropped on the app's window): the
+ * viewer may pull these wherever they are */
+#define MAX_OFFERED 64
+static char offered[MAX_OFFERED][1024];
+static int noffered;
 static ev_timer pump_timer;
 static int pump_inited;
 
@@ -352,7 +357,44 @@ void files_cancel_all(void)
     for (int i = 0; i < MAX_XFERS; i++)
         if (X[i].used)
             close_xfer(&X[i], 1);
+    noffered = 0;
     files_pump();
+}
+
+static int was_offered(const char *in, char *out, size_t cap)
+{
+    if (normalize(in, out, cap) < 0)
+        return 0;
+    for (int i = 0; i < noffered; i++)
+        if (!strcmp(offered[i], out))
+            return 1;
+    return 0;
+}
+
+cJSON *files_offer(const char *const *paths, int n)
+{
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < n; i++) {
+        char p[1024];
+        stat_t st;
+        if (normalize(paths[i], p, sizeof p) < 0 || STAT(p, &st) < 0 || !IS_REG(st.st_mode)) {
+            LOGW("files: not sending %s (folders aren't sent, only files)", paths[i]);
+            continue;
+        }
+        if (noffered == MAX_OFFERED) /* the oldest offers make room */
+            memmove(offered[0], offered[1], sizeof offered[0] * (MAX_OFFERED - 1)), noffered--;
+        snprintf(offered[noffered++], sizeof offered[0], "%s", p);
+        cJSON *f = cJSON_CreateObject();
+        cJSON_AddStringToObject(f, "path", p);
+        cJSON_AddStringToObject(f, "name", base_name(p));
+        cJSON_AddNumberToObject(f, "size", (double)st.st_size);
+        cJSON_AddItemToArray(arr, f);
+    }
+    if (!cJSON_GetArraySize(arr)) {
+        cJSON_Delete(arr);
+        return NULL;
+    }
+    return arr;
 }
 
 #define FAIL(c, ...)                                                                                                   \
@@ -421,7 +463,8 @@ cJSON *files_control(const char *t, cJSON *d, char *code, size_t codecap, char *
 {
     const char *in = msg_str(d, "path", "");
     char path[1024] = "";
-    if (*in && !allowed(in, path, sizeof path) && strcmp(t, "file.push"))
+    if (*in && !allowed(in, path, sizeof path) && strcmp(t, "file.push") &&
+        !(!strcmp(t, "file.pull") && was_offered(in, path, sizeof path)))
         FAIL("forbidden", "the path must be inside your home folder (%s)", rd_home_dir());
     if (!strcmp(t, "file.list")) {
         if (!*in)

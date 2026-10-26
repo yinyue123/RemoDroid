@@ -52,6 +52,9 @@ html.lc #video,html.lc #screen{opacity:.4;outline:3px solid #ff0;outline-offset:
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(92,208,141,.18)}
 .dot.warn{background:var(--warn);box-shadow:0 0 0 3px rgba(241,182,76,.18)}
 
+.dropzone{position:fixed;z-index:70;inset:12px;border:3px dashed rgba(255,255,255,.75);border-radius:18px;background:rgba(10,132,255,.22);display:flex;align-items:center;justify-content:center;pointer-events:none}
+.dropzone span{color:#fff;font-size:20px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.6);padding:0 24px;text-align:center}
+.dropzone[hidden]{display:none}
 .clipbar{position:fixed;z-index:26;top:calc(env(safe-area-inset-top,0px) + 50px);left:50%;transform:translateX(-50%);
   width:min(560px,calc(100% - 24px));display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-radius:14px;
   background:var(--glass);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 10px 30px rgba(0,0,0,.45);animation:drop .2s ease-out}

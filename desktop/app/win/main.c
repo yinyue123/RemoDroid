@@ -29,7 +29,7 @@
 enum {
     ID_STATUS = 100, ID_VIEWER, ID_DISCONNECT, ID_VIEWONLY, ID_OPEN, ID_WINDOW, ID_LOG, ID_LOGIN, ID_ADMIN, ID_QUIT,
     IDC_TITLE = 200, IDC_STATE, IDC_L_LINE, IDC_LINE, IDC_HINT, IDC_L_NAME, IDC_NAME,
-    IDC_INFO, IDC_UNPAIR, IDC_SHOWLOG, IDC_VIEWONLY, IDC_LOGIN, IDC_DISC, IDC_OPENPANEL,
+    IDC_INFO, IDC_UNPAIR, IDC_SHOWLOG, IDC_VIEWONLY, IDC_LOGIN, IDC_DISC, IDC_OPENPANEL, IDC_DROP,
     IDC_LOGTEXT = 300, IDC_LOGPATH, IDC_LOGCOPY, IDC_LOGFOLDER,
 };
 #define IDC_PAIR IDOK /* Enter in the window presses it */
@@ -297,6 +297,7 @@ static const ctl_t CTLS[] = {
     { IDC_PAIR, L"BUTTON", L"Pair", WS_TABSTOP | BS_DEFPUSHBUTTON },
     { IDC_INFO, L"STATIC", L"", SS_LEFT },
     { IDC_OPENPANEL, L"BUTTON", L"Open panel", WS_TABSTOP | BS_PUSHBUTTON },
+    { IDC_DROP, L"STATIC", L"", SS_LEFT },
     { IDC_DISC, L"BUTTON", L"Disconnect viewer", WS_TABSTOP | BS_PUSHBUTTON },
     { IDC_UNPAIR, L"BUTTON", L"Unpair", WS_TABSTOP | BS_PUSHBUTTON },
     { IDC_VIEWONLY, L"BUTTON", L"View only: ignore the viewer's mouse and keyboard", WS_TABSTOP | BS_AUTOCHECKBOX },
@@ -362,6 +363,7 @@ static void layout(void)
     place(IDC_OPENPANEL, 0, 0, 0, 0, 0);
     place(IDC_DISC, 0, 0, 0, 0, 0);
     place(IDC_UNPAIR, 0, 0, 0, 0, 0);
+    place(IDC_DROP, 0, 0, 0, 0, 0);
     if (!paired) {
         place(IDC_L_LINE, X, y, FW, 22, 1);
         y += 24;
@@ -391,7 +393,13 @@ static void layout(void)
             bx += 148;
         }
         place(IDC_UNPAIR, W - 20 - 90, y, 90, 30, 1);
-        y += 44;
+        y += 42;
+        SetDlgItemTextW(g_win, IDC_DROP, g_st.state == RD_IN_SESSION
+                                             ? L"Drop files on this window to send them: the viewer's browser "
+                                               L"downloads them."
+                                             : L"While someone is viewing, drop files on this window to send them.");
+        place(IDC_DROP, X, y, FW, 40, 1);
+        y += 46;
     }
     CheckDlgButton(g_win, IDC_VIEWONLY, g_st.view_only ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_win, IDC_LOGIN, login_enabled() ? BST_CHECKED : BST_UNCHECKED);
@@ -608,6 +616,7 @@ static LRESULT CALLBACK win_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if (GetComputerNameW(host, &n))
             SetDlgItemTextW(h, IDC_NAME, host);
         SendDlgItemMessageW(h, IDC_LINE, EM_SETCUEBANNER, TRUE, (LPARAM)L"remodroid enroll --panel https://… --code XXXX-XXXX");
+        DragAcceptFiles(h, TRUE);
         set_fonts();
         layout();
         return 0;
@@ -644,6 +653,28 @@ static LRESULT CALLBACK win_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         case IDC_SHOWLOG: show_log(); return 0;
         }
         break;
+    case WM_DROPFILES: { /* to the viewer, whose browser downloads them */
+        HDROP drop = (HDROP)wp;
+        UINT n = DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
+        char **paths = calloc(n ? n : 1, sizeof *paths);
+        int k = 0;
+        for (UINT i = 0; i < n; i++) {
+            wchar_t f[MAX_PATH * 4];
+            if (DragQueryFileW(drop, i, f, MAX_PATH * 4))
+                paths[k++] = utf8(f);
+        }
+        DragFinish(drop);
+        wchar_t t[120];
+        if (rd_agent_send_files((const char *const *)paths, k) < 0)
+            swprintf(t, 120, L"Nobody is viewing this computer, so nothing was sent.");
+        else
+            swprintf(t, 120, k == 1 ? L"Sending 1 file to the viewer…" : L"Sending %d files to the viewer…", k);
+        toast(t);
+        for (int i = 0; i < k; i++)
+            free(paths[i]);
+        free(paths);
+        return 0;
+    }
     case WM_CLOSE:
         ShowWindow(h, SW_HIDE);
         return 0;

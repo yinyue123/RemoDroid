@@ -70,6 +70,9 @@ RD_AGENT_API void rd_agent_unpair(void);
 RD_AGENT_API void rd_agent_confirm(int allow);
 /* Ends the current viewer session ("Disconnect viewer"). */
 RD_AGENT_API void rd_agent_end_session(void);
+/* Sends files to the viewer (dropped on the app's window): its browser downloads them. Paths are
+ * UTF-8; returns at once, the transfer runs on the agent's thread. 0, or -1 when nobody is viewing. */
+RD_AGENT_API int  rd_agent_send_files(const char *const *paths, int n);
 /* Changes a [desktop] / [video] / [files] setting ("desktop.view_only", "true") and saves it. */
 RD_AGENT_API void rd_agent_set(const char *key, const char *value);
 RD_AGENT_API void rd_agent_status(rd_status_t *out);

@@ -161,6 +161,7 @@ void session_keyframe(void);
 void session_bitrate(int kbps);
 int  session_active(void);
 void session_send(cJSON *m);  /* ctrl channel; frees m */
+int  session_offer_files(const char *const *paths, int n); /* file.offer to the viewer; -1: no viewer */
 void session_tick(void);      /* 1 s: stats, clipboard */
 
 /* input.c */
@@ -174,6 +175,9 @@ cJSON *files_control(const char *t, cJSON *d, char *code, size_t codecap, char *
 void   files_chunk(const uint8_t *d, size_t n);
 void   files_cancel_all(void);
 void   files_pump(void);       /* sends pulled chunks while the channel has room */
+/* Files the person at the computer sends to the viewer: they may be pulled from anywhere until the
+ * session ends. Returns the file.offer list ({path, name, size}), NULL if none is a file. */
+cJSON *files_offer(const char *const *paths, int n);
 
 /* keymap.c */
 typedef struct {

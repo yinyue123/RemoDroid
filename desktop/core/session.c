@@ -524,6 +524,22 @@ void session_message(const char *label, int binary, const uint8_t *d, size_t n)
     }
 }
 
+/* Files dropped on the app's window: the viewer pulls them and its browser saves them. */
+int session_offer_files(const char *const *paths, int n)
+{
+    if (!S.active || !S.ctrl_open)
+        return -1;
+    cJSON *files = files_offer(paths, n);
+    if (!files)
+        return 0;
+    int k = cJSON_GetArraySize(files);
+    cJSON *m = msg_new("file.offer", 0, NULL);
+    cJSON_AddItemToObject(msg_d(m), "files", files);
+    session_send(m);
+    LOGI("files: offered %d file(s) to the viewer", k);
+    return k;
+}
+
 /* ---------------- once a second ---------------- */
 
 static void check_clipboard(void)
