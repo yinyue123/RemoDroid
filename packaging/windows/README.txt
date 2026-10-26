@@ -17,7 +17,7 @@ The icon by the clock shows whether the server runs; its menu opens the settings
 and the panel, and starts, stops or restarts the server.
 
 Cloud server (AWS, Azure, …): also open these ports in its firewall / security group:
-  TCP  your web port (80), and 443 with a domain
+  TCP  your web port (5580 unless you changed it), and 443 with a domain
   UDP  3478 and 49152-49252 (STUN/TURN)
 
 Files

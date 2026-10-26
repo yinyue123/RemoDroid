@@ -492,6 +492,22 @@ static void place(int id, int x, int y, int w, int h, int show)
                  SWP_NOZORDER | (show ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
 }
 
+/* the height (at 96 dpi) a control's text needs, wrapped to w */
+static int text_height(int id, int w)
+{
+    HWND c = GetDlgItem(g_win, id);
+    UINT d = dpi_of(g_win);
+    wchar_t t[700];
+    GetWindowTextW(c, t, 700);
+    HDC dc = GetDC(c);
+    HGDIOBJ old = SelectObject(dc, g_font);
+    RECT r = { 0, 0, MulDiv(w, (int)d, 96), 0 };
+    DrawTextW(dc, t, -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(dc, old);
+    ReleaseDC(c, dc);
+    return MulDiv(r.bottom, 96, (int)d) + 2;
+}
+
 static int is_heading(int id) { return id == IDC_TITLE || id == IDC_H_ADMIN || id == IDC_H_WEB || id == IDC_H_TURN; }
 
 static void set_fonts(void)
@@ -556,8 +572,9 @@ static void layout(void)
     int y = 16;
     place(IDC_TITLE, X, y, FW, 24, 1);
     y += 28;
-    place(IDC_STATE, X, y, FW, 36, 1);
-    y += 42;
+    int h = text_height(IDC_STATE, FW);
+    place(IDC_STATE, X, y, FW, h, 1);
+    y += h + 6;
     place(IDC_INSTALL, X, y, 150, 30, !inst);
     place(IDC_OPENPANEL, X, y, 110, 30, form);
     place(IDC_STARTSTOP, X + 118, y, 80, 30, inst);
@@ -593,8 +610,9 @@ static void layout(void)
             place(IDC_REDIRECT, X + LW, y, FW - LW, 24, 1);
             y += 28;
         }
-        place(IDC_WEBHINT, X + LW, y, FW - LW, 36, 1);
-        y += 46;
+        h = text_height(IDC_WEBHINT, FW - LW);
+        place(IDC_WEBHINT, X + LW, y, FW - LW, h, 1);
+        y += h + 10;
         place(IDC_H_TURN, X, y, FW, 22, 1);
         y += 26;
         place(IDC_TURN, X, y, FW, 24, 1);
@@ -606,16 +624,18 @@ static void layout(void)
             place(IDC_L_PUBIP, X + LW + w2 + 20, y + 4, LW, 22, 1);
             place(IDC_PUBIP, X + 2 * LW + w2 + 20, y, w2, 26, 1);
             y += 32;
-            place(IDC_TURNHINT, X + LW, y, FW - LW, 36, 1);
-            y += 44;
+            h = text_height(IDC_TURNHINT, FW - LW);
+            place(IDC_TURNHINT, X + LW, y, FW - LW, h, 1);
+            y += h + 8;
         }
         place(IDC_SAVE, W - 20 - 150, y, 150, 30, 1);
         y += 38;
     }
-    place(IDC_MSG, X, y, FW, g_msg[0] ? 40 : 0, g_msg[0] != 0);
     SetDlgItemTextW(g_win, IDC_MSG, g_msg);
+    h = g_msg[0] ? text_height(IDC_MSG, FW) : 0;
+    place(IDC_MSG, X, y, FW, h, g_msg[0] != 0);
     if (g_msg[0])
-        y += 44;
+        y += h + 4;
     CheckDlgButton(g_win, IDC_LOGIN, login_enabled() ? BST_CHECKED : BST_UNCHECKED);
     place(IDC_LOGIN, X, y, FW, 24, 1);
     y += 40;
