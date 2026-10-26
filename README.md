@@ -281,7 +281,11 @@ Remote desktop for the computer itself: install it there, then pair it by pastin
 Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.4.2/SHA256SUMS)
 <!-- /downloads:desktop -->
 
-- **Windows**: unzip and run `RemoDroid.exe`. **macOS**: move `RemoDroid.app` to Applications, open it
+- **Windows**: unzip and run `RemoDroid.exe`. To also control windows of programs that run as administrator
+  (installers, Task Manager, the RemoDroid Server app), choose **Control administrator windows…** in its menu
+  once and confirm as an administrator: it sets up the small `RemoDroidInput` service, which passes the
+  viewer's mouse and keyboard to them (`remodroid-input install` / `uninstall` does the same). UAC prompts stay
+  out of reach. **macOS**: move `RemoDroid.app` to Applications, open it
   (the first time: right-click → Open), and allow **Screen Recording** and **Accessibility** when asked.
   **Linux**: install the `.deb` / `.rpm` and start *RemoDroid* from the app menu. On other distributions take the
   `.AppImage`: `chmod +x` it and run it (`./RemoDroid-*.AppImage desktopd …` is the headless agent). It uses the

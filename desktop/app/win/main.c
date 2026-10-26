@@ -27,7 +27,7 @@
 #define WM_SHOWWIN (WM_APP + 6)
 
 enum {
-    ID_STATUS = 100, ID_VIEWER, ID_DISCONNECT, ID_VIEWONLY, ID_OPEN, ID_WINDOW, ID_LOG, ID_LOGIN, ID_QUIT,
+    ID_STATUS = 100, ID_VIEWER, ID_DISCONNECT, ID_VIEWONLY, ID_OPEN, ID_WINDOW, ID_LOG, ID_LOGIN, ID_ADMIN, ID_QUIT,
     IDC_TITLE = 200, IDC_STATE, IDC_L_LINE, IDC_LINE, IDC_HINT, IDC_L_NAME, IDC_NAME,
     IDC_INFO, IDC_UNPAIR, IDC_SHOWLOG, IDC_VIEWONLY, IDC_LOGIN, IDC_DISC, IDC_OPENPANEL,
     IDC_LOGTEXT = 300, IDC_LOGPATH, IDC_LOGCOPY, IDC_LOGFOLDER,
@@ -154,6 +154,43 @@ static void set_login(int on)
     RegCloseKey(k);
 }
 
+/* ---------------- windows of elevated programs (remodroid-input.exe) ---------------- */
+
+/* The RemoDroidInput service: SendInput from this user doesn't reach windows of programs run as
+ * administrator (UIPI); the service injects for us (desktop/win/inputpipe.h). */
+static int admin_enabled(void)
+{
+    SC_HANDLE scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
+    SC_HANDLE s = scm ? OpenServiceW(scm, L"RemoDroidInput", SERVICE_QUERY_STATUS) : NULL;
+    SERVICE_STATUS st = { 0 };
+    int on = s && QueryServiceStatus(s, &st) && st.dwCurrentState == SERVICE_RUNNING;
+    if (s)
+        CloseServiceHandle(s);
+    if (scm)
+        CloseServiceHandle(scm);
+    return on;
+}
+
+static void toast(const wchar_t *text);
+
+/* remodroid-input.exe install / uninstall, after Windows asks for an administrator */
+static void set_admin(int on)
+{
+    wchar_t exe[MAX_PATH], *slash;
+    GetModuleFileNameW(NULL, exe, MAX_PATH);
+    if ((slash = wcsrchr(exe, L'\\')))
+        wcscpy(slash + 1, L"remodroid-input.exe");
+    SHELLEXECUTEINFOW sei = { .cbSize = sizeof sei, .fMask = SEE_MASK_NOCLOSEPROCESS, .hwnd = g_tray,
+                              .lpVerb = L"runas", .lpFile = exe, .lpParameters = on ? L"install" : L"uninstall",
+                              .nShow = SW_HIDE };
+    if (!ShellExecuteExW(&sei) || !sei.hProcess)
+        return; /* declined, or the program is missing */
+    WaitForSingleObject(sei.hProcess, 30000);
+    CloseHandle(sei.hProcess);
+    toast(admin_enabled() ? L"RemoDroid can now control windows of programs that run as administrator."
+                          : L"RemoDroid no longer controls windows of programs that run as administrator.");
+}
+
 /* ---------------- tray ---------------- */
 
 static void tray_update(int add)
@@ -224,6 +261,7 @@ static void tray_menu(int x, int y)
     AppendMenuW(m, MF_STRING, ID_LOG, L"Show log");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (login_enabled() ? MF_CHECKED : 0), ID_LOGIN, L"Start at login");
+    AppendMenuW(m, MF_STRING | (admin_enabled() ? MF_CHECKED : 0), ID_ADMIN, L"Control administrator windows…");
     AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit RemoDroid");
     SetForegroundWindow(g_tray); /* so the menu closes when clicking elsewhere */
     int cmd = TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, x, y, g_tray, NULL);
@@ -235,6 +273,7 @@ static void tray_menu(int x, int y)
     case ID_WINDOW: show_window(); break;
     case ID_LOG: show_log(); break;
     case ID_LOGIN: set_login(!login_enabled()); break;
+    case ID_ADMIN: set_admin(!admin_enabled()); break;
     case ID_QUIT: PostMessageW(g_tray, WM_CLOSE, 0, 0); break;
     }
 }

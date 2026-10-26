@@ -48,7 +48,7 @@ linux)
 windows)
     T=RemoDroid-$VERSION-windows-$ARCH
     rm -rf "build/$T" && mkdir -p "build/$T"
-    cp "$DIR/RemoDroid.exe" "$DIR/remodroid-desktopd.exe" "$DIR/remodroid.dll" "build/$T/"
+    cp "$DIR/RemoDroid.exe" "$DIR/remodroid-desktopd.exe" "$DIR/remodroid.dll" "$DIR/remodroid-input.exe" "build/$T/"
     (cd build && rm -f "$T.zip" && zip -qr "$T.zip" "$T") && mv "build/$T.zip" "$OUT/"
     ;;
 macos)

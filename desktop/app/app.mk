@@ -25,6 +25,12 @@ $(DESK_OUT)/app.res: $(APP_DIR)/win/app.rc $(APP_DIR)/win/app.manifest $(DESK_OU
 $(APP): $(APP_DIR)/win/main.c $(APP_DIR)/icon.c $(DESK_OUT)/app.res $(DESK_LIB)
 	$(CC) $(OPT) $(ARCHFLAGS) -std=gnu11 -municode -mwindows -I$(APP_DIR) -Idesktop/core $(DESK_WARN) -o $@ \
 	    $(APP_DIR)/win/main.c $(APP_DIR)/icon.c $(DESK_OUT)/app.res $(DESK_LINK) -static-libgcc -lcomctl32 -lshell32 -luser32 -lgdi32 -ladvapi32
+
+# remodroid-input.exe: the RemoDroidInput service, for windows of elevated programs (desktop/win/inputpipe.h)
+APP_EXTRA := $(DESK_OUT)/remodroid-input.exe
+$(APP_EXTRA): $(APP_DIR)/win/inputsvc.c desktop/win/input.c desktop/win/inputpipe.h desktop/core/keymap.c $(DESK_OUT)/app.res
+	$(CC) $(DESK_CFLAGS) -DRD_INPUT_HELPER -municode $(DESK_WARN) -o $@ $(APP_DIR)/win/inputsvc.c desktop/win/input.c \
+	    desktop/core/keymap.c $(DESK_OUT)/app.res -static -lwtsapi32 -ladvapi32 -luser32 -lshell32
 endif
 
 ifeq ($(DESK_OS),macos)
@@ -68,5 +74,5 @@ desktop-icons: $(DESK_OUT)/icongen
 .PHONY: desktop-icons
 endif
 
-desktop-app: $(APP)
+desktop-app: $(APP) $(APP_EXTRA)
 .PHONY: desktop-app

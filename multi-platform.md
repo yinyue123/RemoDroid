@@ -581,8 +581,14 @@ conservative:
   accepted only for `localhost`/LAN panels, as today.
 - **Reach**: file operations are limited to the user's home, and `shell.exec` is off by default. The agent
   runs as the logged-in user without elevation, so it can't reach anything that user can't. On Windows this
-  also means elevated (admin) windows don't accept input from it (UIPI). That is documented, and the fix is
-  the service mode in M6.
+  also means elevated (admin) windows don't accept input from it (UIPI). The optional `RemoDroidInput` service
+  (`remodroid-input.exe`, installed from the tray menu by an administrator) fixes that: it runs a SYSTEM helper
+  in each signed-in session, and the agent sends it its input over `\\.\pipe\RemoDroidInput-<session>`. The
+  pipe is owned by SYSTEM (the agent checks, so nothing else can pose as it and read keystrokes) and takes
+  only clients from its own session. Trade-off: with it installed, any program of the signed-in user can drive
+  elevated windows, as UAC itself does not separate an admin's own programs. The helper stays on the normal
+  desktop, so the UAC prompt's secure desktop remains out of reach; that, and seeing it, are still the service
+  mode in M6.
 - **Input safety**: held keys and buttons are released when a session ends or the input channel resets.
   `view_only` is enforced in the library, not in the viewer.
 - The WebRTC media is end-to-end DTLS-SRTP between the browser and the computer, as with phones. The

@@ -208,7 +208,7 @@ jobs:
         run: build/win-${{ matrix.arch }}/desktop/desk_test.exe web/app.js
       - name: Only system DLLs
         run: |
-          for f in remodroid.dll RemoDroid.exe remodroid-desktopd.exe; do
+          for f in remodroid.dll RemoDroid.exe remodroid-desktopd.exe remodroid-input.exe; do
             echo "== $f"; objdump -p build/win-${{ matrix.arch }}/desktop/$f | grep "DLL Name"
           done
       - name: Smoke test (starts, finds the screens, stops)
@@ -226,6 +226,7 @@ jobs:
             build/win-${{ matrix.arch }}/desktop/remodroid.dll
             build/win-${{ matrix.arch }}/desktop/RemoDroid.exe
             build/win-${{ matrix.arch }}/desktop/remodroid-desktopd.exe
+            build/win-${{ matrix.arch }}/desktop/remodroid-input.exe
           if-no-files-found: error
 
   server-windows:
