@@ -18,7 +18,7 @@ enum { M_STATUS = 1, M_VIEWER, M_DISCONNECT, M_VIEWONLY, M_OPEN, M_WINDOW, M_LOG
 
 static struct {
     GtkApplication *app;
-    GtkWidget *win, *title, *state, *pair_grid, *line, *name, *pair, *paired_box, *info, *disc, *view_only, *login;
+    GtkWidget *win, *title, *state, *pair_grid, *line, *name, *pair, *paired_box, *info, *drop, *disc, *view_only, *login;
     rd_status_t st;
     int pairing, updating;
     char pair_msg[300];
@@ -339,6 +339,9 @@ static void refresh(void)
     snprintf(s, sizeof s, "Panel:  %s\nDevice: %s", U.st.panel, U.st.device_id);
     gtk_label_set_text(GTK_LABEL(U.info), s);
     gtk_widget_set_visible(U.disc, U.st.state == RD_IN_SESSION);
+    gtk_label_set_text(GTK_LABEL(U.drop), U.st.state == RD_IN_SESSION
+                                              ? "Drop files on this window to send them: the viewer's browser downloads them."
+                                              : "While someone is viewing, drop files on this window to send them.");
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(U.view_only), U.st.view_only);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(U.login), login_enabled());
     U.updating = 0;
@@ -525,6 +528,30 @@ static GtkWidget *add_entry(GtkWidget *grid, int row, const char *placeholder)
     return e;
 }
 
+/* files dropped on the window: to the viewer, whose browser downloads them */
+static void on_drop(GtkWidget *w, GdkDragContext *ctx, gint x, gint y, GtkSelectionData *data, guint info, guint time,
+                    gpointer ud)
+{
+    gchar **uris = gtk_selection_data_get_uris(data);
+    if (!uris)
+        return;
+    GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);
+    for (int i = 0; uris[i]; i++) {
+        char *p = g_filename_from_uri(uris[i], NULL, NULL); /* file:// only */
+        if (p)
+            g_ptr_array_add(paths, p);
+    }
+    g_strfreev(uris);
+    int k = (int)paths->len;
+    char t[120];
+    if (rd_agent_send_files((const char *const *)paths->pdata, k) < 0)
+        snprintf(t, sizeof t, "Nobody is viewing this computer, so nothing was sent.");
+    else
+        snprintf(t, sizeof t, k == 1 ? "Sending 1 file to the viewer…" : "Sending %d files to the viewer…", k);
+    notify(t);
+    g_ptr_array_free(paths, TRUE);
+}
+
 static void build_window(void)
 {
     U.win = gtk_application_window_new(U.app);
@@ -533,6 +560,9 @@ static void build_window(void)
     gtk_window_set_resizable(GTK_WINDOW(U.win), FALSE);
     gtk_window_set_icon_name(GTK_WINDOW(U.win), "remodroid");
     g_signal_connect(U.win, "delete-event", G_CALLBACK(gtk_widget_hide_on_delete), NULL);
+    gtk_drag_dest_set(U.win, GTK_DEST_DEFAULT_ALL, NULL, 0, GDK_ACTION_COPY);
+    gtk_drag_dest_add_uri_targets(U.win);
+    g_signal_connect(U.win, "drag-data-received", G_CALLBACK(on_drop), NULL);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_set_border_width(GTK_CONTAINER(box), 18);
     gtk_container_add(GTK_CONTAINER(U.win), box);
@@ -593,6 +623,12 @@ static void build_window(void)
     g_signal_connect(unpair, "clicked", G_CALLBACK(do_unpair), NULL);
     gtk_box_pack_end(GTK_BOX(row), unpair, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(U.paired_box), row, FALSE, FALSE, 0);
+    U.drop = gtk_label_new("");
+    gtk_label_set_line_wrap(GTK_LABEL(U.drop), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(U.drop), 52);
+    gtk_label_set_xalign(GTK_LABEL(U.drop), 0);
+    gtk_style_context_add_class(gtk_widget_get_style_context(U.drop), "dim-label");
+    gtk_box_pack_start(GTK_BOX(U.paired_box), U.drop, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), U.paired_box, FALSE, FALSE, 0);
 
     gtk_box_pack_start(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 4);

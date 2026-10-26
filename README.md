@@ -290,6 +290,10 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   **Linux**: install the `.deb` / `.rpm` and start *RemoDroid* from the app menu. On other distributions take the
   `.AppImage`: `chmod +x` it and run it (`./RemoDroid-*.AppImage desktopd …` is the headless agent). It uses the
   system's GTK 3 and X11 libraries, which every desktop already has.
+- **Files and clipboard, like AirDrop**: drop files on the viewer and they land in the computer's
+  `Downloads/RemoDroid`; drop files on the RemoDroid window on the computer (tray / menu bar → *Pairing &
+  status…*) and the viewer's browser downloads them. Copied text syncs both ways by itself in Chrome and Edge;
+  Safari and Firefox show a Copy button instead.
 - No screen or no tray? Run the same line in a terminal (`remodroid-desktopd pair --panel … --code …`), then run
   `remodroid-desktopd` (a systemd user unit comes with the Linux packages).
 - Settings are in `desktop.ini` (`%APPDATA%\RemoDroid`, `~/Library/Application Support/RemoDroid`,

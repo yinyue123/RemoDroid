@@ -37,7 +37,7 @@ static NSImage *icon_image(int style, CGFloat points)
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate>
 @property(strong) NSStatusItem *item;
 @property(strong) NSWindow *window;
-@property(strong) NSTextField *title, *state, *info, *line, *name, *capState, *ctlState;
+@property(strong) NSTextField *title, *state, *info, *drop, *line, *name, *capState, *ctlState;
 @property(strong) NSButton *pair, *unpair, *openPanel, *disconnect, *viewOnly, *login;
 @property(strong) NSView *pairBox, *pairedBox;
 @property(strong) NSTimer *permTimer;
@@ -53,6 +53,46 @@ static NSImage *icon_image(int style, CGFloat points)
 @end
 
 static AppDelegate *app;
+
+/* The window's content: files dropped on it go to the viewer, whose browser downloads them. */
+@interface DropView : NSView
+@end
+
+@implementation DropView
+- (instancetype)initWithFrame:(NSRect)r
+{
+    if ((self = [super initWithFrame:r]))
+        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
+    return self;
+}
+
+- (NSArray<NSURL *> *)files:(id<NSDraggingInfo>)info
+{
+    return [info.draggingPasteboard readObjectsForClasses:@[ NSURL.class ]
+                                                  options:@{ NSPasteboardURLReadingFileURLsOnlyKey : @YES }];
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info
+{
+    return [self files:info].count ? NSDragOperationCopy : NSDragOperationNone;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info
+{
+    NSArray<NSURL *> *urls = [self files:info];
+    const char **paths = calloc(urls.count ? urls.count : 1, sizeof *paths);
+    int k = 0;
+    for (NSURL *u in urls)
+        if (u.fileURL)
+            paths[k++] = u.fileSystemRepresentation; /* valid while urls lives */
+    BOOL ok = rd_agent_send_files(paths, k) == 0;
+    free(paths);
+    [app notify:!ok ? @"Nobody is viewing this Mac, so nothing was sent."
+                : k == 1 ? @"Sending 1 file to the viewer…"
+                         : [NSString stringWithFormat:@"Sending %d files to the viewer…", k]];
+    return ok;
+}
+@end
 
 static void on_status(void *ud, const rd_status_t *s)
 {
@@ -233,6 +273,7 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     self.window.title = @"RemoDroid";
     self.window.releasedWhenClosed = NO;
     self.window.delegate = self;
+    self.window.contentView = [[DropView alloc] initWithFrame:NSMakeRect(0, 0, W, H)];
     NSView *v = self.window.contentView;
     self.title = label(@"", v, NSMakeRect(20, H - 50, W - 40, 26), 17, YES);
     self.state = label(@"", v, NSMakeRect(20, H - 92, W - 40, 38), 12, NO);
@@ -252,13 +293,15 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     self.pair = button(@"Pair", self.pairBox, NSMakeRect(W - 120, 4, 100, 30), self, @selector(doPair:));
     self.pair.keyEquivalent = @"\r";
 
-    self.pairedBox = [[NSView alloc] initWithFrame:NSMakeRect(0, 210, W, 120)];
+    self.pairedBox = [[NSView alloc] initWithFrame:NSMakeRect(0, 140, W, 190)];
     [v addSubview:self.pairedBox];
-    self.info = label(@"", self.pairedBox, NSMakeRect(20, 64, W - 40, 44), 12, NO);
+    self.info = label(@"", self.pairedBox, NSMakeRect(20, 134, W - 40, 44), 12, NO);
     self.info.selectable = YES;
-    self.openPanel = button(@"Open panel", self.pairedBox, NSMakeRect(16, 20, 120, 30), self, @selector(openPanel:));
-    self.disconnect = button(@"Disconnect viewer", self.pairedBox, NSMakeRect(140, 20, 150, 30), self, @selector(disconnect:));
-    self.unpair = button(@"Unpair", self.pairedBox, NSMakeRect(W - 116, 20, 100, 30), self, @selector(doUnpair:));
+    self.openPanel = button(@"Open panel", self.pairedBox, NSMakeRect(16, 90, 120, 30), self, @selector(openPanel:));
+    self.disconnect = button(@"Disconnect viewer", self.pairedBox, NSMakeRect(140, 90, 150, 30), self, @selector(disconnect:));
+    self.unpair = button(@"Unpair", self.pairedBox, NSMakeRect(W - 116, 90, 100, 30), self, @selector(doUnpair:));
+    self.drop = label(@"", self.pairedBox, NSMakeRect(20, 30, W - 40, 40), 12, NO);
+    self.drop.textColor = NSColor.secondaryLabelColor;
 
     /* permissions */
     label(@"Permissions", v, NSMakeRect(20, 108, W - 40, 20), 13, YES);
@@ -292,6 +335,9 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     self.pair.enabled = !self.pairing;
     self.info.stringValue = [NSString stringWithFormat:@"Panel:  %@\nDevice: %@", str(self.st.panel), str(self.st.device_id)];
     self.disconnect.hidden = self.st.state != RD_IN_SESSION;
+    self.drop.stringValue = self.st.state == RD_IN_SESSION
+                                ? @"Drop files on this window to send them: the viewer's browser downloads them."
+                                : @"While someone is viewing, drop files on this window to send them.";
     self.viewOnly.state = self.st.view_only ? NSControlStateValueOn : NSControlStateValueOff;
     self.login.state = [self loginEnabled] ? NSControlStateValueOn : NSControlStateValueOff;
     BOOL cap = CGPreflightScreenCaptureAccess(), ctl = AXIsProcessTrusted();
