@@ -1,4 +1,4 @@
-# nFPM definition for remodroid-server (deb, rpm, apk, ipk). Used by packaging/package.sh:
+# nFPM definition for remodroid-server (deb, rpm, apk). Used by packaging/package.sh:
 #   PKG_ARCH=<distro arch> VERSION=<x.y> BIN=<dir with binaries> PHONE=<dir with phone files>
 name: remodroid-server
 arch: ${PKG_ARCH}
@@ -14,10 +14,6 @@ description: "RemoDroid control server: login, REST/WebSocket API, web client, b
 # CA certificates for ACME and HTTPS to the CA (the binary is static and reads the system bundle)
 recommends:
   - ca-certificates
-overrides:
-  ipk:
-    depends:
-      - ca-bundle
 contents:
   - src: ${BIN}/remodroid-server
     dst: /usr/bin/remodroid-server
@@ -40,11 +36,6 @@ contents:
   - src: ./deploy/openrc/remodroid-server
     dst: /etc/init.d/remodroid-server
     packager: apk
-    file_info:
-      mode: 0755
-  - src: ./deploy/remodroid-server.init
-    dst: /etc/init.d/remodroid-server
-    packager: ipk
     file_info:
       mode: 0755
 scripts:

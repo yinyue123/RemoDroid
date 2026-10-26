@@ -28,7 +28,7 @@ typedef struct {
 
 static code_t codes[MAX_CODES];
 
-static const char ABC[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; /* no 0/O, 1/I/L */
+static const char CODE_ABC[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; /* no 0/O, 1/I/L */
 
 static void expire_codes(void)
 {
@@ -46,7 +46,7 @@ static int normalize(const char *in, char out[10])
         if (*p == '-' || *p == ' ')
             continue;
         char ch = (char)toupper((unsigned char)*p);
-        if (!strchr(ABC, ch) || n == 8)
+        if (!strchr(CODE_ABC, ch) || n == 8)
             return -1;
         out[n < 4 ? n : n + 1] = ch;
         n++;
@@ -170,7 +170,7 @@ int enroll_api(conn_t *c, const http_req_t *r, const char *user)
             for (int i = 0, o = 0; i < 8; i++, o++) {
                 if (i == 4)
                     k->code[o++] = '-';
-                k->code[o] = ABC[rnd[i] % (sizeof ABC - 1)];
+                k->code[o] = CODE_ABC[rnd[i] % (sizeof CODE_ABC - 1)];
             }
             k->code[9] = 0;
         } while (find_code(k->code) != k);

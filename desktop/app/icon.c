@@ -11,9 +11,31 @@ static int in_rrect(double x, double y, double x0, double y0, double x1, double 
 
 static int in_circle(double x, double y, double cx, double cy, double r) { return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r; }
 
+/* the server: two rack units, each with a light (and a slot, on the app icon) */
+static int classify_server(double x, double y, int style)
+{
+    int app = style == RD_ICON_SERVER_APP;
+    double x0 = app ? 0.2 : 0.08, x1 = app ? 0.8 : 0.92, sw = app ? 0.05 : 0.1, r = app ? 0.06 : 0.1;
+    static const double units[2][2][2] = { { { 0.25, 0.48 }, { 0.52, 0.75 } }, { { 0.1, 0.46 }, { 0.54, 0.9 } } };
+    for (int i = 0; i < 2; i++) {
+        double y0 = units[!app][i][0], y1 = units[!app][i][1], cy = (y0 + y1) / 2;
+        if (in_rrect(x, y, x0, y0, x1, y1, r) && !in_rrect(x, y, x0 + sw, y0 + sw, x1 - sw, y1 - sw, r * 0.5))
+            return 2;
+        if (in_circle(x, y, x0 + (x1 - x0) * 0.25, cy, app ? 0.035 : 0.075))
+            return 2;
+        if (app && x >= x0 + (x1 - x0) * 0.45 && x <= x1 - (x1 - x0) * 0.17 && y >= cy - 0.02 && y <= cy + 0.02)
+            return 2;
+    }
+    if (app && in_rrect(x, y, 0, 0, 1, 1, 14.0 / 64))
+        return 1;
+    return 0;
+}
+
 /* which colour a point gets: 0 none, 1 background, 2 foreground, 3 dot */
 static int classify(double x, double y, int style)
 {
+    if (style >= RD_ICON_SERVER_APP)
+        return classify_server(x, y, style);
     int app = style == RD_ICON_APP;
     double m = app ? 0.0 : -0.06;            /* tray icons use more of the square */
     double sw = app ? 0.05 : 0.095;          /* outline width */
@@ -39,7 +61,7 @@ static int classify(double x, double y, int style)
 void rd_icon_render(uint32_t *argb, int size, int style)
 {
     uint32_t bg = 0xFF13171C, fg = 0xFF6CC8EE, dot = 0xFFF0524F;
-    if (style == RD_ICON_OFF)
+    if (style == RD_ICON_OFF || style == RD_ICON_SERVER_OFF)
         fg = 0xFF8A94A6;
     if (style == RD_ICON_TEMPLATE || style == RD_ICON_TEMPLATE_LIVE)
         fg = dot = 0xFF000000;

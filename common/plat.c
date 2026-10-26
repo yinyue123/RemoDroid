@@ -46,9 +46,9 @@ int rd_sock_close(int fd) { return closesocket((SOCKET)fd); }
 int rd_sock_error(void) { return WSAGetLastError(); }
 int rd_sock_again(int e) { return e == WSAEWOULDBLOCK || e == WSAEINTR || e == WSAEINPROGRESS; }
 
-int rd_sock_accept(int lfd)
+int rd_sock_accept(int lfd, struct sockaddr *sa, socklen_t *len)
 {
-    SOCKET s = accept((SOCKET)lfd, NULL, NULL);
+    SOCKET s = accept((SOCKET)lfd, sa, len);
     if (s == INVALID_SOCKET)
         return -1;
     rd_sock_nonblock((int)s);
@@ -95,6 +95,15 @@ void rd_thread_join(rd_thread_t t)
 {
     WaitForSingleObject(t, INFINITE);
     CloseHandle(t);
+}
+
+int rd_thread_detached(void *(*fn)(void *), void *arg)
+{
+    rd_thread_t t;
+    if (rd_thread_start(&t, fn, arg) < 0)
+        return -1;
+    CloseHandle(t);
+    return 0;
 }
 
 void rd_mutex_init(rd_mutex_t *m) { InitializeSRWLock(m); }
@@ -172,12 +181,12 @@ int rd_sock_error(void) { return errno; }
 int rd_sock_again(int e) { return e == EAGAIN || e == EWOULDBLOCK || e == EINTR || e == EINPROGRESS; }
 const char *rd_sock_strerror(int e) { return strerror(e); }
 
-int rd_sock_accept(int lfd)
+int rd_sock_accept(int lfd, struct sockaddr *sa, socklen_t *len)
 {
 #if defined(SOCK_NONBLOCK) && !defined(__APPLE__)
-    return accept4(lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    return accept4(lfd, sa, len, SOCK_NONBLOCK | SOCK_CLOEXEC);
 #else
-    int fd = accept(lfd, NULL, NULL);
+    int fd = accept(lfd, sa, len);
     if (fd >= 0) {
         fcntl(fd, F_SETFD, FD_CLOEXEC);
         rd_sock_nonblock(fd);
@@ -188,6 +197,15 @@ int rd_sock_accept(int lfd)
 
 int rd_thread_start(rd_thread_t *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg) ? -1 : 0; }
 void rd_thread_join(rd_thread_t t) { pthread_join(t, NULL); }
+
+int rd_thread_detached(void *(*fn)(void *), void *arg)
+{
+    pthread_t t;
+    if (pthread_create(&t, NULL, fn, arg))
+        return -1;
+    pthread_detach(t);
+    return 0;
+}
 void rd_mutex_init(rd_mutex_t *m) { pthread_mutex_init(m, NULL); }
 void rd_mutex_lock(rd_mutex_t *m) { pthread_mutex_lock(m); }
 void rd_mutex_unlock(rd_mutex_t *m) { pthread_mutex_unlock(m); }

@@ -2,7 +2,7 @@
  * from desktop/app/icon.c. No zlib: PNG data is compressed with a small
  * fixed-Huffman deflate that only looks for repeats of the previous pixel,
  * which is most of an icon.
- *   icongen out.png SIZE [style]   icongen out.ico   icongen out.icns */
+ *   icongen out.png SIZE [style]   icongen out.ico [style]   icongen out.icns */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -184,7 +184,7 @@ static int write_file(const char *path, buf_t *b)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: icongen out.png SIZE [style] | out.ico | out.icns\n");
+        fprintf(stderr, "usage: icongen out.png SIZE [style] | out.ico [style] | out.icns\n");
         return 2;
     }
     const char *out = argv[1], *ext = strrchr(out, '.');
@@ -202,7 +202,7 @@ int main(int argc, char **argv)
         le16(&b, (unsigned)n);
         unsigned off = 6 + 16 * (unsigned)n;
         for (int i = 0; i < n; i++) {
-            imgs[i] = png(sizes[i], RD_ICON_APP);
+            imgs[i] = png(sizes[i], argc > 2 ? atoi(argv[2]) : RD_ICON_APP);
             unsigned char dim = (unsigned char)(sizes[i] >= 256 ? 0 : sizes[i]);
             unsigned char e[4] = { dim, dim, 0, 0 };
             put(&b, e, 4);

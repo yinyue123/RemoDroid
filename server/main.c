@@ -2,18 +2,37 @@
  *
  *   remodroid-server [-c /etc/remodroid/server.ini]
  *   remodroid-server hashpw [password]     print a bcrypt hash for server.ini
- *   remodroid-server gensecret             print a random device secret */
+ *   remodroid-server gensecret             print a random device secret
+ *   remodroid-server [-c …] settings       the wizard's settings as JSON
+ *   remodroid-server [-c …] configure      apply the wizard's form (JSON on stdin) to server.ini
+ * Windows adds install, uninstall, start, stop, restart and service (win.c). */
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <getopt.h>
+#else
 #include <termios.h>
-#include <unistd.h>
+#endif
 
+#include "msg.h"
 #include "server.h"
 
 server_t S;
+
+/* Where things are when server.ini doesn't say: the Linux packages' paths; on Windows the
+ * data folder (%ProgramData%\RemoDroid) and the web folder next to the program. */
+#ifdef _WIN32
+#define DEFAULT_CONF win_data_path("server.ini")
+#define DEFAULT_STATE win_data_path(NULL)
+#define DEFAULT_WEB win_exe_path("web")
+#else
+#define DEFAULT_CONF "/etc/remodroid/server.ini"
+#define DEFAULT_STATE "/var/lib/remodroid"
+#define DEFAULT_WEB "/usr/share/remodroid/web"
+#endif
 
 static void count_key(const char *k, const char *v, void *ud) { ++*(int *)ud; }
 
@@ -40,7 +59,7 @@ static int load_config(void)
     int users = 0;
     rd_conf_each(c, "users", count_key, &users);
     S.setup = users == 0; /* fresh install: only the setup wizard until an admin exists */
-    snprintf(S.state_dir, sizeof S.state_dir, "%s", rd_conf_get(c, "server", "state_dir", "/var/lib/remodroid"));
+    snprintf(S.state_dir, sizeof S.state_dir, "%s", rd_conf_get(c, "server", "state_dir", DEFAULT_STATE));
     S.session_days = (int)rd_conf_int(c, "auth", "session_days", 30);
     S.max_failed = (int)rd_conf_int(c, "auth", "max_failed_logins", 5);
     /* lockout_seconds wins when set; otherwise fall back to lockout_minutes (default 15 min). */
@@ -50,7 +69,7 @@ static int load_config(void)
     S.ping_s = (int)rd_conf_int(c, "keepalive", "ping_seconds", 20);
     S.timeout_s = (int)rd_conf_int(c, "keepalive", "timeout_seconds", 60);
     S.heartbeat_s = (int)rd_conf_int(c, "keepalive", "heartbeat_seconds", 30);
-    set_str(&S.web_root, rd_conf_get(c, "http", "web_root", "/usr/share/remodroid/web"));
+    set_str(&S.web_root, rd_conf_get(c, "http", "web_root", DEFAULT_WEB));
     set_str(&S.origins, rd_conf_get(c, "http", "allowed_origins", ""));
     set_str(&S.turn_urls, rd_conf_get(c, "turn", "urls", ""));
     set_str(&S.turn_secret, rd_conf_get(c, "turn", "shared_secret", ""));
@@ -90,7 +109,8 @@ int server_conf_set(const char *sec, const char *key, const char *val)
 }
 
 /* After the wizard: start over with the new listen addresses. All sockets are
- * close-on-exec; the short delay lets the reply reach the browser. */
+ * close-on-exec; the short delay lets the reply reach the browser. Windows has no
+ * exec(): the process exits and its supervisor (win.c) starts it again. */
 static ev_timer restart_timer;
 
 static void on_restart(struct ev_loop *loop, ev_timer *w, int revents)
@@ -100,9 +120,13 @@ static void on_restart(struct ev_loop *loop, ev_timer *w, int revents)
     snprintf(path, sizeof path, "%s/sessions", S.state_dir);
     if (rd_mkdirs(S.state_dir, 0700) == 0)
         auth_save_sessions(path);
+#ifdef _WIN32
+    exit(SERVER_EXIT_RESTART);
+#else
     execv("/proc/self/exe", S.argv);
     LOGE("re-exec failed (%s); exiting so the service manager restarts us", strerror(errno));
     exit(0);
+#endif
 }
 
 void server_restart_soon(void)
@@ -128,14 +152,30 @@ static void on_hup(struct ev_loop *loop, ev_signal *w, int revents)
     }
 }
 
-static void on_term(struct ev_loop *loop, ev_signal *w, int revents)
+void server_stop(void)
 {
     LOGI("shutting down");
-    ev_break(loop, EVBREAK_ALL);
+    ev_break(S.loop, EVBREAK_ALL);
 }
+
+static void on_term(struct ev_loop *loop, ev_signal *w, int revents) { server_stop(); }
 
 static int read_password(char *buf, size_t cap)
 {
+#ifdef _WIN32
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD old;
+    int tty = GetConsoleMode(in, &old);
+    if (tty) {
+        fprintf(stderr, "Password: ");
+        SetConsoleMode(in, old & ~(DWORD)ENABLE_ECHO_INPUT);
+    }
+    char *r = fgets(buf, (int)cap, stdin);
+    if (tty) {
+        SetConsoleMode(in, old);
+        fprintf(stderr, "\n");
+    }
+#else
     struct termios t, old;
     int tty = isatty(0) && tcgetattr(0, &old) == 0;
     if (tty) {
@@ -149,6 +189,7 @@ static int read_password(char *buf, size_t cap)
         tcsetattr(0, TCSANOW, &old);
         fprintf(stderr, "\n");
     }
+#endif
     if (!r)
         return -1;
     buf[strcspn(buf, "\r\n")] = 0;
@@ -161,14 +202,68 @@ static void usage(void)
             "usage: remodroid-server [-c server.ini] [-v] [-t]     -t: check the configuration and exit\n"
             "       remodroid-server hashpw [password]   bcrypt hash for [users]/[devices]\n"
             "       remodroid-server gensecret           random device secret\n"
-            "       remodroid-server gentoken NAME [scopes]  API token for AI clients (ui,screenshot,control)\n");
+            "       remodroid-server gentoken NAME [scopes]  API token for AI clients (ui,screenshot,control)\n"
+            "       remodroid-server [-c server.ini] settings    the setup wizard's settings, as JSON\n"
+            "       remodroid-server [-c server.ini] configure   apply the setup wizard's form (JSON on stdin)\n"
+#ifdef _WIN32
+            "       remodroid-server [-c server.ini] install     run as a Windows service (needs an administrator)\n"
+            "       remodroid-server uninstall | start | stop | restart\n"
+#endif
+            );
+}
+
+static void first_key(const char *k, const char *v, void *ud)
+{
+    if (!*(const char **)ud)
+        *(const char **)ud = k;
+}
+
+/* settings / configure: the setup wizard's form from the command line, for the Windows
+ * app (and scripts). configure applies it as the first admin account, or as the wizard
+ * when there is none; the running server picks it up when restarted. */
+static int settings_cli(int apply)
+{
+    const char *admin = NULL;
+    rd_conf_each(S.conf, "users", first_key, &admin);
+    char *adm = admin ? rd_strdup(admin) : NULL; /* server_conf_set reloads S.conf */
+    cJSON *out;
+    int ret = 0;
+    if (!apply) {
+        out = setup_current(adm);
+    } else {
+        rd_buf_t in;
+        rd_buf_init(&in);
+        char chunk[4096];
+        size_t n;
+        while ((n = fread(chunk, 1, sizeof chunk, stdin)) > 0 && in.len < 65536)
+            rd_buf_append(&in, chunk, n);
+        cJSON *form = cJSON_ParseWithLength((const char *)rd_buf_data(&in), rd_buf_avail(&in));
+        rd_buf_free(&in);
+        int status = 400;
+        const char *err = cJSON_IsObject(form) ? setup_save(form, adm, &status) : "expected a JSON object on stdin";
+        cJSON_Delete(form);
+        out = cJSON_CreateObject();
+        if (err) {
+            cJSON_AddStringToObject(out, "error", err);
+            ret = 1;
+        } else {
+            cJSON_AddBoolToObject(out, "ok", 1);
+        }
+    }
+    char *s = cJSON_Print(out);
+    printf("%s\n", s);
+    free(s);
+    cJSON_Delete(out);
+    free(adm);
+    return ret;
 }
 
 int main(int argc, char **argv)
 {
-    S.conf_path = "/etc/remodroid/server.ini";
+    S.conf_path = DEFAULT_CONF;
     S.argv = argv;
     rd_log_init("server", RD_LOG_INFO);
+    rd_net_init();
     if (argc > 1 && !strcmp(argv[1], "hashpw")) {
         char pw[256];
         if (argc > 2)
@@ -219,9 +314,22 @@ int main(int argc, char **argv)
         default: usage(); return opt == 'h' ? 0 : 2;
         }
     }
+    const char *cmd = optind < argc ? argv[optind] : "";
+#ifdef _WIN32
+    /* install, service, …; and the server itself runs under a supervisor that restarts it */
+    if (strcmp(cmd, "settings") && strcmp(cmd, "configure") && (*cmd || (!test_only && !getenv(WIN_SUPERVISED))))
+        return win_command(cmd, argc, argv);
+#else
     signal(SIGPIPE, SIG_IGN);
+#endif
+    if (*cmd && strcmp(cmd, "settings") && strcmp(cmd, "configure")) {
+        usage();
+        return 2;
+    }
     if (load_config() < 0)
         return 1;
+    if (*cmd)
+        return settings_cli(!strcmp(cmd, "configure"));
     if (test_only) { /* like nginx -t: no sockets, no ACME */
         if (*S.tls_cert && !*rd_conf_get(S.conf, "acme", "domains", "") && tls_load(S.tls_cert, S.tls_key) < 0)
             return 1;
@@ -257,8 +365,13 @@ int main(int argc, char **argv)
     ev_timer_start(S.loop, &S.ping_timer);
     ev_timer_init(&S.sweep_timer, on_sweep, 600., 600.);
     ev_timer_start(S.loop, &S.sweep_timer);
+#ifdef SIGHUP
     ev_signal_init(&S.sig_hup, on_hup, SIGHUP);
     ev_signal_start(S.loop, &S.sig_hup);
+#else
+    (void)on_hup;
+    win_worker_start(); /* the supervisor's stop and restart requests */
+#endif
     ev_signal_init(&S.sig_term, on_term, SIGTERM);
     ev_signal_start(S.loop, &S.sig_term);
     ev_signal_init(&S.sig_int, on_term, SIGINT);

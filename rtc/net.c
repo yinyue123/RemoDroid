@@ -200,7 +200,7 @@ static void reopen_tunnel_socks(net_t *n)
 static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
 {
     net_t *n = w->data;
-    int fd = rd_sock_accept(n->lfd);
+    int fd = rd_sock_accept(n->lfd, NULL, NULL);
     if (fd < 0)
         return;
     if (n->cfd >= 0)

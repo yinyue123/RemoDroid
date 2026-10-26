@@ -5,13 +5,9 @@
  *  - fixed logins, as coturn's user= lines: [turn] users = name:password, … (for another server's
  *    viewers and agents to use this relay, entered there as an ordinary TURN username and password).
  * Also answers plain STUN Binding requests (server-reflexive candidates). */
-#include <arpa/inet.h>
-#include <errno.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "server.h"
 #include "stun.h"
@@ -89,12 +85,15 @@ static void free_alloc(alloc_t *a)
     LOGI("turn: allocation for %s (%s) closed, %llu/%llu bytes relayed", c, a->user, (unsigned long long)a->tx,
          (unsigned long long)a->rx);
     ev_io_stop(S.loop, &a->io);
-    close(a->fd);
+    rd_sock_close(a->fd);
     free(a);
     T.nallocs--;
 }
 
-static void reply(const struct sockaddr_storage *to, stun_msg_t *m) { sendto(T.fd, m->buf, m->len, 0, (const struct sockaddr *)to, addr_len(to)); }
+static void reply(const struct sockaddr_storage *to, stun_msg_t *m)
+{
+    sendto(T.fd, (const void *)m->buf, (int)m->len, 0, (const struct sockaddr *)to, addr_len(to));
+}
 
 static void error(const struct sockaddr_storage *to, const stun_view_t *v, int code, const char *reason, int auth_hint)
 {
@@ -196,7 +195,7 @@ static void on_relay(struct ev_loop *loop, ev_io *w, int revents)
     for (int k = 0; k < 64; k++) {
         struct sockaddr_storage peer;
         socklen_t pl = sizeof peer;
-        ssize_t n = recvfrom(a->fd, buf + 4, sizeof buf - 4, 0, (struct sockaddr *)&peer, &pl);
+        ssize_t n = recvfrom(a->fd, (void *)(buf + 4), sizeof buf - 4, 0, (struct sockaddr *)&peer, &pl);
         if (n < 0)
             return;
         if (!has_perm(a, &peer))
@@ -209,7 +208,7 @@ static void on_relay(struct ev_loop *loop, ev_io *w, int revents)
         if (ch >= 0) { /* ChannelData: 4-byte header */
             rd_put_be16(buf, a->chans[ch].num);
             rd_put_be16(buf + 2, (uint16_t)n);
-            sendto(T.fd, buf, (size_t)n + 4, 0, (struct sockaddr *)&a->client, addr_len(&a->client));
+            sendto(T.fd, (const void *)buf, (int)n + 4, 0, (struct sockaddr *)&a->client, addr_len(&a->client));
         } else if (n <= 1400) {
             stun_msg_t m;
             stun_new(&m, STUN_DATA | STUN_INDICATION, NULL);
@@ -225,11 +224,11 @@ static int open_relay(alloc_t *a)
     int span = T.max_port - T.min_port + 1;
     for (int tries = 0; tries < span; tries++) {
         int port = T.min_port + (T.next_port++ % span);
-        int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        int fd = rd_socket(AF_INET, SOCK_DGRAM, 0);
         struct sockaddr_in sin = { .sin_family = AF_INET, .sin_port = htons((uint16_t)port) };
         int sz = 512 * 1024;
-        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
-        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const void *)&sz, sizeof sz);
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const void *)&sz, sizeof sz);
         if (fd >= 0 && bind(fd, (struct sockaddr *)&sin, sizeof sin) == 0) {
             a->fd = fd;
             memset(&a->relay, 0, sizeof a->relay);
@@ -248,7 +247,7 @@ static int open_relay(alloc_t *a)
             return 0;
         }
         if (fd >= 0)
-            close(fd);
+            rd_sock_close(fd);
     }
     return -1;
 }
@@ -398,7 +397,7 @@ static void on_packet(const struct sockaddr_storage *from, const uint8_t *d, siz
             return;
         for (int i = 0; i < a->nchans; i++) {
             if (a->chans[i].num == num && a->chans[i].expires > now()) {
-                sendto(a->fd, d + 4, len, 0, (struct sockaddr *)&a->chans[i].peer, addr_len(&a->chans[i].peer));
+                sendto(a->fd, (const void *)(d + 4), (int)len, 0, (struct sockaddr *)&a->chans[i].peer, addr_len(&a->chans[i].peer));
                 a->tx += len;
                 return;
             }
@@ -416,7 +415,7 @@ static void on_packet(const struct sockaddr_storage *from, const uint8_t *d, siz
         size_t dl;
         const uint8_t *data = stun_attr(&v, STUN_A_DATA, &dl);
         if (a && data && stun_get_xaddr(&v, STUN_A_XOR_PEER_ADDRESS, &peer) == 0 && has_perm(a, &peer)) {
-            sendto(a->fd, data, dl, 0, (struct sockaddr *)&peer, addr_len(&peer));
+            sendto(a->fd, (const void *)data, (int)dl, 0, (struct sockaddr *)&peer, addr_len(&peer));
             a->tx += dl;
         }
     }
@@ -428,7 +427,7 @@ static void on_read(struct ev_loop *loop, ev_io *w, int revents)
     for (int k = 0; k < 128; k++) {
         struct sockaddr_storage from;
         socklen_t fl = sizeof from;
-        ssize_t n = recvfrom(T.fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
+        ssize_t n = recvfrom(T.fd, (void *)buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
         if (n < 0)
             return;
         on_packet(&from, buf, (size_t)n);
@@ -467,12 +466,12 @@ int turn_start(void)
         LOGE("turn: cannot resolve %s", listen);
         return -1;
     }
-    T.fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    T.fd = rd_socket(AF_INET, SOCK_DGRAM, 0);
     int sz = 1024 * 1024;
-    setsockopt(T.fd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
-    setsockopt(T.fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
-    if (T.fd < 0 || bind(T.fd, ai->ai_addr, ai->ai_addrlen) < 0) {
-        LOGE("turn: cannot listen on %s: %s", listen, strerror(errno));
+    setsockopt(T.fd, SOL_SOCKET, SO_RCVBUF, (const void *)&sz, sizeof sz);
+    setsockopt(T.fd, SOL_SOCKET, SO_SNDBUF, (const void *)&sz, sizeof sz);
+    if (T.fd < 0 || bind(T.fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) < 0) {
+        LOGE("turn: cannot listen on %s: %s", listen, rd_sock_strerror(rd_sock_error()));
         freeaddrinfo(ai);
         return -1;
     }

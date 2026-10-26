@@ -2,8 +2,20 @@
 #ifndef RD_SERVER_H
 #define RD_SERVER_H
 
-#include <netinet/in.h>
-#include <sys/types.h>
+#include "plat.h" /* sockets: POSIX or Winsock */
+#ifdef _WIN32
+#include <io.h> /* access, close, read, unlink */
+#include <sys/stat.h>
+/* No file modes: the data folder's access list guards server.ini and the state (win.c). */
+static inline int fchmod(int fd, int mode) { (void)fd; (void)mode; return 0; }
+#define timegm _mkgmtime
+#ifndef F_OK
+#define F_OK 0
+#define R_OK 4
+#endif
+#else
+#include <unistd.h>
+#endif
 
 #include "cJSON.h"
 #include "conf.h"
@@ -181,12 +193,25 @@ int  acme_challenge(const char *token, size_t token_len, char *out, size_t cap);
 /* main.c */
 int  server_conf_set(const char *sec, const char *key, const char *val); /* writes server.ini, reloads */
 void server_restart_soon(void);                                          /* re-exec with the new settings */
+void server_stop(void);
+
+#ifdef _WIN32
+/* win.c: the Windows service, the supervisor that restarts the server, the default paths */
+#define SERVER_EXIT_RESTART 75          /* the server asks its supervisor for a restart */
+#define WIN_SUPERVISED "RD_SUPERVISED"  /* set in the supervised server's environment */
+const char *win_data_path(const char *name); /* %ProgramData%\RemoDroid[\name] */
+const char *win_exe_path(const char *name);  /* the program's folder\name */
+int         win_command(const char *cmd, int argc, char **argv);
+void        win_worker_start(void);
+#endif
 
 /* setup.c: first-run wizard (web/wizard.html) and its API */
 void setup_init(void);          /* setup mode: create the token and say where to go */
 void setup_request(conn_t *c, const http_req_t *r); /* every request while S.setup */
 void setup_api(conn_t *c, const http_req_t *r, const char *user); /* /api/v1/setup after setup */
 void settings_api(conn_t *c, const http_req_t *r, const char *user); /* /api/v1/settings: the panel's Server tab */
+const char *setup_save(cJSON *in, const char *user, int *status);   /* the wizard's form → server.ini */
+cJSON *setup_current(const char *user);                            /* what the wizard's form starts from */
 
 /* enroll.c: adding routers with one-time codes (web/agent.html, remodroid-agent enroll) */
 void enroll_public(conn_t *c, const http_req_t *r);               /* POST /api/v1/enroll (no login) */

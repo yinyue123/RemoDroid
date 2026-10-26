@@ -1,17 +1,18 @@
 /* HTTP/1.1 + WebSocket connections on one libev loop. */
-#include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <strings.h>
 #include <sys/sendfile.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 #include "msg.h"
 #include "picohttpparser.h"
@@ -101,6 +102,12 @@ static int header_has_token(const http_req_t *r, const char *name, const char *t
 
 static void flush_out(conn_t *c);
 
+#ifdef _WIN32
+#define USE_SENDFILE(c) 0
+#else
+#define USE_SENDFILE(c) (!(c)->ssl)
+#endif
+
 void conn_send(conn_t *c, const void *data, size_t n)
 {
     if (c->fd < 0)
@@ -170,24 +177,24 @@ static ssize_t conn_read(conn_t *c, void *buf, size_t n)
 {
     if (c->ssl)
         return tls_read(c, buf, n);
-    ssize_t r = read(c->fd, buf, n);
-    return r < 0 && (errno == EAGAIN || errno == EINTR) ? TLS_AGAIN : r;
+    ssize_t r = recv(c->fd, buf, (int)RD_MIN(n, (size_t)1 << 30), 0);
+    return r < 0 && rd_sock_again(rd_sock_error()) ? TLS_AGAIN : r;
 }
 
 static ssize_t conn_write(conn_t *c, const void *buf, size_t n)
 {
     if (c->ssl)
         return tls_write(c, buf, n);
-    ssize_t r = write(c->fd, buf, n);
-    return r < 0 && (errno == EAGAIN || errno == EINTR) ? TLS_AGAIN : r;
+    ssize_t r = send(c->fd, buf, (int)RD_MIN(n, (size_t)1 << 30), MSG_NOSIGNAL);
+    return r < 0 && rd_sock_again(rd_sock_error()) ? TLS_AGAIN : r;
 }
 
-/* TLS can't use sendfile(): feed the file through the output buffer instead. */
+/* TLS (and Windows, which has no sendfile()): feed the file through the output buffer.
+ * The file is read from the start, in order. */
 static void fill_from_file(conn_t *c)
 {
     size_t want = (size_t)RD_MIN(c->file_end - c->file_off, (off_t)65536);
-    ssize_t n = want && rd_buf_reserve(&c->out, want) == 0 ? pread(c->file_fd, c->out.p + c->out.len, want, c->file_off)
-                                                           : 0;
+    ssize_t n = want && rd_buf_reserve(&c->out, want) == 0 ? read(c->file_fd, c->out.p + c->out.len, (unsigned)want) : 0;
     if (n > 0) {
         c->out.len += (size_t)n;
         c->file_off += n;
@@ -201,7 +208,7 @@ static void fill_from_file(conn_t *c)
 static void flush_out(conn_t *c)
 {
     for (;;) {
-        if (c->ssl && !rd_buf_avail(&c->out) && c->file_fd >= 0)
+        if (!USE_SENDFILE(c) && !rd_buf_avail(&c->out) && c->file_fd >= 0)
             fill_from_file(c);
         if (!rd_buf_avail(&c->out))
             break;
@@ -214,7 +221,8 @@ static void flush_out(conn_t *c)
         }
         rd_buf_consume(&c->out, (size_t)w);
     }
-    while (!c->ssl && !rd_buf_avail(&c->out) && c->file_fd >= 0) {
+#ifndef _WIN32
+    while (USE_SENDFILE(c) && !rd_buf_avail(&c->out) && c->file_fd >= 0) {
         ssize_t w = sendfile(c->fd, c->file_fd, &c->file_off, (size_t)(c->file_end - c->file_off));
         if (w < 0 && (errno == EAGAIN || errno == EINTR))
             break;
@@ -223,6 +231,7 @@ static void flush_out(conn_t *c)
             c->file_fd = -1;
         }
     }
+#endif
     int pending = rd_buf_avail(&c->out) || c->file_fd >= 0;
     /* a TLS write waiting for readability resumes from on_read, not on writability */
     if ((pending && !c->ssl_wr_wants_r) || c->ssl_rd_wants_w)
@@ -260,7 +269,7 @@ void http_serve_static(conn_t *c, const http_req_t *r, const char *extra)
     }
     memcpy(rel, r->path, r->path_len);
     rel[r->path_len] = 0;
-    if (strstr(rel, "..") || strchr(rel, '\\') || strchr(rel, '%') || rel[0] != '/') {
+    if (strstr(rel, "..") || strchr(rel, '\\') || strchr(rel, '%') || strchr(rel, ':') || rel[0] != '/') {
         http_error(c, 400, "bad_request", "bad path");
         return;
     }
@@ -268,7 +277,7 @@ void http_serve_static(conn_t *c, const http_req_t *r, const char *extra)
         strcat(rel, "index.html");
     char full[1024];
     snprintf(full, sizeof full, "%s%s", S.web_root, rel);
-    int fd = open(full, O_RDONLY | O_CLOEXEC);
+    int fd = open(full, O_RDONLY | O_BINARY | O_CLOEXEC);
     struct stat st;
     if (fd < 0 || fstat(fd, &st) < 0 || !S_ISREG(st.st_mode)) {
         if (fd >= 0)
@@ -315,10 +324,12 @@ static int origin_ok(const http_req_t *r)
         }
     }
     const char *h = req_header(r, "Host", &hl);
-    const char *ss = memmem(o, ol, "://", 3);
+    const char *ss = NULL;
+    for (size_t i = 0; i + 3 <= ol && !ss; i++)
+        if (!memcmp(o + i, "://", 3))
+            ss = o + i + 3;
     if (!h || !ss)
         return 0;
-    ss += 3;
     return (size_t)(o + ol - ss) == hl && !strncasecmp(ss, h, hl);
 }
 
@@ -646,7 +657,7 @@ void conn_close(conn_t *c)
     ev_io_stop(S.loop, &c->rio);
     ev_io_stop(S.loop, &c->wio);
     tls_conn_free(c);
-    close(c->fd);
+    rd_sock_close(c->fd);
     c->fd = -1;
     if (c->file_fd >= 0)
         close(c->file_fd);
@@ -684,15 +695,15 @@ static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
     for (;;) {
         struct sockaddr_storage ss;
         socklen_t sl = sizeof ss;
-        int fd = accept4(l->fd, (struct sockaddr *)&ss, &sl, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        int fd = rd_sock_accept(l->fd, (struct sockaddr *)&ss, &sl);
         if (fd < 0)
             return;
         if (l->tls && !tls_ready()) { /* no certificate yet (ACME still running) */
-            close(fd);
+            rd_sock_close(fd);
             continue;
         }
         int one = 1;
-        setsockopt(fd, IPPROTO_TCP, 1 /* TCP_NODELAY */, &one, sizeof one);
+        setsockopt(fd, IPPROTO_TCP, 1 /* TCP_NODELAY */, (const void *)&one, sizeof one);
         conn_t *c = calloc(1, sizeof *c);
         c->fd = fd;
         c->file_fd = -1;
@@ -710,7 +721,7 @@ static void on_accept(struct ev_loop *loop, ev_io *w, int revents)
         }
         c->tls = l->tls;
         if (c->tls && tls_conn_start(c) < 0) {
-            close(fd);
+            rd_sock_close(fd);
             free(c);
             continue;
         }
@@ -740,14 +751,18 @@ int server_listen(const char *addr, int tls)
         LOGE("listen %s: %s", addr, gai_strerror(e));
         return -1;
     }
-    int fd = socket(ai->ai_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    int fd = rd_socket(ai->ai_family, SOCK_STREAM, 0);
     int one = 1;
+#ifdef _WIN32 /* Windows' SO_REUSEADDR would let another program take the port over */
+    setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const void *)&one, sizeof one);
+#else
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    if (fd < 0 || bind(fd, ai->ai_addr, ai->ai_addrlen) < 0 || listen(fd, 128) < 0) {
-        LOGE("listen %s: %s", addr, strerror(errno));
+#endif
+    if (fd < 0 || bind(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) < 0 || listen(fd, 128) < 0) {
+        LOGE("listen %s: %s", addr, rd_sock_strerror(rd_sock_error()));
         freeaddrinfo(ai);
         if (fd >= 0)
-            close(fd);
+            rd_sock_close(fd);
         return -1;
     }
     freeaddrinfo(ai);

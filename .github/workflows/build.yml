@@ -1,9 +1,11 @@
 # Builds RemoDroid for every target and packages it:
-#   static binaries  x86, x86_64, armv7, aarch64 (+ mipsel, mips for OpenWrt routers)
+#   static binaries  x86, x86_64, armv7, aarch64 (+ the agent alone for mipsel, mips routers)
 #   phone files      remodroid-server.jar + libremodroid.so (arm64-v8a, armeabi-v7a)
 #   desktop agents   Linux (x86_64, aarch64), Windows (x86_64, arm64), macOS (universal2):
 #                    libremodroid + the tray / menu bar app (multi-platform.md)
-#   packages         .deb, .rpm, .apk, .ipk (OpenWrt), .tar.gz, Merlin agent offline installers,
+#   server, Windows  remodroid-server.exe + the tray app RemoDroid-Server.exe (x86_64, arm64), tested as a service
+#   packages         .deb, .rpm, .apk, .ipk (OpenWrt, agent only), .tar.gz, Merlin agent offline installers,
+#                    RemoDroid-Server-*-windows-*.zip,
 #                    remodroid-desktop .deb/.rpm/.tar.gz, RemoDroid-*-linux-*.AppImage, RemoDroid-*-windows-*.zip,
 #                    RemoDroid-*-macos.zip
 # A pushed tag v* publishes a GitHub release; the annotated tag's message is the release notes.
@@ -226,6 +228,49 @@ jobs:
             build/win-${{ matrix.arch }}/desktop/remodroid-desktopd.exe
           if-no-files-found: error
 
+  server-windows:
+    name: server (windows ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: windows-2022, msystem: UCRT64, cc: gcc, windres: windres }
+          - { arch: arm64, runner: windows-11-arm, msystem: CLANGARM64, cc: clang, windres: llvm-windres }
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: false
+          install: make
+          pacboy: toolchain:p
+      - name: Build
+        run: |
+          make -j4 OPT=-Os TARGET=win-${{ matrix.arch }} CC=${{ matrix.cc }} HOSTCC=${{ matrix.cc }} \
+            WINDRES=${{ matrix.windres }} LDFLAGS="-Wl,--gc-sections -s"
+      - name: Only system DLLs
+        run: |
+          for f in remodroid-server.exe RemoDroid-Server.exe; do
+            echo "== $f"; objdump -p build/win-${{ matrix.arch }}/$f | grep "DLL Name"
+          done
+      - name: Server, supervisor and Windows service
+        shell: pwsh
+        run: node tests/server_windows.mjs build/win-${{ matrix.arch }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: server-windows-${{ matrix.arch }}
+          path: |
+            build/win-${{ matrix.arch }}/remodroid-server.exe
+            build/win-${{ matrix.arch }}/RemoDroid-Server.exe
+          if-no-files-found: error
+
   desktop-macos:
     name: desktop (macos universal2)
     runs-on: macos-14
@@ -263,7 +308,7 @@ jobs:
 
   packages:
     name: packages
-    needs: [test, binaries, phone, desktop-linux, desktop-windows, desktop-macos]
+    needs: [test, binaries, phone, desktop-linux, desktop-windows, server-windows, desktop-macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -297,7 +342,7 @@ jobs:
             *) v="0.1.${GITHUB_RUN_NUMBER}" ;;   # development builds
           esac
           echo "VERSION=$v" >> "$GITHUB_ENV"
-      - name: Build Linux and OpenWrt packages
+      - name: Build Linux and OpenWrt (agent) packages
         run: |
           mkdir -p build/out build/android
           cp -r artifacts/phone/. build/android/
@@ -319,6 +364,11 @@ jobs:
             ./packaging/desktop/package.sh "$VERSION" windows "$a" "artifacts/desktop-windows-$a"
           done
           cp artifacts/desktop-macos/RemoDroid-*-macos.zip build/packages/
+      - name: Windows server packages
+        run: |
+          for a in x86_64 arm64; do
+            ./packaging/windows/package.sh "$VERSION" "$a" "artifacts/server-windows-$a"
+          done
       - name: Package checksums
         run: |
           cd build/packages && sha256sum * > SHA256SUMS && cat SHA256SUMS

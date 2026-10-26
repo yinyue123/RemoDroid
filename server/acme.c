@@ -10,15 +10,12 @@
  * Account and certificate keys are ECDSA P-256 (JWS alg ES256). Crypto and TLS
  * are mbedTLS; the worker has its own contexts, nothing is shared with the loop. */
 #include <errno.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
 
 #include <mbedtls/asn1.h>
 #include <mbedtls/bignum.h>
@@ -58,9 +55,9 @@ static struct {
     ev_async done;
     ev_timer timer;
     double backoff;
-    pthread_mutex_t mu;   /* guards chal[] */
+    rd_mutex_t mu;        /* guards chal[] */
     struct { char token[128], keyauth[300]; } chal[MAX_DOMAINS];
-} A = { .mu = PTHREAD_MUTEX_INITIALIZER };
+} A = { .mu = RD_MUTEX_INIT };
 
 static void cert_path(const job_t *j, char *out, size_t cap) { snprintf(out, cap, "%s/cert.pem", j->dir); }
 static void key_path(const job_t *j, char *out, size_t cap) { snprintf(out, cap, "%s/key.pem", j->dir); }
@@ -69,7 +66,7 @@ static void key_path(const job_t *j, char *out, size_t cap) { snprintf(out, cap,
 
 static void chal_set(const char *token, const char *keyauth)
 {
-    pthread_mutex_lock(&A.mu);
+    rd_mutex_lock(&A.mu);
     for (int i = 0; i < MAX_DOMAINS; i++) {
         if (!A.chal[i].token[0] || !strcmp(A.chal[i].token, token)) {
             snprintf(A.chal[i].token, sizeof A.chal[i].token, "%s", token);
@@ -77,20 +74,20 @@ static void chal_set(const char *token, const char *keyauth)
             break;
         }
     }
-    pthread_mutex_unlock(&A.mu);
+    rd_mutex_unlock(&A.mu);
 }
 
 static void chal_clear(void)
 {
-    pthread_mutex_lock(&A.mu);
+    rd_mutex_lock(&A.mu);
     memset(A.chal, 0, sizeof A.chal);
-    pthread_mutex_unlock(&A.mu);
+    rd_mutex_unlock(&A.mu);
 }
 
 int acme_challenge(const char *token, size_t len, char *out, size_t cap)
 {
     int r = -1;
-    pthread_mutex_lock(&A.mu);
+    rd_mutex_lock(&A.mu);
     for (int i = 0; i < MAX_DOMAINS; i++) {
         if (A.chal[i].token[0] && strlen(A.chal[i].token) == len && !memcmp(A.chal[i].token, token, len)) {
             snprintf(out, cap, "%s", A.chal[i].keyauth);
@@ -98,7 +95,7 @@ int acme_challenge(const char *token, size_t len, char *out, size_t cap)
             break;
         }
     }
-    pthread_mutex_unlock(&A.mu);
+    rd_mutex_unlock(&A.mu);
     if (r == 0)
         LOGI("acme: answered the http-01 challenge %.*s", (int)RD_MIN(len, 16), token);
     return r;
@@ -146,13 +143,18 @@ static int write_file(const char *path, const void *d, size_t n, mode_t mode)
 {
     char tmp[600];
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
-    FILE *f = fopen(tmp, "w");
+    FILE *f = fopen(tmp, "wb");
     if (!f)
         return -1;
     chmod(tmp, mode);
     int ok = fwrite(d, 1, n, f) == n;
     ok &= fclose(f) == 0;
-    if (!ok || rename(tmp, path) < 0) {
+#ifdef _WIN32 /* rename() won't replace a file there */
+    ok = ok && MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING);
+#else
+    ok = ok && rename(tmp, path) == 0;
+#endif
+    if (!ok) {
         unlink(tmp);
         return -1;
     }
@@ -329,7 +331,7 @@ static cJSON *fetch(acme_t *a, const char *url, const char *what, int wait_done)
         int wait = r.retry_after > 0 ? RD_MIN(r.retry_after, 10) : 2;
         resp_free(&r);
         cJSON_Delete(j);
-        sleep((unsigned)wait);
+        rd_sleep_ms(wait * 1000);
     }
     fail(a->j, "%s: still pending after a long wait", what);
     return NULL;
@@ -672,11 +674,7 @@ static void check(void)
     *j = A.cfg;
     j->ok = 0;
     j->err[0] = 0;
-    pthread_t t;
-    pthread_attr_t at;
-    pthread_attr_init(&at);
-    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&t, &at, worker, j) != 0) {
+    if (rd_thread_detached(worker, j) < 0) {
         LOGE("acme: cannot start the worker thread");
         free(j);
     } else {
@@ -684,7 +682,6 @@ static void check(void)
         LOGI("acme: requesting a certificate for %s%s from %s", j->domains[0], j->ndomains > 1 ? " (+more)" : "",
              j->directory);
     }
-    pthread_attr_destroy(&at);
 }
 
 static void on_done(struct ev_loop *loop, ev_async *w, int revents)
@@ -732,7 +729,13 @@ static int read_config(void)
     }
     snprintf(c->directory, sizeof c->directory, "%s", rd_conf_get(S.conf, "acme", "directory", LETSENCRYPT));
     snprintf(c->email, sizeof c->email, "%s", rd_conf_get(S.conf, "acme", "email", ""));
-    snprintf(c->dir, sizeof c->dir, "%s", rd_conf_get(S.conf, "acme", "dir", "/var/lib/remodroid/acme"));
+#ifdef _WIN32
+    char def[300];
+    snprintf(def, sizeof def, "%s\\acme", S.state_dir);
+#else
+    const char *def = "/var/lib/remodroid/acme";
+#endif
+    snprintf(c->dir, sizeof c->dir, "%s", rd_conf_get(S.conf, "acme", "dir", def));
     snprintf(c->ca_file, sizeof c->ca_file, "%s", rd_conf_get(S.conf, "acme", "ca_file", ""));
     snprintf(c->profile, sizeof c->profile, "%s", rd_conf_get(S.conf, "acme", "profile", ""));
     A.enabled = c->ndomains > 0;

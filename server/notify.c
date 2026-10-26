@@ -4,7 +4,6 @@
  * Bark push (https://github.com/Finb/Bark). The Bark call is blocking HTTPS, so
  * it runs on a detached worker thread, like acme.c. The Bark key lives only in
  * server.ini, and notification text is never written to the log. */
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -105,14 +104,9 @@ void notify_on_event(device_t *d, const char *kind, cJSON *info)
     snprintf(j->pkg, sizeof j->pkg, "%s", pkg);
     j->json = bark_body(ttl, text);
 
-    pthread_t t;
-    pthread_attr_t at;
-    pthread_attr_init(&at);
-    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&t, &at, bark_worker, j) != 0) {
+    if (rd_thread_detached(bark_worker, j) < 0) {
         LOGE("notify: cannot start the Bark worker thread");
         free(j->json);
         free(j);
     }
-    pthread_attr_destroy(&at);
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Download grids (CPU x platform: the server, the router agent, and the desktop agents) from a release's files.
+The server is for Linux and Windows servers: no OpenWrt or MIPS builds (routers run the agent).
 
   doc/downloads.py 0.3.4 packages/            Markdown for the release notes (CI, release job)
   gh release view v0.3.4 --json assets -q '.assets[].name' | doc/downloads.py 0.3.4 - --readme README.md
@@ -31,10 +32,12 @@ def grid(part, names, ver):
     url = f'https://github.com/{REPO}/releases/download/v{ver}/'
     btn = lambda name, badge, alt: f'[<img src="{BADGE}{badge}.svg" alt="{alt}" height="24">]({url}{name})'
     expect = lambda n: n if n in names else None
-    out = [f'| {part.title()} | ' + ' | '.join(c[1] for c in COLS) + ' |', '|:--|' + ':-:|' * len(COLS)]
-    for cpu, label, deb, rpm, apk, ipks, tar in ROWS:
+    cols = [c for c in COLS if part != 'server' or c[0] != 'ipk']
+    rows = [r for r in ROWS if part != 'server' or r[2]]  # MIPS (no .deb) is agent only
+    out = [f'| {part.title()} | ' + ' | '.join(c[1] for c in cols) + ' |', '|:--|' + ':-:|' * len(cols)]
+    for cpu, label, deb, rpm, apk, ipks, tar in rows:
         cells = []
-        for kind, _ in COLS:
+        for kind, _ in cols:
             if kind == 'deb':
                 n = deb and expect(f'remodroid-{part}_{ver}-1_{deb}.deb')
                 cells.append(btn(n, 'deb', f'{part} .deb {cpu}') if n else '—')
@@ -50,14 +53,34 @@ def grid(part, names, ver):
                 cells.append('<br>'.join(bs) or '—')
             else:
                 n = expect(f'remodroid-{ver}-linux-{tar}.tar.gz')
-                cells.append(btn(n, 'tar', f'server + agent .tar.gz {cpu}') if n else '—')
+                what = 'server + agent' if deb else 'agent'
+                cells.append(btn(n, 'tar', f'{what} .tar.gz {cpu}') if n else '—')
         out.append(f'| {label} | ' + ' | '.join(cells) + ' |')
     return '\n'.join(out)
 
 
+def windows_grid(names, ver):
+    """The server for Windows (packaging/windows/package.sh): one row, one column per CPU, as desktop_grid."""
+    url = f'https://github.com/{REPO}/releases/download/v{ver}/'
+    def cell(arch, alt):
+        n = f'RemoDroid-Server-{ver}-windows-{arch}.zip'
+        return f'[<img src="{BADGE}zip.svg" alt="{alt}" height="24">]({url}{n})' if n in names else '—'
+    if not any(n.startswith('RemoDroid-Server-') for n in names):
+        return ''
+    return '\n'.join([
+        '| Server | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Graviton, Snapdragon…</sub> |', '|:--|:-:|:-:|',
+        f'| **Windows** Server 2019+, 10 1809+, 11 | {cell("x86_64", "server Windows .zip x86_64")} | '
+        f'{cell("arm64", "server Windows .zip ARM64")} |',
+    ])
+
+
 HINT = ('Pick the row for the machine\'s CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, '
         '`i686` = x86) and the column for its system. OpenWrt: take the build that `opkg print-architecture` '
-        'lists. *Any Linux* holds both the server and the agent.')
+        'lists. *Any Linux* holds both the server and the agent (only the agent on MIPS).')
+SERVER_HINT = ('Pick the row for the server\'s CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, '
+               '`i686` = x86) and the column for its system. *Any Linux* holds both the server and the agent.')
+WINDOWS_HINT = ('Windows: unzip it, run **RemoDroid-Server.exe** and choose *Install and start*; the same window sets the '
+                'administrator, web port, HTTPS domain and STUN/TURN, and shows the log.')
 
 
 def merlin_note(names, ver):
@@ -97,10 +120,14 @@ def checksums(ver):
     return f'Checksums: [SHA256SUMS](https://github.com/{REPO}/releases/download/v{ver}/SHA256SUMS)'
 
 
+def server_section(names, ver):
+    win = windows_grid(names, ver)
+    return [SERVER_HINT, '', grid('server', names, ver), ''] + ([WINDOWS_HINT, '', win, ''] if win else [])
+
+
 def markdown(names, ver):
     return '\n'.join([
-        f'### Downloads (v{ver})', '', HINT, '',
-        grid('server', names, ver), '',
+        f'### Downloads (v{ver})', ''] + server_section(names, ver) + [HINT, '',
         grid('agent', names, ver), '', merlin_note(names, ver), '',
         '#### Remote desktop (Windows, macOS, Linux)', '', DESKTOP_HINT, '', desktop_grid(names, ver), '',
         checksums(ver),
@@ -112,7 +139,9 @@ def section(part, names, ver):
     if part == 'desktop':
         return '\n'.join([f'#### Download RemoDroid for your computer (v{ver})', '', DESKTOP_HINT, '',
                           desktop_grid(names, ver), '', checksums(ver)])
-    note = merlin_note(names, ver) if part == 'agent' else ''
+    if part == 'server':
+        return '\n'.join([f'#### Download the server (v{ver})', ''] + server_section(names, ver) + [checksums(ver)])
+    note = merlin_note(names, ver)
     return '\n'.join([f'#### Download the {part} (v{ver})', '', HINT, '', grid(part, names, ver), '']
                       + ([note, ''] if note else []) + [checksums(ver)])
 

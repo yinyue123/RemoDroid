@@ -62,4 +62,8 @@
 #define MBEDTLS_X509_USE_C
 #define MBEDTLS_X509_CRT_PARSE_C
 
+#ifdef _WIN32
+#define MBEDTLS_PLATFORM_C /* mbedTLS requires it on Windows (its snprintf shim) */
+#endif
+
 #endif

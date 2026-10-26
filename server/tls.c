@@ -2,10 +2,8 @@
  * from [tls] cert/key or from the ACME client (acme.c). A renewed certificate
  * gets a new config; connections already open keep a reference to the old one
  * until they close. */
-#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
@@ -119,18 +117,18 @@ int tls_ready(void) { return G.cur != NULL; }
 static int bio_send(void *ctx, const unsigned char *b, size_t n)
 {
     tconn_t *t = ctx;
-    ssize_t r = send(t->c->fd, b, n, MSG_NOSIGNAL);
+    ssize_t r = send(t->c->fd, (const void *)b, (int)RD_MIN(n, (size_t)1 << 30), MSG_NOSIGNAL);
     if (r < 0)
-        return errno == EAGAIN || errno == EINTR ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
+        return rd_sock_again(rd_sock_error()) ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_NET_SEND_FAILED;
     return (int)r;
 }
 
 static int bio_recv(void *ctx, unsigned char *b, size_t n)
 {
     tconn_t *t = ctx;
-    ssize_t r = recv(t->c->fd, b, n, 0);
+    ssize_t r = recv(t->c->fd, (void *)b, (int)RD_MIN(n, (size_t)1 << 30), 0);
     if (r < 0)
-        return errno == EAGAIN || errno == EINTR ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
+        return rd_sock_again(rd_sock_error()) ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_NET_RECV_FAILED;
     return (int)r; /* 0 = EOF */
 }
 

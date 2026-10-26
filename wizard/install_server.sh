@@ -5,7 +5,8 @@
 #
 # Picks the package for this distro and CPU from the latest GitHub release
 # (REMODROID_VERSION=0.2 for a specific one). Debian/Ubuntu, CentOS/RHEL/Fedora,
-# Alpine, or any Linux through the plain tarball.
+# Alpine, or any Linux through the plain tarball. Not for routers (no MIPS server): they
+# run the agent. Windows servers: the RemoDroid-Server zip from the release.
 set -eu
 REPO=yinyue123/RemoDroid
 VERSION=${REMODROID_VERSION:-latest}
@@ -30,9 +31,7 @@ case "$(uname -m)" in
     aarch64|arm64) ARCH=aarch64 DEB=arm64 RPM=aarch64 APK=aarch64 ;;
     armv7*|armv8l) ARCH=armv7 DEB=armhf RPM=armv7hl APK=armv7 ;;
     i?86) ARCH=x86 DEB=i386 RPM=i686 APK=x86 ;;
-    mips) ARCH=mips DEB= RPM= APK= ;;
-    mipsel) ARCH=mipsel DEB= RPM= APK= ;;
-    *) die "unsupported CPU: $(uname -m)" ;;
+    *) die "unsupported CPU: $(uname -m) (the server runs on x86_64, ARM64, ARMv7 and x86; routers run the agent)" ;;
 esac
 
 say "fetching the release list"

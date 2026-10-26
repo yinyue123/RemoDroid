@@ -13,9 +13,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "msg.h"
 #include "server.h"
@@ -101,6 +98,8 @@ static cJSON *current(const http_req_t *r, const char *user)
     return j;
 }
 
+cJSON *setup_current(const char *user) { return current(NULL, user); }
+
 static int valid_port(int p) { return p >= 1 && p <= 65535; }
 
 static int valid_name(const char *s, const char *extra, size_t max)
@@ -122,8 +121,10 @@ static int valid_ipv4(const char *s)
            c >= 0 && c < 256 && d >= 0 && d < 256;
 }
 
-/* Applies the wizard's form; user = the logged-in admin (NULL during setup). */
-static void apply(conn_t *c, cJSON *in, const char *user)
+/* Writes the wizard's form to server.ini; user = the admin it is applied as (NULL during
+ * setup). NULL when saved, else what is wrong (*status: 400 the form, 500 the file). The
+ * new settings take effect when the server restarts. */
+const char *setup_save(cJSON *in, const char *user, int *status)
 {
     int http_port = (int)msg_num(in, "http_port", 0), tls_port = (int)msg_num(in, "tls_port", 443);
     int turn_port = (int)msg_num(in, "turn_port", 3478), turn_on = msg_bool(in, "turn_enabled", 1);
@@ -151,10 +152,9 @@ static void apply(conn_t *c, cJSON *in, const char *user)
         err = "the public IPv4 address is needed for STUN/TURN (e.g. 203.0.113.10)";
     else if (strchr(extra, '\n') || strlen(extra) > 1000)
         err = "the extra ICE servers must be one line";
-    if (err) {
-        http_error(c, 400, "bad_request", err);
-        return;
-    }
+    *status = 400;
+    if (err)
+        return err;
 
     char v[1100];
     int ok = 1;
@@ -201,16 +201,26 @@ static void apply(conn_t *c, cJSON *in, const char *user)
         ok &= server_conf_set("turn", "urls", NULL) == 0;
     }
     ok &= server_conf_set("ice", "extra", *extra ? extra : NULL) == 0;
-    if (!ok) {
-        http_error(c, 500, "io_error", "could not write the configuration file; check its permissions");
-        return;
-    }
+    *status = 500;
+    if (!ok)
+        return "could not write the configuration file; check its permissions";
     LOGI("setup: settings saved by %s (web port %d%s%s)", user ? user : "the setup wizard", http_port,
          *domain ? ", domain " : "", domain);
     if (!user) {
         char path[400];
         token_path(path, sizeof path);
         unlink(path);
+    }
+    return NULL;
+}
+
+static void apply(conn_t *c, cJSON *in, const char *user)
+{
+    int status;
+    const char *err = setup_save(in, user, &status);
+    if (err) {
+        http_error(c, status, status == 500 ? "io_error" : "bad_request", err);
+        return;
     }
     cJSON *b = cJSON_CreateObject();
     cJSON_AddBoolToObject(b, "ok", 1);

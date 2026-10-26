@@ -19,6 +19,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #define RD_PATH_SEP '\\'
 #ifndef MSG_NOSIGNAL
@@ -32,6 +33,9 @@
 #define gai_strerror gai_strerrorA
 #endif
 #include <time.h>
+#ifndef O_CLOEXEC
+#define O_CLOEXEC _O_NOINHERIT
+#endif
 #define strtok_r strtok_s
 #ifndef strcasecmp
 #define strcasecmp _stricmp
@@ -40,6 +44,7 @@
 static inline struct tm *rd_gmtime_r(const time_t *t, struct tm *tm) { return gmtime_s(tm, t) ? NULL : tm; }
 #define gmtime_r rd_gmtime_r
 typedef SRWLOCK rd_mutex_t;
+#define RD_MUTEX_INIT SRWLOCK_INIT
 typedef CONDITION_VARIABLE rd_cond_t;
 typedef HANDLE rd_thread_t;
 #else
@@ -48,14 +53,19 @@ typedef HANDLE rd_thread_t;
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 #define RD_PATH_SEP '/'
+#ifndef O_BINARY
+#define O_BINARY 0 /* Windows opens files as text without it */
+#endif
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0 /* macOS: SO_NOSIGPIPE is set on each socket instead */
 #endif
 typedef pthread_mutex_t rd_mutex_t;
+#define RD_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
 typedef pthread_cond_t rd_cond_t;
 typedef pthread_t rd_thread_t;
 #endif
@@ -74,12 +84,14 @@ int         rd_sock_nonblock(int fd);
 int         rd_sock_error(void);                  /* errno / WSAGetLastError() */
 int         rd_sock_again(int err);               /* would block / interrupted / in progress */
 const char *rd_sock_strerror(int err);
-/* Accepts a connection on a listening socket, non-blocking; -1 on error. */
-int         rd_sock_accept(int lfd);
+/* Accepts a connection on a listening socket, non-blocking and close-on-exec; -1 on error.
+ * sa / len (both may be NULL) receive the peer's address. */
+int         rd_sock_accept(int lfd, struct sockaddr *sa, socklen_t *len);
 
 /* ---- threads ---- */
 int  rd_thread_start(rd_thread_t *t, void *(*fn)(void *), void *arg);
 void rd_thread_join(rd_thread_t t);
+int  rd_thread_detached(void *(*fn)(void *), void *arg); /* runs fn(arg) on a thread nobody joins */
 void rd_mutex_init(rd_mutex_t *m);
 void rd_mutex_lock(rd_mutex_t *m);
 void rd_mutex_unlock(rd_mutex_t *m);
