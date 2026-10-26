@@ -5,7 +5,7 @@
  * It runs as an administrator (the manifest): the service, server.ini and the log
  * are for administrators only.
  *
- *   RemoDroid-Server.exe [--background] */
+ *   RemoDroidServer.exe [--background] */
 #ifndef UNICODE
 #define UNICODE
 #endif

@@ -288,9 +288,11 @@ static void open_log(void)
         return;
     SetStdHandle(STD_OUTPUT_HANDLE, h);
     SetStdHandle(STD_ERROR_HANDLE, h);
+    /* our own log lines (stderr) go there too. A service starts without a stderr, and the C
+     * runtime's stream stays broken after a plain _dup2: reopen it first, then repoint it. */
     int fd = _open_osfhandle((intptr_t)h, _O_APPEND);
-    if (fd >= 0)
-        _dup2(fd, 2); /* our own log lines (stderr) go there too */
+    if (fd >= 0 && freopen("NUL", "w", stderr) && _dup2(fd, _fileno(stderr)) == 0)
+        setvbuf(stderr, NULL, _IONBF, 0);
 }
 
 /* ---------------- install / uninstall / start / stop ---------------- */
@@ -448,7 +450,7 @@ static int install(void)
     if (!r)
         printf("RemoDroid Server is running as the Windows service \"RemoDroid Server\" (starts with Windows).\n"
                "  settings:  %s\n  log:       %s\n"
-               "Change the settings in RemoDroid-Server.exe, or open http://localhost:<port>/ for the setup wizard\n"
+               "Change the settings in RemoDroidServer.exe, or open http://localhost:<port>/ for the setup wizard\n"
                "(its code is in %s).\n",
                S.conf_path, win_data_path("server.log"), win_data_path("setup-token"));
     return r;

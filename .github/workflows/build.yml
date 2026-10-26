@@ -3,7 +3,7 @@
 #   phone files      remodroid-server.jar + libremodroid.so (arm64-v8a, armeabi-v7a)
 #   desktop agents   Linux (x86_64, aarch64), Windows (x86_64, arm64), macOS (universal2):
 #                    libremodroid + the tray / menu bar app (multi-platform.md)
-#   server, Windows  remodroid-server.exe + the tray app RemoDroid-Server.exe (x86_64, arm64), tested as a service
+#   server, Windows  remodroid-server.exe + the tray app RemoDroidServer.exe (x86_64, arm64), tested as a service
 #   packages         .deb, .rpm, .apk, .ipk (OpenWrt, agent only), .tar.gz, Merlin agent offline installers,
 #                    RemoDroid-Server-*-windows-*.zip,
 #                    remodroid-desktop .deb/.rpm/.tar.gz, RemoDroid-*-linux-*.AppImage, RemoDroid-*-windows-*.zip,
@@ -257,9 +257,11 @@ jobs:
             WINDRES=${{ matrix.windres }} LDFLAGS="-Wl,--gc-sections -s"
       - name: Only system DLLs
         run: |
-          for f in remodroid-server.exe RemoDroid-Server.exe; do
+          for f in remodroid-server.exe RemoDroidServer.exe; do
             echo "== $f"; objdump -p build/win-${{ matrix.arch }}/$f | grep "DLL Name"
           done
+          # Windows file names ignore case: a tray app named like the server would replace it
+          objdump -p build/win-${{ matrix.arch }}/remodroid-server.exe | grep -q "DLL Name: WS2_32.dll"
       - name: Server, supervisor and Windows service
         shell: pwsh
         run: node tests/server_windows.mjs build/win-${{ matrix.arch }}
@@ -268,7 +270,7 @@ jobs:
           name: server-windows-${{ matrix.arch }}
           path: |
             build/win-${{ matrix.arch }}/remodroid-server.exe
-            build/win-${{ matrix.arch }}/RemoDroid-Server.exe
+            build/win-${{ matrix.arch }}/RemoDroidServer.exe
           if-no-files-found: error
 
   desktop-macos:

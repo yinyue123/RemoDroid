@@ -69,7 +69,7 @@ AGENT_OBJ  := $(AGENT_SRC:%.c=$(OUT)/obj/%.o)
 ifeq ($(EXE),)
 all: $(OUT)/remodroid-server $(OUT)/remodroid-agent
 else
-all: $(OUT)/remodroid-server.exe $(OUT)/RemoDroid-Server.exe # server/win/win.mk
+all: $(OUT)/remodroid-server.exe $(OUT)/RemoDroidServer.exe # server/win/win.mk
 endif
 
 $(OUT)/libthird.a: $(TP_OBJ)

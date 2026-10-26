@@ -6,7 +6,7 @@ Windows Server 2019 or later, Windows 10 1809 or later, Windows 11.
 
 Install
   1. Unzip this folder somewhere it can stay, e.g. C:\Program Files\RemoDroid Server.
-  2. Run RemoDroid-Server.exe and choose "Install and start".
+  2. Run RemoDroidServer.exe and choose "Install and start".
      It installs the "RemoDroid Server" Windows service, which starts with Windows
      whether or not anyone signs in, and lets it through Windows Firewall.
   3. In the same window, fill in the administrator, the web port, a domain for HTTPS
@@ -25,7 +25,7 @@ Files
   Log       %ProgramData%\RemoDroid\server.log
   (that folder is for administrators only)
 
-Update: in RemoDroid-Server.exe press Stop, unzip the new version over this folder, press Start.
+Update: in RemoDroidServer.exe press Stop, unzip the new version over this folder, press Start.
 
 Without the app, from an administrator command prompt:
   remodroid-server install      install and start the service

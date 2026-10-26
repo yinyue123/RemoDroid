@@ -79,7 +79,7 @@ HINT = ('Pick the row for the machine\'s CPU (`uname -m`: `x86_64`, `aarch64` = 
         'lists. *Any Linux* holds both the server and the agent (only the agent on MIPS).')
 SERVER_HINT = ('Pick the row for the server\'s CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, '
                '`i686` = x86) and the column for its system. *Any Linux* holds both the server and the agent.')
-WINDOWS_HINT = ('Windows: unzip it, run **RemoDroid-Server.exe** and choose *Install and start*; the same window sets the '
+WINDOWS_HINT = ('Windows: unzip it, run **RemoDroidServer.exe** and choose *Install and start*; the same window sets the '
                 'administrator, web port, HTTPS domain and STUN/TURN, and shows the log.')
 
 

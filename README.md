@@ -68,7 +68,7 @@ It picks the right package, installs it, starts the server and prints a link lik
 `http://<ip>:5580/wizard.html?token=…`.
 
 On a **Windows server** (Windows Server 2019 or newer; Windows 10 and 11 work too): download the Windows `.zip`
-below, unzip it into a folder it can stay in, run **RemoDroid-Server.exe** and choose **Install and start**. It
+below, unzip it into a folder it can stay in, run **RemoDroidServer.exe** and choose **Install and start**. It
 runs the server as a Windows service, which starts with Windows whether or not anyone is signed in, and lets it
 through Windows Firewall. The same window sets the administrator, web port, HTTPS domain and STUN/TURN, starts and
 stops the server and shows its log; its icon stays by the clock. From a command prompt instead:
@@ -423,7 +423,7 @@ make dist                   # inside the build container (build/Dockerfile, need
 
 Results land in `build/out/<arch>/`: about 0.8 MB per binary (1.2 MB on MIPS, which gets only the agent).
 
-The server for Windows (`remodroid-server.exe` and the tray app `RemoDroid-Server.exe`), cross-built with Zig or
+The server for Windows (`remodroid-server.exe` and the tray app `RemoDroidServer.exe`), cross-built with Zig or
 natively in MSYS2:
 
 ```sh

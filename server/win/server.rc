@@ -1,5 +1,5 @@
-// remodroid-server.exe / RemoDroid-Server.exe resources: manifest, icon, version.
-// windres -DRD_TRAY (RemoDroid-Server.exe) -DRD_VERSION_STR=\"0.5\" -DRD_VERSION_NUM=0,5,0,0 -I build/... server.rc out.res
+// remodroid-server.exe / RemoDroidServer.exe resources: manifest, icon, version.
+// windres -DRD_TRAY (RemoDroidServer.exe) -DRD_VERSION_STR=\"0.5\" -DRD_VERSION_NUM=0,5,0,0 -I build/... server.rc out.res
 #include <winver.h>
 
 #ifndef RD_VERSION_STR
