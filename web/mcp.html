@@ -41,8 +41,8 @@
   <div class="flow" aria-label="How a request travels"><span>Assistant</span><i>→</i><span>this panel /mcp/…</span><i>→</i><span>agent</span><i>→</i><span>phone</span></div>
   <p class="callout warn" id="status" hidden></p>
 
-  <h2>1. Pick a phone</h2>
-  <p>Each phone has its own MCP URL. An assistant you connect to one phone can't see the others.</p>
+  <h2>1. Pick a device</h2>
+  <p>Each phone and computer has its own MCP URL. An assistant you connect to one can't see the others.</p>
   <div class="group" id="devs"><div class="item"><span class="txt"><small>Loading…</small></span></div></div>
   <div id="urlBox" style="margin-top:12px"></div>
 
@@ -77,7 +77,8 @@
     <li><b>You come first.</b> While you're touching the phone in the viewer, the assistant's taps are refused for 5 seconds and it is told to wait.</li>
     <li><b>Screen text is data.</b> Assistants are told that text on the phone (messages, web pages) is content, never instructions to them.</li>
     <li><b>It asks before risky taps.</b> Tapping and typing are marked as actions with side effects, so Claude Code and ChatGPT ask you before running them unless you allow them.</li>
-    <li><b>Phones only, for now.</b> Computers (Windows, macOS, Linux) don't offer screen reading to assistants yet.</li>
+    <li><b>Computers too.</b> On a Windows, macOS or Linux computer the assistant sees the screen through screenshots and uses the mouse and keyboard.
+      The person at the computer is told when an assistant starts. A view-only computer can only be looked at, and one that asks before every viewer is off-limits to assistants.</li>
     <li><b>Sign-ins are revocable.</b> claude.ai and ChatGPT get a token for one phone when you tap Allow. It shows under Server → API tokens; revoke it there to cut them off.</li>
   </ul>
 
@@ -169,11 +170,11 @@ function render() {
   const d = devices.find(x => x.id === pick);
   $('#devs').innerHTML = devices.length ? devices.map(x => {
     const desk = isDesk(x), on = x.online;
-    const sub = desk ? 'computer · not available to assistants yet' : [x.id, on ? 'online' : 'offline'].join(' · ');
-    return `<button type="button" class="item" data-dev="${esc(x.id)}" aria-pressed="${x.id === pick}" ${desk ? 'disabled' : ''}>
-      <span class="ic ${desk ? '' : on ? 'on' : 'off'}">${desk ? COMPUTER : PHONE}</span>
+    const sub = [x.id, desk ? 'computer' : null, on ? 'online' : 'offline'].filter(Boolean).join(' · ');
+    return `<button type="button" class="item" data-dev="${esc(x.id)}" aria-pressed="${x.id === pick}">
+      <span class="ic ${on ? 'on' : 'off'}">${desk ? COMPUTER : PHONE}</span>
       <span class="txt"><b>${esc(x.name || x.id)}</b><small>${esc(sub)}</small></span></button>`;
-  }).join('') : '<div class="item"><span class="txt"><small>No phones yet. Add an agent on the <a href="/panel.html#agents/add">Agents</a> page first.</small></span></div>';
+  }).join('') : '<div class="item"><span class="txt"><small>No devices yet. Add an agent on the <a href="/panel.html#agents/add">Agents</a> page first.</small></span></div>';
   $('#urlBox').innerHTML = d ? `<p class="note" style="margin:0 0 6px">MCP URL for <b>${esc(d.name || d.id)}</b>:</p>${box(url(d.id), true)}` : '';
   const oauth = !!(CLIENTS.find(x => x[0] === tab) || [])[3];
   $('#tokYes').hidden = oauth;
@@ -244,8 +245,7 @@ async function load() {
     user = (await get('/api/v1/me')).user || user;
     devices = (await get('/api/v1/devices')).devices || [];
   } catch (_) {}
-  const phones = devices.filter(x => !isDesk(x));
-  if (!phones.some(x => x.id === pick)) pick = (phones.find(x => x.online) || phones[0] || {}).id || null;
+  if (!devices.some(x => x.id === pick)) pick = (devices.find(x => x.online) || devices[0] || {}).id || null;
   render();
   /* Is the endpoint live yet? A live one wants a token (401); before that, the path doesn't exist. */
   try {

@@ -482,7 +482,7 @@ static void on_server_message(void *ud, cJSON *m)
         cJSON_AddItemToObject(r, "server_stderr", cJSON_CreateArray());
         wsc_send(msg_ack(id, r));
     } else if (!strcmp(t, "api")) {
-        wsc_send(msg_error(id, "unsupported", "the AI control API is for phones"));
+        ai_request(id, msg_d(m)); /* ai.c */
     } else if (!strcmp(t, "error")) {
         LOGW("server error: %s", msg_str(msg_d(m), "msg", "?"));
     }

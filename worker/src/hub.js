@@ -10,7 +10,7 @@
 // Data lives in the Durable Object's SQLite; WebSockets use the hibernation API, so
 // per-socket facts are kept in their attachments and device state in SQLite.
 import { DurableObject } from 'cloudflare:workers';
-import { aiRoute, bearer, initTables, mcpHandle, oauthApi, oauthHandle, tokenApi, tokensApi } from './mcp.js';
+import { aiRoute, bearer, initTables, mcpHandle, oauthApi, oauthHandle, platformOf, tokenApi, tokensApi } from './mcp.js';
 
 const PROTO = 1;
 const VERSION = '0.3.0';
@@ -476,7 +476,7 @@ export class Hub extends DurableObject {
     const vs = this.one('SELECT * FROM vsessions WHERE device = ?', d.id);
     return {
       id: d.id, name: d.name, online, last_seen: d.last_seen || 0,
-      platform: (hello && hello.platform) || 'android', // "windows" / "macos" / "linux" for a computer
+      platform: platformOf(d), // "windows" / "macos" / "linux" for a computer, remembered while offline
       agent: { ...(hello ? { version: hello.version || '', arch: hello.arch || '', ...(hello.os ? { os: hello.os } : {}) } : {}), ...(online ? { uptime_s: Math.round((now() - d.online_since) / 1000) } : {}), public_ip: d.public_ip || '' },
       phone: status.phone && typeof status.phone === 'object' ? status.phone : { attached: false },
       session: vs ? { active: true, sid: vs.sid, since: vs.since, viewer: vs.viewer } : { active: false },
@@ -575,7 +575,7 @@ export class Hub extends DurableObject {
     this.sql.exec('UPDATE devices SET last_seen = ? WHERE id = ?', now(), id);
     if (m.t === 'hello') {
       const was = this.online(id);
-      this.sql.exec('UPDATE devices SET hello = ?, online_since = ?, public_ip = ? WHERE id = ?', JSON.stringify(d), now(), a.ip || '', id);
+      this.sql.exec('UPDATE devices SET hello = ?, online_since = ?, public_ip = ?, platform = ? WHERE id = ?', JSON.stringify(d), now(), a.ip || '', String(d.platform || 'android').slice(0, 15), id);
       if (d.phone && typeof d.phone === 'object') {
         const st = JSON.parse(this.one('SELECT status FROM devices WHERE id = ?', id).status || '{}');
         st.phone = d.phone;

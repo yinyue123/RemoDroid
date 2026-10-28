@@ -152,7 +152,7 @@ function renderAgents() {
       : `offline${d.last_seen ? ' · seen ' + ago(d.last_seen) : ''}`;
     return item({ href: '#agents/' + encodeURIComponent(d.id), icon: agentIcon(d), iconCls: d.online ? 'on' : 'off', title: d.name, sub });
   })) + `<h2 class="gtitle"></h2><div class="group">${item({ href: '#agents/add', title: '', html: '<span class="txt"><b style="color:var(--accent)">Add an agent</b><small>A router with a phone, or a computer; paired with a one-time code</small></span>' })}</div>` +
-    group('AI assistants', [item({ href: '/mcp/help', icon: ICON.ai, iconCls: 'on', title: 'MCP for Claude and ChatGPT', sub: 'Let an assistant read the phone\'s screen and tap, type and swipe' })],
+    group('AI assistants', [item({ href: '/mcp/help', icon: ICON.ai, iconCls: 'on', title: 'MCP for Claude and ChatGPT', sub: 'Let an assistant see and use your phones and computers' })],
       'Opens the guide (<code>/mcp/help</code>): each phone\'s MCP URL, how to make a token, and setup for Claude Code, Claude Desktop, Codex and the Claude and OpenAI APIs.');
 }
 
@@ -231,7 +231,7 @@ async function renderAgent(id) {
   main.innerHTML = status + name + (desk ? '' : notifyGroup(d)) + '<div id="cfg"></div>' +
     group('Actions', [
       item({ act: 'open', html: `<span class="txt"><b style="color:var(--accent)">Open the ${N}</b></span>` }),
-      desk ? '' : item({ href: '/mcp/help?device=' + encodeURIComponent(d.id), html: '<span class="txt"><b>Use with an AI assistant</b><small>MCP: let Claude or ChatGPT see and control this phone</small></span>' }),
+      item({ href: '/mcp/help?device=' + encodeURIComponent(d.id), html: `<span class="txt"><b>Use with an AI assistant</b><small>MCP: let Claude or ChatGPT see and control this ${N}</small></span>` }),
       d.online && !desk ? item({ act: 'restart', html: '<span class="txt"><b>Restart the phone server</b><small>When the picture or input is stuck</small></span>', noChev: true }) : '',
       d.online && !desk ? item({ act: 'usb', html: '<span class="txt"><b>Reconnect USB</b></span>', noChev: true }) : '',
       d.online ? item({ act: 'wake', html: `<span class="txt"><b>${desk ? 'Wake the display' : 'Wake the phone'}</b></span>`, noChev: true }) : '',

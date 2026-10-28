@@ -173,6 +173,7 @@ void      hub_rename_device(device_t *d, const char *name);
 void      hub_device_changed(device_t *d); /* device.update to every viewer */
 device_t *hub_device(const char *id);
 cJSON    *hub_device_json(device_t *d);
+const char *hub_platform(const device_t *d); /* "android", "windows", "macos", "linux"; known while offline too */
 void      hub_viewer_open(conn_t *c);
 void      hub_agent_open(conn_t *c);
 void      hub_on_message(conn_t *c, cJSON *m);

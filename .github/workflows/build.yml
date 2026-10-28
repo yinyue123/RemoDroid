@@ -170,6 +170,9 @@ jobs:
           sudo udevadm control --reload-rules
           sudo chmod 666 /dev/uinput
           python3 tests/e2e_desktop.py --bin build/host
+      - name: End to end, an AI assistant over MCP (Xvfb + server + agent)
+        if: matrix.arch == 'x86_64'
+        run: python3 tests/e2e_desktop_mcp.py build/host
       - name: End to end, files and clipboard (the GTK app; a real drag onto its window)
         if: matrix.arch == 'x86_64'
         run: |

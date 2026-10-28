@@ -19,6 +19,9 @@ static int8_t pad_on[DSK_MAX_PADS]; /* 1 open, -1 couldn't be created (not retri
 
 int input_events(void) { return events; }
 
+static uint64_t last_ms; /* the viewer's last input: assistants wait for the person (ai.c) */
+uint64_t input_last_ms(void) { return last_ms; }
+
 static const dsk_screen_t *screen(void)
 {
     if (D.screen < 0 || D.screen >= D.nscreens)
@@ -110,6 +113,7 @@ void input_handle(const uint8_t *d, size_t n)
     if (!n || D.view_only)
         return;
     events++;
+    last_ms = rd_mono_ms();
     switch (d[0]) {
     case 0x01: /* touch: action, pointer, tool, x, y, pressure, ts */
         if (n >= 14 && dsk_touch_points()) {

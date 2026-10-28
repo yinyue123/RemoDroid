@@ -169,6 +169,10 @@ void input_handle(const uint8_t *d, size_t n);
 void input_release_all(void);
 void input_pads_close(void); /* the session ended: unplug the virtual gamepads */
 int  input_events(void);
+uint64_t input_last_ms(void); /* rd_mono_ms() of the viewer's last input, 0 if none */
+
+/* ai.c: the AI control API (mcp.md) — {"t": "api"} from the server, answered with one binary message */
+void ai_request(long id, const cJSON *d);
 
 /* files.c (port of android/java/…/Files.java) */
 cJSON *files_control(const char *t, cJSON *d, char *code, size_t codecap, char *err, size_t errcap);

@@ -319,7 +319,8 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
     } else if (!*suffix && is_method(r, "DELETE")) { /* forget the router; it must enroll again */
         LOGI("%s: removed router %s", user, d->id);
         if (server_conf_set("devices", d->id, NULL) < 0 || server_conf_set("device_names", d->id, NULL) < 0 ||
-            server_conf_set("device_notify", d->id, NULL) < 0 || server_conf_set("bark_paused", d->id, NULL) < 0) {
+            server_conf_set("device_notify", d->id, NULL) < 0 || server_conf_set("bark_paused", d->id, NULL) < 0 ||
+            server_conf_set("device_platforms", d->id, NULL) < 0) {
             http_error(c, 500, "io_error", "could not write the configuration file");
             return;
         }

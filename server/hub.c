@@ -52,6 +52,13 @@ device_t *hub_device(const char *id)
 
 static int online(const device_t *d) { return d->agent && d->hello; }
 
+/* "android" (a router agent's phone) or "windows" / "macos" / "linux" (a computer); remembered in
+ * [device_platforms] so a computer is still one while it is offline (only computers are written) */
+const char *hub_platform(const device_t *d)
+{
+    return d->hello ? msg_str(d->hello, "platform", "android") : rd_conf_get(S.conf, "device_platforms", d->id, "android");
+}
+
 cJSON *hub_device_json(device_t *d)
 {
     cJSON *j = cJSON_CreateObject();
@@ -59,8 +66,7 @@ cJSON *hub_device_json(device_t *d)
     cJSON_AddStringToObject(j, "name", d->name);
     cJSON_AddBoolToObject(j, "online", online(d));
     cJSON_AddNumberToObject(j, "last_seen", (double)d->last_seen);
-    /* what the agent controls: "android" (a router agent's phone) or "windows" / "macos" / "linux" */
-    cJSON_AddStringToObject(j, "platform", d->hello ? msg_str(d->hello, "platform", "android") : "android");
+    cJSON_AddStringToObject(j, "platform", hub_platform(d));
     cJSON *a = cJSON_AddObjectToObject(j, "agent");
     if (d->hello) {
         cJSON_AddStringToObject(a, "version", msg_str(d->hello, "version", ""));
@@ -380,6 +386,10 @@ static void agent_message(conn_t *c, cJSON *m)
         cJSON_Delete(d->hello);
         d->hello = cJSON_Duplicate(msg_d(m), 1);
         d->online_since = rd_now_ms();
+        const char *plat = msg_str(d->hello, "platform", "android");
+        if (strcmp(plat, rd_conf_get(S.conf, "device_platforms", d->id, "android")) && !strpbrk(plat, " \t\r\n=;[]") &&
+            strlen(plat) < 16)
+            server_conf_set("device_platforms", d->id, strcmp(plat, "android") ? plat : NULL);
         snprintf(d->public_ip, sizeof d->public_ip, "%s", c->ip);
         cJSON *w = msg_new("welcome", 0, NULL);
         cJSON *wd = msg_d(w);

@@ -23,7 +23,7 @@ DESK_SRC := desktop/$(if $(filter windows,$(DESK_OS)),win,$(if $(filter macos,$(
 DESK_INCS := -Idesktop -Idesktop/core -I$(DESK_SRC) -Ibrowser/agent -Irtc -Icommon -Ithird_party/libev -Ithird_party/cjson \
              -Ithird_party/inih -Ithird_party/picohttpparser -Ithird_party/mbedtls/include \
              -Ithird_party/libsrtp/include -Ithird_party/libsrtp/crypto/include -Ithird_party/usrsctp/usrsctplib \
-             -Ithird_party/minih264 -Ithird_party/opus/include
+             -Ithird_party/minih264 -Ithird_party/opus/include -Ithird_party/stb
 DESK_DEFS := -DRD_DESKTOP -DMBEDTLS_CONFIG_FILE='"mbedtls_desktop_config.h"' \
              -DINI_ALLOW_INLINE_COMMENTS=1 -DINI_STOP_ON_FIRST_ERROR=1 -DINI_MAX_LINE=1024 -DEV_STANDALONE=1 \
              -DINI_API=
