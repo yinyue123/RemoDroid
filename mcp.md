@@ -251,7 +251,7 @@ Menus and field names in these apps change; the guide page (`/mcp/help`) links t
 
 ## 5. Tools
 
-Each tool maps onto one existing REST call, so the C code is a table plus argument copying.
+Each tool but `wake_phone` maps onto one existing REST call, so the C code is mostly a table plus argument copying.
 
 | Tool | REST call | Scope | Arguments | Result |
 |---|---|---|---|---|
