@@ -244,7 +244,7 @@ async function main() {
   r = await fetch(MCP, { method: 'POST', headers: BT(tok), body: '{"jsonrpc":"2.0","method":"notifications/initialized"}' });
   ok(r.status === 202, 'MCP: notifications are 202');
   m = await rpc('tools/list');
-  ok(m.j.result.tools.length === 10, 'MCP: 10 tools');
+  ok(m.j.result.tools.length === 11, 'MCP: 11 tools');
   ok((await rpc('tools/list', {}, ro)).j.result.tools.length === 3, 'MCP: a read-only token sees 3');
   m = await rpc('tools/call', { name: 'screenshot', arguments: {} });
   ok(m.j.result.content[0].type === 'image' && Buffer.from(m.j.result.content[0].data, 'base64').equals(phone.shot(1024)) &&
@@ -258,6 +258,8 @@ async function main() {
   m = await rpc('tools/call', { name: 'type_text', arguments: { text: '你好', into: { rid: 'search' } } });
   sent = phone.apiRequests.at(-1).args;
   ok(sent.action === 'set_text' && sent.text === '你好', 'MCP: type_text');
+  m = await rpc('tools/call', { name: 'wake_phone', arguments: {} });
+  ok(!m.j.result.isError && /unlocked: com\.example is in front/.test(m.j.result.content[0].text), 'MCP: wake_phone');
   m = await rpc('tools/call', { name: 'tap', arguments: { text: '__viewer__' } });
   ok(m.j.result.isError && /^viewer_active/.test(m.j.result.content[0].text), 'MCP: a person on the phone is a tool error');
   m = await rpc('tools/call', { name: 'tap', arguments: { text: 'OK' } }, ro);
@@ -291,7 +293,7 @@ async function main() {
   ok(r.status === 200 && /^oauth-chatgpt-[0-9a-f]{8}\./.test(j.access_token) && j.scope === 'ui screenshot control', 'OAuth: the code becomes a token');
   ok((await treq()).status === 400, 'OAuth: a code works once');
   m = await rpc('tools/list', {}, j.access_token);
-  ok(m.j.result.tools.length === 10, 'OAuth: the token works on the MCP endpoint');
+  ok(m.j.result.tools.length === 11, 'OAuth: the token works on the MCP endpoint');
   r = await fetch(B + '/api/v1/tokens', { headers: H });
   ok((await r.json()).tokens.some(t => j.access_token.startsWith(t.name + '.') && t.device === 'pixel'), 'OAuth: the token is listed in the panel');
   r = await fetch(B + '/api/v1/tokens/claude-code', { method: 'DELETE', headers: H });

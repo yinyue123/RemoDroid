@@ -461,8 +461,8 @@ interval_seconds = 2
   ok(r.status === 405 && r.headers.get('allow') === 'POST', 'MCP: GET (an event stream) is 405');
   m = await rpc('tools/list');
   const names = m.j.result.tools.map(t => t.name);
-  ok(names.length === 10 && names.includes('tap') && m.j.result.tools.every(t => t.inputSchema.type === 'object' && t.description),
-    'MCP: tools/list has the 10 tools with schemas');
+  ok(names.length === 11 && names.includes('wake_phone') && m.j.result.tools.every(t => t.inputSchema.type === 'object' && t.description),
+    'MCP: tools/list has the 11 tools with schemas');
   ok(m.j.result.tools.find(t => t.name === 'tap').annotations.destructiveHint === true &&
     m.j.result.tools.find(t => t.name === 'get_ui').annotations.readOnlyHint === true, 'MCP: tools are annotated read-only or not');
   m = await rpc('tools/list', {}, mcpRoToken);
@@ -524,6 +524,23 @@ interval_seconds = 2
   await call('wait_for', { text: 'Done', gone: true, timeout_ms: 100 });
   sent = phone.apiRequests.at(-1).args;
   ok(sent.action === 'wait' && sent.wait.for === 'gone' && sent.wait.selector.text === 'Done' && sent.wait.timeout_ms === 100, 'MCP: wait_for');
+  res = await call('wake_phone', {});
+  ok(res.result.isError === false && /unlocked: com\.example is in front/.test(res.result.content[0].text) &&
+    phone.apiRequests.at(-2).args.key === 'WAKEUP', 'MCP: wake_phone wakes the screen and says it is unlocked');
+  const lockUi = nodes => ({ body: { schema: 1, ui_id: 2, package: 'com.android.systemui', display: { w: 1080, h: 2400, rotation: 0, epoch: 0 }, nodes } });
+  let wakeUis = [lockUi([{ id: 0, text: '15:20', cls: 'TextView', f: ['enabled'] }]),
+    lockUi([{ id: 0, rid: 'com.android.systemui:id/lockPatternView', cls: 'com.android.internal.widget.LockPatternView', b: [90, 1200, 990, 2100], f: ['enabled'] }])];
+  phone.apiHandler = req => req.op === 'ui' ? wakeUis.shift() : phone.defaultApi(req);
+  const n0 = phone.apiRequests.length;
+  res = await call('wake_phone', {});
+  const wakeOps = phone.apiRequests.slice(n0).map(r => r.op === 'action' ? r.args.action : r.op);
+  ok(res.result.isError === false && wakeOps.join() === 'key,ui,swipe,ui' && /locked with a pattern/.test(res.result.content[0].text) &&
+    / 1 \(240, 1350\), .* 5 \(540, 1650\), .* 9 \(840, 1950\)\./.test(res.result.content[0].text),
+    'MCP: on the lock screen\'s clock, wake_phone swipes up and gives the pattern\'s nine dots');
+  wakeUis = [lockUi([{ id: 0, text: '1', cls: 'Button', f: ['click', 'enabled'] }, { id: 1, text: '9', cls: 'Button', f: ['click', 'enabled'] }])];
+  res = await call('wake_phone', {});
+  ok(/locked with a PIN/.test(res.result.content[0].text), 'MCP: wake_phone recognizes a PIN keypad');
+  phone.apiHandler = req => phone.defaultApi(req);
   const before = phone.apiRequests.length;
   res = await call('tap', { text: 'OK' }, mcpRoToken);
   ok(res.result.isError === true && /control/.test(res.result.content[0].text) && phone.apiRequests.length === before,
