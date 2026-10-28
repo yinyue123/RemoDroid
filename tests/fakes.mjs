@@ -102,7 +102,7 @@ export class FakePhone {
       const edge = Number(args.max_edge || 1280);
       return { type: 'image/jpeg', body: this.shot(edge), headers: { 'X-RD-Width': Math.round(1080 * edge / 2400), 'X-RD-Height': edge, 'X-RD-Epoch': 0, 'X-Evil': 'dropped' } };
     }
-    if (op === 'action' && args.action === 'tap' && args.viewer) return { status: 409, body: { error: 'viewer_active', msg: 'a person is using the phone', retryable: true } };
+    if (op === 'action' && args.action === 'tap' && (args.viewer || (args.target && args.target.text === '__viewer__'))) return { status: 409, body: { error: 'viewer_active', msg: 'a person is using the phone', retryable: true } };
     if (op === 'action') return { body: { ok: true, action: args.action, injected: true } };
     return { status: 404, body: { error: 'not_found', msg: 'unknown op ' + op } };
   }

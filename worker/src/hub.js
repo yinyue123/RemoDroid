@@ -6,9 +6,11 @@
 //   setup      /api/v1/setup: admin account, Cloudflare TURN / other ICE  (setup.c)
 //   routers    one-time codes, /api/v1/enroll, rename, remove            (enroll.c, api.c)
 //   relay      /ws/viewer and /ws/agent: devices, session.*, signal, cmd (hub.c)
+//   ai         API tokens, the AI routes, MCP and OAuth for AI assistants      (mcp.js: api.c, mcp.c, oauth.c)
 // Data lives in the Durable Object's SQLite; WebSockets use the hibernation API, so
 // per-socket facts are kept in their attachments and device state in SQLite.
 import { DurableObject } from 'cloudflare:workers';
+import { aiRoute, bearer, initTables, mcpHandle, oauthApi, oauthHandle, tokenApi, tokensApi } from './mcp.js';
 
 const PROTO = 1;
 const VERSION = '0.3.0';
@@ -86,6 +88,7 @@ export class Hub extends DurableObject {
         CREATE TABLE IF NOT EXISTS codes (code TEXT PRIMARY KEY, name TEXT, expires INTEGER, device TEXT);
         CREATE TABLE IF NOT EXISTS fails (ip TEXT PRIMARY KEY, count INTEGER, until INTEGER);
         CREATE TABLE IF NOT EXISTS vsessions (sid TEXT PRIMARY KEY, device TEXT, viewer TEXT, since INTEGER);`);
+      initTables(this.sql); /* API tokens, OAuth (mcp.js) */
     });
   }
 
@@ -179,6 +182,13 @@ export class Hub extends DurableObject {
       return err(503, 'setup_required', 'finish the setup wizard first (/wizard.html)');
     }
 
+    /* AI assistants (mcp.js): OAuth metadata, registration and tokens, the MCP endpoint (API tokens,
+     * never the cookie), and the OAuth consent page, which logs in by itself (oauth.html) */
+    const oa = await oauthHandle(this, req, url);
+    if (oa) return oa;
+    if (p.startsWith('/mcp/') && p !== '/mcp/help') return mcpHandle(this, req, url, VERSION);
+    if (p === '/oauth/authorize' && m === 'GET') return new Response(null, { status: 200, headers: { 'x-rd-asset': '/oauth' } });
+
     const sess = this.cookieSession(req, false);
     const user = sess && sess.name;
     if (p === '/ws/viewer') {
@@ -188,7 +198,12 @@ export class Hub extends DurableObject {
       return this.upgrade(req, { role: 'viewer', user }, ['viewer'], null);
     }
     if (p.startsWith('/api/v1/')) {
-      if (!user) return err(401, 'unauthorized', 'log in first');
+      if (!user) { /* AI clients: Authorization: Bearer <name>.<secret> */
+        const t = await bearer(this, req);
+        if (t === 'locked') return err(429, 'rate_limited', 'too many failed logins');
+        if (t) return tokenApi(this, req, url, t);
+        return err(401, 'unauthorized', t === false ? 'bad API token' : 'log in first');
+      }
       return this.api(req, url, user, sess);
     }
     /* pages: the login page (web/login.html), or a cookie, or off to the login page */
@@ -200,6 +215,7 @@ export class Hub extends DurableObject {
       const back = p + url.search;
       return new Response(null, { status: 302, headers: { location: back === '/' ? '/login' : '/login?next=' + encodeURIComponent(back).replace(/%2F/g, '/') } });
     }
+    if (p === '/mcp/help') return new Response(null, { status: 200, headers: { 'x-rd-asset': '/mcp' } }); /* web/mcp.html, the MCP guide */
     return new Response(null, { status: 200, headers: { 'x-rd-asset': '/' } });
   }
 
@@ -214,6 +230,8 @@ export class Hub extends DurableObject {
     }
     if (p === '/api/v1/setup') return this.setup(req, user);
     if (p === '/api/v1/settings') return this.settings(req, user, sess);
+    const ai = (await tokensApi(this, req, url, user)) || (await oauthApi(this, req, url, user));
+    if (ai) return ai;
     if (p === '/api/v1/devices' && m === 'GET') return json({ devices: this.all('SELECT * FROM devices ORDER BY created').map(d => this.deviceJson(d)) });
     if (p === '/api/v1/enroll/codes' && m === 'POST') {
       const b = await body();
@@ -263,6 +281,8 @@ export class Hub extends DurableObject {
       if (!allowed.includes(b.cmd)) return err(400, 'bad_request', 'unknown or missing "cmd"');
       return this.forward(d.id, 'cmd', { cmd: b.cmd, args: b.args && typeof b.args === 'object' ? b.args : {} });
     }
+    const relayed = await aiRoute(this, req, url, d, sub, null);
+    if (relayed) return relayed;
     if (sub === '/diag' && m === 'GET') {
       const lines = Math.max(1, Math.min(1000, +url.searchParams.get('lines') || 200));
       return this.forward(d.id, 'diag', { lines });
@@ -280,6 +300,33 @@ export class Hub extends DurableObject {
       this.pending.set(cid, { resolve, timer });
       ws.send(JSON.stringify({ t: type, id: cid, d }));
     });
+  }
+
+  /* REST → the phone's AI API through the agent (hub_forward_api): → {status, type, headers, body} */
+  apiForward(id, op, args) {
+    const ws = this.ctx.getWebSockets('agent:' + id)[0];
+    const fail = (status, code, m) => ({ status, type: 'application/json', headers: {}, body: enc.encode(JSON.stringify({ error: code, msg: m })) });
+    if (!ws || !this.online(id)) return Promise.resolve(fail(409, 'offline', 'the router agent is offline'));
+    const cid = this.nextCmd++;
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { this.pending.delete(cid); resolve(fail(504, 'timeout', 'the agent did not answer in time')); }, 45000);
+      this.pending.set(cid, { resolve, timer, api: fail });
+      ws.send(JSON.stringify({ t: 'api', id: cid, d: { op, args: args || {} } }));
+    });
+  }
+  /* the agent's binary answer: u32 header length | {"id", "status", "type", "headers"} | body */
+  agentBinary(a, data) {
+    const u8 = new Uint8Array(data);
+    if (u8.length < 4) return;
+    const hl = new DataView(u8.buffer, u8.byteOffset).getUint32(0);
+    if (hl > u8.length - 4) return;
+    let h;
+    try { h = JSON.parse(new TextDecoder().decode(u8.subarray(4, 4 + hl))); } catch (_) { return; }
+    const p = this.pending.get(h.id);
+    if (!p || !p.api) return;
+    clearTimeout(p.timer);
+    this.pending.delete(h.id);
+    p.resolve({ status: +h.status || 502, type: String(h.type || 'application/octet-stream'), headers: h.headers || {}, body: u8.slice(4 + hl) });
   }
 
   /* ---------------- setup (setup.c) ---------------- */
@@ -472,6 +519,10 @@ export class Hub extends DurableObject {
   }
 
   async webSocketMessage(ws, data) {
+    if (typeof data !== 'string') {
+      const a = ws.deserializeAttachment() || {};
+      if (a.role === 'agent') return this.agentBinary(a, data);
+    }
     let m;
     try { m = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data)); } catch (_) { return; }
     if (!m || typeof m !== 'object') return;
@@ -556,9 +607,11 @@ export class Hub extends DurableObject {
       if (!p) return;
       clearTimeout(p.timer);
       this.pending.delete(m.id);
-      if (m.t === 'ack') p.resolve(json({ result: d }));
+      const code = d.code || 'io_error';
+      if (p.api) p.resolve(m.t === 'ack' ? { status: 200, type: 'application/json', headers: {}, body: enc.encode(JSON.stringify(d)) }
+        : p.api({ bad_request: 400, not_found: 404, offline: 409, busy: 409, too_large: 413, timeout: 504, unsupported: 501 }[code] || 500, code, d.msg || code));
+      else if (m.t === 'ack') p.resolve(json({ result: d }));
       else {
-        const code = d.code || 'io_error';
         const status = { bad_request: 400, not_found: 404, offline: 409, busy: 409, adb_unauthorized: 409, too_large: 413, timeout: 504, unsupported: 501 }[code] || 500;
         p.resolve(err(status, code, d.msg || code));
       }

@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { FakePhone } from './fakes.mjs';
 
 const BIN = path.resolve(process.argv[2] || 'build/host');
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -187,6 +188,113 @@ async function main() {
   await until(async () => /unauthorized|rejected|HTTP 40[13]/.test(agent.log), 10000, 'agent refused');
   ok(true, 'the removed router can no longer log in');
   viewer.close();
+
+  console.log('AI assistants: API tokens, MCP, OAuth (mcp.md)');
+  fs.mkdirSync(path.join(dir, 'files'));
+  fs.writeFileSync(path.join(dir, 'files', 'remodroid-server.jar'), crypto.randomBytes(300 * 1024));
+  fs.writeFileSync(path.join(dir, 'files', 'libremodroid.so'), crypto.randomBytes(60 * 1024));
+  const keyPath = path.join(dir, 'adbkey2');
+  const phone = new FakePhone({ keyPath, log: s => VERBOSE && console.log('[phone] ' + s) });
+  const adbPort = await phone.listen();
+  const code2 = (await (await fetch(B + '/api/v1/enroll/codes', { method: 'POST', headers: H, body: '{"name":"Pixel"}' })).json()).code;
+  const ini2 = path.join(dir, 'agent2.ini');
+  fs.writeFileSync(ini2, `[agent]\nfiles_dir = ${dir}/files\nadbkey = ${keyPath}\nsocket = ${dir}/agent2.sock\nlog_level = debug\n[phone]\nadb = tcp:127.0.0.1:${adbPort}\n`);
+  start('agent2', path.join(BIN, 'remodroid-agent'), ['-c', ini2]);
+  await sleep(800);
+  const en2 = await run(path.join(BIN, 'remodroid-agent'), ['-c', ini2, 'enroll', '--panel', B, '--code', code2]);
+  ok(en2.code === 0, 'a second router, with a phone, enrolls');
+  await until(async () => (await (await fetch(B + '/api/v1/devices', { headers: H })).json()).devices.find(d => d.id === 'pixel' && d.phone.server === 'running'),
+    30000, 'phone server running');
+  const tpost = body => fetch(B + '/api/v1/tokens', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  r = await tpost({ name: 'claude-code' });
+  const tok = (await r.json()).token;
+  ok(r.status === 201 && /^claude-code\.[0-9a-f]{48}$/.test(tok), 'tokens: the panel makes one');
+  ok((await tpost({ name: 'claude-code' })).status === 409, 'tokens: names are unique');
+  r = await tpost({ name: 'looker', scopes: 'ui,screenshot' });
+  const ro = (await r.json()).token;
+  const BT = t => ({ Authorization: 'Bearer ' + t });
+  r = await fetch(B + '/api/v1/devices/pixel/ui', { headers: BT(tok) });
+  j = await r.json();
+  ok(r.status === 200 && j.ui_id === 1, 'AI API: /ui with a token, relayed through the agent to the phone');
+  r = await fetch(B + '/api/v1/devices/pixel/screenshot?max_edge=1280', { headers: BT(tok) });
+  const img = Buffer.from(await r.arrayBuffer());
+  ok(r.status === 200 && r.headers.get('content-type') === 'image/jpeg' && img.equals(phone.shot(1280)) && r.headers.get('x-rd-height') === '1280' &&
+    !r.headers.get('x-evil'), 'AI API: screenshot bytes and X-RD headers come through the binary relay');
+  r = await fetch(B + '/api/v1/devices/pixel/actions', { method: 'POST', headers: BT(ro), body: '{"action":"back"}' });
+  ok(r.status === 403, 'AI API: a ui,screenshot token cannot act');
+  r = await fetch(B + '/api/v1/devices/pixel/actions', { method: 'POST', headers: BT(tok), body: '{"action":"tap","viewer":true}' });
+  ok(r.status === 409 && (await r.json()).error === 'viewer_active', 'AI API: the phone\'s errors keep their status');
+  r = await fetch(B + '/api/v1/devices/pixel/ui', { headers: H });
+  ok(r.status === 200, 'AI API: the login cookie works too');
+
+  const MCP = B + '/mcp/admin/pixel';
+  let rid = 0;
+  const rpc = async (method, params, t = tok) => {
+    const res = await fetch(MCP, { method: 'POST', headers: { ...BT(t), 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++rid, method, params }) });
+    return { status: res.status, j: await res.json().catch(() => null) };
+  };
+  r = await fetch(B + '/mcp/admin/devices');
+  ok(r.status === 401 && /resource_metadata=".*\/\.well-known\/oauth-protected-resource\/mcp\/admin\/devices"/.test(r.headers.get('www-authenticate')),
+    'MCP: no token is 401 with the resource metadata URL');
+  j = await (await fetch(B + '/mcp/admin/devices', { headers: BT(tok) })).json();
+  ok(j.devices.some(d => d.id === 'pixel' && d.url === MCP && d.mcp), 'MCP: the device list gives the MCP URL');
+  ok((await fetch(B + '/mcp/someone/devices', { headers: BT(tok) })).status === 404, 'MCP: another user\'s URL does not exist');
+  let m = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test' } });
+  ok(m.j.result.protocolVersion === '2025-06-18' && /"Pixel"/.test(m.j.result.instructions), 'MCP: initialize');
+  r = await fetch(MCP, { method: 'POST', headers: BT(tok), body: '{"jsonrpc":"2.0","method":"notifications/initialized"}' });
+  ok(r.status === 202, 'MCP: notifications are 202');
+  m = await rpc('tools/list');
+  ok(m.j.result.tools.length === 10, 'MCP: 10 tools');
+  ok((await rpc('tools/list', {}, ro)).j.result.tools.length === 3, 'MCP: a read-only token sees 3');
+  m = await rpc('tools/call', { name: 'screenshot', arguments: {} });
+  ok(m.j.result.content[0].type === 'image' && Buffer.from(m.j.result.content[0].data, 'base64').equals(phone.shot(1024)) &&
+    /461x1024/.test(m.j.result.content[1].text), 'MCP: screenshot is an image block');
+  m = await rpc('tools/call', { name: 'tap', arguments: { x: 10, y: 20 } });
+  let sent = phone.apiRequests.at(-1).args;
+  ok(!m.j.result.isError && sent.target.space === 'image' && sent.target.w === 461, 'MCP: tap in screenshot pixels');
+  m = await rpc('tools/call', { name: 'type_text', arguments: { text: '你好', into: { rid: 'search' } } });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.action === 'set_text' && sent.text === '你好', 'MCP: type_text');
+  m = await rpc('tools/call', { name: 'tap', arguments: { text: '__viewer__' } });
+  ok(m.j.result.isError && /^viewer_active/.test(m.j.result.content[0].text), 'MCP: a person on the phone is a tool error');
+  m = await rpc('tools/call', { name: 'tap', arguments: { text: 'OK' } }, ro);
+  ok(m.j.result.isError && /control/.test(m.j.result.content[0].text), 'MCP: a read-only token cannot tap');
+  m = await rpc('nope');
+  ok(m.j.error.code === -32601, 'MCP: unknown method');
+
+  const cb = 'https://chatgpt.com/connector_platform_oauth_redirect';
+  j = await (await fetch(B + '/.well-known/oauth-protected-resource/mcp/admin/pixel')).json();
+  ok(j.resource === MCP && j.authorization_servers[0] === B, 'OAuth: resource metadata');
+  j = await (await fetch(B + '/.well-known/oauth-authorization-server')).json();
+  ok(j.token_endpoint === B + '/oauth/token' && j.code_challenge_methods_supported[0] === 'S256', 'OAuth: server metadata');
+  r = await fetch(B + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_name: 'ChatGPT', redirect_uris: [cb] }) });
+  const client = await r.json();
+  ok(r.status === 201 && /^c_/.test(client.client_id), 'OAuth: registration');
+  const b64u = b => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const verifier = b64u(crypto.randomBytes(32)), challenge = b64u(crypto.createHash('sha256').update(verifier).digest());
+  const q = '?' + new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: cb, code_challenge: challenge,
+    code_challenge_method: 'S256', state: 'xyz', resource: MCP });
+  r = await fetch(B + '/oauth/authorize' + q);
+  ok(r.status === 200 && /Allow access/.test(await r.text()), 'OAuth: the consent page');
+  j = await (await fetch(B + '/api/v1/oauth/request' + q, { headers: H })).json();
+  ok(j.client === 'ChatGPT' && j.device.name === 'Pixel' && j.redirect_host === 'chatgpt.com', 'OAuth: what the consent page shows');
+  j = await (await fetch(B + '/api/v1/oauth/approve', { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q, allow: true }) })).json();
+  const back = new URL(j.redirect);
+  ok(back.searchParams.get('state') === 'xyz' && back.searchParams.get('iss') === B, 'OAuth: Allow redirects back with a code');
+  const treq = () => fetch(B + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code: back.searchParams.get('code'), redirect_uri: cb, client_id: client.client_id, code_verifier: verifier }) });
+  r = await treq();
+  j = await r.json();
+  ok(r.status === 200 && /^oauth-chatgpt-[0-9a-f]{8}\./.test(j.access_token) && j.scope === 'ui screenshot control', 'OAuth: the code becomes a token');
+  ok((await treq()).status === 400, 'OAuth: a code works once');
+  m = await rpc('tools/list', {}, j.access_token);
+  ok(m.j.result.tools.length === 10, 'OAuth: the token works on the MCP endpoint');
+  r = await fetch(B + '/api/v1/tokens', { headers: H });
+  ok((await r.json()).tokens.some(t => j.access_token.startsWith(t.name + '.') && t.device === 'pixel'), 'OAuth: the token is listed in the panel');
+  r = await fetch(B + '/api/v1/tokens/claude-code', { method: 'DELETE', headers: H });
+  ok(r.status === 204 && (await fetch(B + '/mcp/admin/devices', { headers: BT(tok) })).status === 401, 'tokens: revoke stops it at once');
+  r = await fetch(B + '/mcp/help', { headers: H });
+  ok(r.status === 200 && /AI assistants/.test(await r.text()), 'the guide is served at /mcp/help');
 }
 
 const timer = setTimeout(() => { console.log('  ✗ overall timeout'); failures++; finish(); }, 150000);

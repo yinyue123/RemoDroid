@@ -59,6 +59,7 @@ struct device {
     uint64_t last_seen, online_since;
     vsession_t *vs;
     char public_ip[INET6_ADDRSTRLEN];
+    int shot_w, shot_h; /* the last MCP screenshot's size: tap coordinates are in its pixels (mcp.c) */
 };
 
 struct vsession {
@@ -125,6 +126,7 @@ const char *req_header(const http_req_t *r, const char *name, size_t *len);
 int         req_is(const http_req_t *r, const char *method, const char *path);
 int         req_query_int(const http_req_t *r, const char *key, int def);
 void        http_serve_static(conn_t *c, const http_req_t *r, const char *extra);
+int         http_origin_ok(const http_req_t *r); /* no Origin, or this host, or [http] origins */
 
 /* auth.c */
 typedef struct asess asess_t;
@@ -149,11 +151,19 @@ int         auth_fail(conn_t *c);
 int         auth_locked(conn_t *c);
 const char *user_hash(const char *name);
 /* API tokens: "Authorization: Bearer <name>.<secret>" checked against [api_tokens]
- * name = <sha256 hex of the whole token> [scopes]. Returns like auth_basic; on success
- * name_out = "token:<name>" and scopes_out = e.g. "ui,screenshot,control". */
-int         auth_bearer(const http_req_t *r, conn_t *c, char *name_out, size_t name_cap, char *scopes_out,
-                        size_t scopes_cap);
+ * name = <sha256 hex of the whole token> [scopes] [user=OWNER] [device=ID]. Returns like auth_basic. */
+typedef struct {
+    char name[72];   /* "token:<name>" */
+    char scopes[64]; /* e.g. "ui,screenshot,control" */
+    char owner[64];  /* "" for an old token without one (not for MCP) */
+    char device[64]; /* "" = every device; OAuth tokens are for one */
+} api_token_t;
+int         auth_bearer(const http_req_t *r, conn_t *c, api_token_t *t);
+void        auth_token_parse(const char *entry, char *scopes, size_t scap, char *owner, size_t ocap, char *device, size_t dcap);
 #define API_SCOPES_ALL "ui,screenshot,control"
+/* A new token "NAME.<48 hex>" (tok_cap >= 90); hex_out gets the SHA-256 that [api_tokens] stores. */
+void        auth_token_new(const char *name, char *tok, size_t tok_cap, char hex_out[65]);
+int         auth_token_name_ok(const char *name); /* letters, digits, - and _, up to 40 */
 
 /* hub.c */
 void      hub_init_devices(void);
@@ -172,6 +182,12 @@ void      hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *d_pay
 /* AI API (skill-plan.md): op "ui" | "screenshot" | "action" | "capabilities"; takes args. The
  * agent's binary reply (hub_on_binary) becomes the HTTP response as is. */
 void      hub_forward_api(conn_t *c, device_t *d, const char *op, cJSON *args);
+/* The same, but the answer goes to cb: called exactly once, with c NULL when the client is
+ * gone (only free ud then). Errors (offline, timeout, the phone's) come as status >= 400 and a
+ * {"error", "msg"} JSON body; headers are the phone's X-RD-* values (may be NULL). */
+typedef void (*hub_api_cb)(conn_t *c, void *ud, int status, const char *type, const void *body, size_t n,
+                           const cJSON *headers);
+void      hub_forward_api_cb(conn_t *c, device_t *d, const char *op, cJSON *args, hub_api_cb cb, void *ud);
 void      hub_on_binary(conn_t *c, const uint8_t *m, size_t n);
 
 /* tls.c: HTTPS on the [tls] listener (mbedTLS) */
@@ -228,5 +244,16 @@ void notify_bark_masked(device_t *d, char *out, size_t n); /* the router's own U
 /* api.c */
 void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expires_ms, const char *sess_id);
 void api_token_handle(conn_t *c, const http_req_t *r, const char *who, const char *scopes);
+/* A new API token for user, saved in [api_tokens]: the token (malloc'd, shown once) or NULL with *err. */
+char *api_token_create(const char *name, const char *scopes, const char *user, const char **err);
+
+/* mcp.c (mcp.md) */
+void mcp_handle(conn_t *c, const http_req_t *r); /* /mcp/<user>/devices and /mcp/<user>/<device> */
+int  mcp_path(const char *path, size_t len, char *user, size_t ucap, char *rest, size_t rcap);
+void mcp_origin(conn_t *c, const http_req_t *r, char *out, size_t cap); /* "https://host[:port]" */
+
+/* oauth.c (mcp.md §6.4) */
+int oauth_handle(conn_t *c, const http_req_t *r);                 /* /.well-known/oauth-*, /oauth/register, /oauth/token; 1 if handled */
+int oauth_api(conn_t *c, const http_req_t *r, const char *user);  /* /api/v1/oauth/request and /approve (logged in) */
 
 #endif

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AI assistants · RemoDroid</title>
+<meta name="description" content="Connect Claude or ChatGPT to your phones over MCP: the URLs, a token, and setup for each assistant.">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="stylesheet" href="/setup.css">
+<link rel="stylesheet" href="/panel.css">
+<style>
+/* The MCP guide (/mcp/help, mcp.md). Builds on setup.css and panel.css. */
+.mcp h2{font:500 21px/1.25 var(--serif);margin:34px 0 10px}
+.mcp p{margin:0 0 12px}
+.mcp .lede{font-size:16.5px;margin:6px 0 18px}
+.mcp .cmd.raw code::before{content:none}
+.mcp .cmd code{font-size:13.5px}
+.mcp .flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font:13px/1.3 var(--mono);color:var(--muted);margin:0 0 18px}
+.mcp .flow span{padding:6px 10px;border-radius:9px;background:var(--card);border:1px solid var(--line);color:var(--ink-2)}
+.mcp .flow i{font-style:normal;color:var(--faint)}
+.mcp .item[aria-pressed="true"]{background:var(--accent-soft)}
+.mcp .item[aria-pressed="true"] .txt b{color:var(--accent)}
+.mcp .item[disabled]{opacity:.55;cursor:default}
+.mcp .seg{display:flex;margin-bottom:12px}
+.mcp .seg button{padding:8px 12px;font-size:13.5px}
+.mcp ul{margin:0 0 12px;padding-left:20px}
+.mcp li{margin:0 0 6px}
+.mcp .tries li{font-family:var(--serif);font-size:17px}
+.mcp .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px;margin:0 0 12px}
+.mcp .kv code{word-break:break-all}
+.mcp .mk{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin:0 0 14px}
+.mcp .mk .check{margin:0;font-size:14.5px}
+</style>
+</head>
+<body class="panel">
+<header class="ptop"><a class="back" href="/panel.html#agents">Agents</a><h1>AI assistants (MCP)</h1></header>
+<main class="mcp" id="main">
+  <p class="lede">Let Claude, ChatGPT or another AI assistant use your phone: read the screen, take screenshots, and tap, type and swipe,
+    the same things you do in the viewer. It connects through <b>MCP</b> (Model Context Protocol), the standard way to give an assistant tools.</p>
+  <div class="flow" aria-label="How a request travels"><span>Assistant</span><i>→</i><span>this panel /mcp/…</span><i>→</i><span>agent</span><i>→</i><span>phone</span></div>
+  <p class="callout warn" id="status" hidden></p>
+
+  <h2>1. Pick a phone</h2>
+  <p>Each phone has its own MCP URL. An assistant you connect to one phone can't see the others.</p>
+  <div class="group" id="devs"><div class="item"><span class="txt"><small>Loading…</small></span></div></div>
+  <div id="urlBox" style="margin-top:12px"></div>
+
+  <h2>2. Pick your assistant</h2>
+  <div class="seg" role="tablist" id="seg"></div>
+
+  <h2>3. Make a token</h2>
+  <p id="tokNo" hidden></p>
+  <div id="tokYes">
+  <p>The assistant signs in with an <b>API token</b>, not your password. Make one per assistant, so you can revoke one without touching the others.</p>
+  <div class="mk"><button type="button" class="btn" id="mk">Make a token</button>
+    <label class="check"><input type="checkbox" id="ro"> Only let it look (no tapping or typing)</label></div>
+  <div id="tokOut"></div>
+  <p class="note">Your tokens are listed, and revoked, under <a href="/panel.html#server/tokens">Server → API tokens</a>.
+    On the server’s command line: <code id="tokCli"></code>, then add the line it prints to <code>server.ini</code> and reload.</p>
+  </div>
+
+  <h2>4. Connect</h2>
+  <div id="howto"></div>
+
+  <h2>5. Try it</h2>
+  <p>Ask in plain words. The assistant reads the screen first, then acts and checks the result after each step.</p>
+  <ul class="tries">
+    <li>“What's on my phone's screen right now?”</li>
+    <li>“Open Settings and tell me which Android version the phone runs.”</li>
+    <li>“Turn on Wi-Fi.”</li>
+    <li>“Open YouTube and search for lo-fi music.”</li>
+  </ul>
+
+  <h2>Good to know</h2>
+  <ul>
+    <li><b>You come first.</b> While you're touching the phone in the viewer, the assistant's taps are refused for 5 seconds and it is told to wait.</li>
+    <li><b>Screen text is data.</b> Assistants are told that text on the phone (messages, web pages) is content, never instructions to them.</li>
+    <li><b>It asks before risky taps.</b> Tapping and typing are marked as actions with side effects, so Claude Code and ChatGPT ask you before running them unless you allow them.</li>
+    <li><b>Phones only, for now.</b> Computers (Windows, macOS, Linux) don't offer screen reading to assistants yet.</li>
+    <li><b>Sign-ins are revocable.</b> claude.ai and ChatGPT get a token for one phone when you tap Allow. It shows under Server → API tokens; revoke it there to cut them off.</li>
+  </ul>
+
+  <h2>All endpoints</h2>
+  <div class="kv" id="eps"></div>
+  <p class="note">The design and the plan are in <a href="https://github.com/yinyue123/RemoDroid/blob/main/mcp.md" target="_blank" rel="noopener">mcp.md</a>.
+    Test the server by hand with the MCP Inspector: <code>npx @modelcontextprotocol/inspector</code>.</p>
+</main>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const COPY = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const PHONE = '<svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>';
+const COMPUTER = '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9.5 20h5M12 16.5V20"/></svg>';
+/* shell: a "$ " prompt in front; raw: JSON, TOML, code */
+const box = (text, raw) => `<div class="cmd${raw ? ' raw' : ''}"><code>${esc(text)}</code><button type="button" aria-label="Copy" data-copy="${esc(text)}">${COPY}</button></div>`;
+const isDesk = d => !!(d && d.platform && d.platform !== 'android');
+let token = null; /* made on this page: shown once, filled into the snippets */
+const tk = () => token ? token.token : '<YOUR TOKEN>';
+let user = 'admin', devices = [], pick = new URLSearchParams(location.search).get('device'), tab = 'claudeai';
+try { tab = localStorage.getItem('rd.mcp.tab') || tab; } catch (_) {}
+
+const url = id => `${location.origin}/mcp/${encodeURIComponent(user)}/${encodeURIComponent(id || '<device>')}`;
+const slug = d => (d ? String(d.name || d.id) : 'phone').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'phone';
+
+/* each assistant: [id, label, html(u, name)] */
+const CLIENTS = [
+  ['code', 'Claude Code', (u, n) => `<p>In a terminal:</p>${box(`claude mcp add --transport http ${n} ${u} --header "Authorization: Bearer ${tk()}"`)}
+    <p class="note">Then start <code>claude</code> and type <code>/mcp</code> to see the phone's tools. Add <code>--scope user</code> to use it in every project.
+    <a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Claude Code MCP docs</a></p>`],
+  ['desktop', 'Claude Desktop', (u, n) => `<p>Settings → Developer → Edit Config, then add this to <code>claude_desktop_config.json</code> and restart Claude Desktop.
+    The <code>mcp-remote</code> bridge (needs Node.js) adds the token header that Desktop can't send by itself.</p>${box(JSON.stringify({ mcpServers: { [n]: {
+      command: 'npx', args: ['-y', 'mcp-remote', u, '--header', 'Authorization: Bearer ${RD_TOKEN}'], env: { RD_TOKEN: tk() } } } }, null, 2), true)}`],
+  ['api', 'Claude API', (u, n) => `<p>Anthropic's servers connect to the URL, so this panel must be reachable from the internet. Python:</p>${box(`import anthropic
+
+client = anthropic.Anthropic()
+resp = client.beta.messages.create(
+    model="claude-opus-5-5",
+    max_tokens=16000,
+    betas=["mcp-client-2025-11-20"],
+    mcp_servers=[{"type": "url", "name": "${n}", "url": "${u}",
+                  "authorization_token": "${tk()}"}],
+    tools=[{"type": "mcp_toolset", "mcp_server_name": "${n}"}],
+    messages=[{"role": "user", "content": "What's on my phone's screen?"}],
+)
+print(resp.content)`, true)}<p class="note"><a href="https://platform.claude.com/docs/en/agents-and-tools/mcp-connector" target="_blank" rel="noopener">MCP connector docs</a></p>`],
+  ['openai', 'OpenAI API', (u, n) => `<p>The Responses API, Python. OpenAI's servers connect to the URL, so this panel must be reachable from the internet:</p>${box(`from openai import OpenAI
+
+client = OpenAI()
+resp = client.responses.create(
+    model="gpt-5",
+    tools=[{"type": "mcp", "server_label": "${n}", "server_url": "${u}",
+            "authorization": "${tk()}", "require_approval": "never"}],
+    input="What's on my phone's screen?",
+)
+print(resp.output_text)`, true)}<p class="note"><a href="https://platform.openai.com/docs/guides/tools-connectors-mcp" target="_blank" rel="noopener">OpenAI MCP docs</a></p>`],
+  ['codex', 'Codex', (u, n) => `<p>Put the token in the <code>RD_TOKEN</code> environment variable:</p>${box(`export RD_TOKEN=${tk()}`)}
+    <p>and add to <code>~/.codex/config.toml</code>:</p>${box(`[mcp_servers.${n.replace(/-/g, '_')}]
+url = "${u}"
+bearer_token_env_var = "RD_TOKEN"`, true)}<p class="note"><a href="https://developers.openai.com/codex/mcp" target="_blank" rel="noopener">Codex MCP docs</a></p>`],
+  ['other', 'Others', (u, n) => `<p>Cursor, VS Code, Windsurf and most other clients take an <code>mcpServers</code> entry with a URL and headers:</p>${box(JSON.stringify({ mcpServers: { [n]: {
+      url: u, headers: { Authorization: 'Bearer ' + tk() } } } }, null, 2), true)}
+    <p class="note">Clients that can’t send a header sign in with OAuth instead, like claude.ai: give them just the URL.</p>`],
+];
+/* the apps that sign in with OAuth (oauth.html) instead of a token */
+const PUBLIC = () => location.protocol === 'https:' ? '' : `<p class="callout warn">These apps connect from the internet, so this panel needs a public
+  <b>https://</b> address. Add a domain under <a href="/panel.html#server">Server → Web address</a>, then open this page at that address.</p>`;
+CLIENTS.unshift(
+  ['claudeai', 'claude.ai', (u, n) => `${PUBLIC()}<ol>
+    <li>In <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener">claude.ai → Settings → Connectors</a>, choose <b>Add custom connector</b>.</li>
+    <li>Name it after the phone and paste the URL:</li></ol>${box(u, true)}
+    <ol start="3"><li>Choose <b>Connect</b>. A RemoDroid page opens: log in if it asks, check what Claude may do, and tap <b>Allow</b>.</li>
+    <li>In a chat, turn the connector on from the tools menu. It works in the Claude apps for iPhone and Android too.</li></ol>
+    <p class="note">Custom connectors need a paid Claude plan; on Team and Enterprise an owner adds them first.</p>`, true],
+  ['chatgpt', 'ChatGPT', (u, n) => `${PUBLIC()}<ol>
+    <li>In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on <b>Developer mode</b>.</li>
+    <li>Back in Apps &amp; Connectors, choose <b>Create</b>. Name it after the phone, set <b>Authentication</b> to OAuth, and paste the URL:</li></ol>${box(u, true)}
+    <ol start="3"><li>Choose <b>Create</b>. A RemoDroid page opens: log in if it asks, and tap <b>Allow</b>.</li>
+    <li>In a chat, pick the connector from the + menu (Developer mode).</li></ol>
+    <p class="note">Developer mode is in ChatGPT’s paid plans. OpenAI moves these menus now and then; search its help for “developer mode” if they’ve moved.</p>`, true],
+);
+
+/* a token named after the assistant: claude-code, codex, ... */
+const tokenName = () => tab === 'other' ? 'assistant' : slug({ name: (CLIENTS.find(x => x[0] === tab) || CLIENTS[0])[1] });
+
+function render() {
+  const d = devices.find(x => x.id === pick);
+  $('#devs').innerHTML = devices.length ? devices.map(x => {
+    const desk = isDesk(x), on = x.online;
+    const sub = desk ? 'computer · not available to assistants yet' : [x.id, on ? 'online' : 'offline'].join(' · ');
+    return `<button type="button" class="item" data-dev="${esc(x.id)}" aria-pressed="${x.id === pick}" ${desk ? 'disabled' : ''}>
+      <span class="ic ${desk ? '' : on ? 'on' : 'off'}">${desk ? COMPUTER : PHONE}</span>
+      <span class="txt"><b>${esc(x.name || x.id)}</b><small>${esc(sub)}</small></span></button>`;
+  }).join('') : '<div class="item"><span class="txt"><small>No phones yet. Add an agent on the <a href="/panel.html#agents/add">Agents</a> page first.</small></span></div>';
+  $('#urlBox').innerHTML = d ? `<p class="note" style="margin:0 0 6px">MCP URL for <b>${esc(d.name || d.id)}</b>:</p>${box(url(d.id), true)}` : '';
+  const oauth = !!(CLIENTS.find(x => x[0] === tab) || [])[3];
+  $('#tokYes').hidden = oauth;
+  $('#tokNo').hidden = !oauth;
+  if (oauth) $('#tokNo').innerHTML = `Not needed: ${esc((CLIENTS.find(x => x[0] === tab) || [])[1])} signs in by itself, on a RemoDroid page that asks you to allow it.`;
+  $('#tokCli').textContent = `remodroid-server gentoken ${tokenName()} --user ${user}`;
+  $('#tokOut').innerHTML = token ? `<p class="callout ok"><b>Token “${esc(token.name)}” made.</b> It is filled into the setup below.
+    Copy it now: it is shown only once.${token.scopes === 'ui,screenshot' ? ' It can only look.' : ''}</p>${box(token.token, true)}` : '';
+  $('#mk').textContent = token ? 'Make another' : `Make a token for ${(CLIENTS.find(x => x[0] === tab) || CLIENTS[0])[1]}`;
+  $('#seg').innerHTML = CLIENTS.map(([id, label]) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${id === tab}">${esc(label)}</button>`).join('');
+  const c = CLIENTS.find(x => x[0] === tab) || CLIENTS[0];
+  $('#howto').innerHTML = c[2](url(d && d.id), d ? slug(d) : 'phone');
+  $('#eps').innerHTML = [
+    ['GET', '/mcp/help', 'this guide'],
+    ['GET', `/mcp/${user}/devices`, 'your devices and their MCP URLs (token)'],
+    ['POST', `/mcp/${user}/<device>`, 'the MCP endpoint for one phone (token)'],
+  ].map(([m, p, what]) => `<code>${m}</code><span><code>${esc(location.origin + p)}</code><br><small class="note">${esc(what)}</small></span>`).join('');
+}
+
+document.addEventListener('click', async e => {
+  const dev = e.target.closest('[data-dev]');
+  if (dev && !dev.disabled) {
+    pick = dev.dataset.dev;
+    history.replaceState(null, '', '?device=' + encodeURIComponent(pick));
+    render();
+    return;
+  }
+  const t = e.target.closest('[data-tab]');
+  if (t) {
+    tab = t.dataset.tab;
+    try { localStorage.setItem('rd.mcp.tab', tab); } catch (_) {}
+    render();
+    return;
+  }
+  if (e.target.closest('#mk')) {
+    const mk = $('#mk');
+    mk.disabled = true;
+    const base = tokenName();
+    for (let i = 1; i <= 9; i++) {
+      const r = await fetch('/api/v1/tokens', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: (i > 1 ? `${base}-${i}` : base).slice(0, 40), scopes: $('#ro').checked ? 'ui,screenshot' : 'ui,screenshot,control' }) });
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 409) continue; /* that name is taken: try the next */
+      if (r.ok) token = j;
+      else $('#tokOut').innerHTML = `<p class="callout bad">${esc(j.msg || 'Could not make a token (' + r.status + ')')}</p>`;
+      break;
+    }
+    mk.disabled = false;
+    if (token) render();
+    return;
+  }
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); } catch (_) {
+    const ta = document.createElement('textarea'); ta.value = b.dataset.copy; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (__) {} ta.remove();
+  }
+  b.classList.add('ok'); b.innerHTML = '✓'; setTimeout(() => { b.classList.remove('ok'); b.innerHTML = COPY; }, 1400);
+});
+
+async function load() {
+  const get = async p => {
+    const r = await fetch(p, { credentials: 'same-origin' });
+    if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); throw new Error('login required'); }
+    return r.json();
+  };
+  try {
+    user = (await get('/api/v1/me')).user || user;
+    devices = (await get('/api/v1/devices')).devices || [];
+  } catch (_) {}
+  const phones = devices.filter(x => !isDesk(x));
+  if (!phones.some(x => x.id === pick)) pick = (phones.find(x => x.online) || phones[0] || {}).id || null;
+  render();
+  /* Is the endpoint live yet? A live one wants a token (401); before that, the path doesn't exist. */
+  try {
+    const r = await fetch(`/mcp/${encodeURIComponent(user)}/devices`, { credentials: 'omit' });
+    if (r.status !== 401) {
+      const s = $('#status');
+      s.innerHTML = '<b>Not on this server yet.</b> This server doesn\'t answer the MCP endpoints yet; they arrive with an update. The steps below are what you\'ll do then.';
+      s.hidden = false;
+    }
+  } catch (_) {}
+}
+render();
+load();
+})();
+</script>
+</body>
+</html>

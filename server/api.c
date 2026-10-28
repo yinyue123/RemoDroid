@@ -111,6 +111,128 @@ void api_token_handle(conn_t *c, const http_req_t *r, const char *who, const cha
         http_error(c, 404, "not_found", "no such endpoint for API tokens");
 }
 
+/* ---------------- API tokens (mcp.md §6): [api_tokens] NAME = <sha256> [scopes] [user=OWNER] ---------------- */
+
+static void token_json(const char *name, const char *val, void *ud)
+{
+    char scopes[64], owner[64], device[64];
+    auth_token_parse(val, scopes, sizeof scopes, owner, sizeof owner, device, sizeof device);
+    cJSON *t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "name", name);
+    cJSON_AddStringToObject(t, "scopes", scopes);
+    cJSON_AddStringToObject(t, "user", owner);
+    cJSON_AddStringToObject(t, "device", device);
+    cJSON_AddItemToArray(ud, t);
+}
+
+/* Only known scopes, each once, in the canonical order; NULL when none or unknown. */
+static const char *scopes_canon(const cJSON *in, char *out, size_t cap)
+{
+    static const char *ALL[] = { "ui", "screenshot", "control" };
+    int want[3] = { 0 }, n = 0;
+    const cJSON *it;
+    if (!cJSON_IsString(in) && !cJSON_IsArray(in))
+        return NULL;
+    char buf[128];
+    snprintf(buf, sizeof buf, "%s", cJSON_IsString(in) ? in->valuestring : "");
+    if (cJSON_IsArray(in)) {
+        cJSON_ArrayForEach(it, in) {
+            if (!cJSON_IsString(it))
+                return NULL;
+            size_t l = strlen(buf);
+            snprintf(buf + l, sizeof buf - l, "%s%s", l ? "," : "", it->valuestring);
+        }
+    }
+    for (char *tok = strtok(buf, ", "); tok; tok = strtok(NULL, ", ")) {
+        int k = -1;
+        for (int i = 0; i < 3; i++)
+            if (!strcmp(tok, ALL[i]))
+                k = i;
+        if (k < 0)
+            return NULL;
+        want[k] = 1;
+    }
+    *out = 0;
+    for (int i = 0; i < 3; i++) {
+        if (!want[i])
+            continue;
+        size_t l = strlen(out);
+        snprintf(out + l, cap - l, "%s%s", n++ ? "," : "", ALL[i]);
+    }
+    return n ? out : NULL;
+}
+
+/* Makes a token owned by user and saves it; returns the token (malloc'd) or NULL with *err. */
+char *api_token_create(const char *name, const char *scopes, const char *user, const char **err)
+{
+    if (!auth_token_name_ok(name)) {
+        *err = "a name of letters, digits, - and _ (up to 40)";
+        return NULL;
+    }
+    if (rd_conf_get(S.conf, "api_tokens", name, NULL)) {
+        *err = "a token with this name exists";
+        return NULL;
+    }
+    char tok[96], hex[65], val[200];
+    auth_token_new(name, tok, sizeof tok, hex);
+    snprintf(val, sizeof val, "%s %s user=%s", hex, scopes, user);
+    if (server_conf_set("api_tokens", name, val) < 0) {
+        *err = "could not write the configuration file";
+        return NULL;
+    }
+    return rd_strdup(tok);
+}
+
+static int tokens_api(conn_t *c, const http_req_t *r, const char *user)
+{
+    static const char pre[] = "/api/v1/tokens";
+    size_t pl = sizeof pre - 1;
+    if (r->path_len < pl || memcmp(r->path, pre, pl) || (r->path_len > pl && r->path[pl] != '/'))
+        return 0;
+    if (r->path_len == pl && is_method(r, "GET")) {
+        cJSON *b = cJSON_CreateObject();
+        rd_conf_each(S.conf, "api_tokens", token_json, cJSON_AddArrayToObject(b, "tokens"));
+        http_json(c, 200, b, NULL);
+    } else if (r->path_len == pl && is_method(r, "POST")) {
+        cJSON *body = cJSON_ParseWithLength((const char *)r->body, r->body_len);
+        char buf[64];
+        const cJSON *sc = cJSON_GetObjectItemCaseSensitive(body, "scopes");
+        const char *name = msg_str(body, "name", ""), *err = NULL, *scopes = API_SCOPES_ALL;
+        if (sc && !(scopes = scopes_canon(sc, buf, sizeof buf))) {
+            http_error(c, 400, "bad_request", "scopes are ui, screenshot and control");
+        } else {
+            char *tok = api_token_create(name, scopes, user, &err);
+            if (!tok) {
+                http_error(c, err && strstr(err, "exists") ? 409 : 400, "bad_request", err);
+            } else {
+                LOGI("%s: new API token %s (%s)", user, name, scopes);
+                cJSON *b = cJSON_CreateObject();
+                cJSON_AddStringToObject(b, "token", tok);
+                cJSON_AddStringToObject(b, "name", name);
+                cJSON_AddStringToObject(b, "scopes", scopes);
+                cJSON_AddStringToObject(b, "user", user);
+                http_json(c, 201, b, NULL);
+                free(tok);
+            }
+        }
+        cJSON_Delete(body);
+    } else if (r->path_len > pl + 1 && r->path_len - pl - 1 < 64 && is_method(r, "DELETE")) {
+        char name[64];
+        snprintf(name, sizeof name, "%.*s", (int)(r->path_len - pl - 1), r->path + pl + 1);
+        if (!rd_conf_get(S.conf, "api_tokens", name, NULL)) {
+            http_error(c, 404, "not_found", "no such token");
+        } else if (server_conf_set("api_tokens", name, NULL) < 0) {
+            http_error(c, 500, "io_error", "could not write the configuration file");
+        } else {
+            LOGI("%s: revoked API token %s", user, name);
+            http_respond(c, 204, NULL, "", 0, NULL);
+        }
+    } else {
+        http_error(c, 405, "bad_request", "method not allowed");
+    }
+    return 1;
+}
+
 void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expires_ms, const char *sess_id)
 {
     if (r->path_len == 13 && !memcmp(r->path, "/api/v1/setup", 13)) {
@@ -122,6 +244,10 @@ void api_handle(conn_t *c, const http_req_t *r, const char *user, uint64_t expir
         return;
     }
     if (enroll_api(c, r, user))
+        return;
+    if (tokens_api(c, r, user))
+        return;
+    if (oauth_api(c, r, user))
         return;
     if (req_is(r, "GET", "/api/v1/me")) {
         cJSON *b = cJSON_CreateObject();

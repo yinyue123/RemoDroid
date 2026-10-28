@@ -2,7 +2,8 @@
  *   #devices            every phone and computer, tap one to control it (/?device=ID)
  *   #agents             the agents (routers with a phone, computers); #agents/ID edits one,
  *                       #agents/add[/connect|/phone] enrolls a new one
- *   #server             this server's settings, one item at a time (/api/v1/settings)
+ *   #server             this server's settings, one item at a time (/api/v1/settings);
+ *                       #server/tokens the API tokens for AI assistants (/api/v1/tokens, mcp.md)
  * Plain JS, no build step; works the same on remodroid-server and the Worker. */
 (() => {
 'use strict';
@@ -16,6 +17,7 @@ const ICON = {
   phone: '<svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
   router: '<svg viewBox="0 0 24 24"><rect x="3" y="12.5" width="18" height="7.5" rx="2"/><path d="M7 16.2h.01M10.5 16.2h.01"/><path d="M8.5 9a5 5 0 0 1 7 0M6 6.5a8.5 8.5 0 0 1 12 0"/></svg>',
   computer: '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9.5 20h5M12 16.5V20"/></svg>',
+  ai: '<svg viewBox="0 0 24 24"><path d="M12 3.5l1.7 4.6 4.6 1.7-4.6 1.7L12 16.1l-1.7-4.6-4.6-1.7 4.6-1.7z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>',
   copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
 };
 
@@ -149,7 +151,9 @@ function renderAgents() {
     const sub = d.online ? [d.id, isDesk(d) ? OS_NAME[d.platform] : null, a.version && 'agent ' + a.version, a.arch].filter(Boolean).join(' · ')
       : `offline${d.last_seen ? ' · seen ' + ago(d.last_seen) : ''}`;
     return item({ href: '#agents/' + encodeURIComponent(d.id), icon: agentIcon(d), iconCls: d.online ? 'on' : 'off', title: d.name, sub });
-  })) + `<h2 class="gtitle"></h2><div class="group">${item({ href: '#agents/add', title: '', html: '<span class="txt"><b style="color:var(--accent)">Add an agent</b><small>A router with a phone, or a computer; paired with a one-time code</small></span>' })}</div>`;
+  })) + `<h2 class="gtitle"></h2><div class="group">${item({ href: '#agents/add', title: '', html: '<span class="txt"><b style="color:var(--accent)">Add an agent</b><small>A router with a phone, or a computer; paired with a one-time code</small></span>' })}</div>` +
+    group('AI assistants', [item({ href: '/mcp/help', icon: ICON.ai, iconCls: 'on', title: 'MCP for Claude and ChatGPT', sub: 'Let an assistant read the phone\'s screen and tap, type and swipe' })],
+      'Opens the guide (<code>/mcp/help</code>): each phone\'s MCP URL, how to make a token, and setup for Claude Code, Claude Desktop, Codex and the Claude and OpenAI APIs.');
 }
 
 /* Router settings: agent.ini through the panel (agent.config.get / agent.config). */
@@ -227,6 +231,7 @@ async function renderAgent(id) {
   main.innerHTML = status + name + (desk ? '' : notifyGroup(d)) + '<div id="cfg"></div>' +
     group('Actions', [
       item({ act: 'open', html: `<span class="txt"><b style="color:var(--accent)">Open the ${N}</b></span>` }),
+      desk ? '' : item({ href: '/mcp/help?device=' + encodeURIComponent(d.id), html: '<span class="txt"><b>Use with an AI assistant</b><small>MCP: let Claude or ChatGPT see and control this phone</small></span>' }),
       d.online && !desk ? item({ act: 'restart', html: '<span class="txt"><b>Restart the phone server</b><small>When the picture or input is stuck</small></span>', noChev: true }) : '',
       d.online && !desk ? item({ act: 'usb', html: '<span class="txt"><b>Reconnect USB</b></span>', noChev: true }) : '',
       d.online ? item({ act: 'wake', html: `<span class="txt"><b>${desk ? 'Wake the display' : 'Wake the phone'}</b></span>`, noChev: true }) : '',
@@ -554,6 +559,10 @@ function renderServer() {
     ].filter(Boolean), 'Cloudflare dashboard → Realtime → TURN Server → Create.');
   }
   html += `<h2 class="gtitle">${builtinOn ? 'STUN / TURN servers' : 'Other STUN / TURN servers'}</h2><div id="ice"></div><p class="gfoot">Phones use UDP TURN; add your own coturn here, or a public STUN server such as stun.cloudflare.com.</p>`;
+  html += group('AI assistants', [
+    item({ href: '#server/tokens', html: '<span class="txt"><b>API tokens</b><small>How assistants and scripts sign in; revoke one at any time</small></span>' }),
+    item({ href: '/mcp/help', html: '<span class="txt"><b>Connect an assistant (MCP)</b><small>Claude, ChatGPT, Codex and others</small></span>' }),
+  ]);
   html += group('About', [
     item({ html: '<span class="txt"><b>Version</b></span>', val: cfg.version || '' }),
     !worker && cfg.config_file ? item({ html: '<span class="txt"><b>Config file</b></span>', val: cfg.config_file }) : '',
@@ -620,6 +629,38 @@ function editServer(what) {
   if (S[what]) S[what]();
 }
 
+/* ---------------- API tokens (mcp.md §6) ---------------- */
+let tokens = null, newToken = null;
+const SCOPES = [['ui,screenshot,control', 'See and control the phone'], ['ui,screenshot', 'Only see the screen']];
+async function renderTokens() {
+  setTop('API tokens', { back: '#server', backLabel: 'Server' });
+  if (!tokens) {
+    main.innerHTML = '<p class="note">Loading…</p>';
+    try { tokens = (await api('GET', '/api/v1/tokens')).tokens || []; }
+    catch (e) { main.innerHTML = `<div class="callout bad">${esc(e.message)}</div>`; return; }
+    if (route().id !== 'tokens') return;
+  }
+  const made = newToken ? `<div class="callout ok"><b>Token “${esc(newToken.name)}” made.</b> Copy it now: it is shown only once.</div>
+    ${cmdBox(newToken.token).replace('class="cmd"', 'class="cmd raw"')}<p class="gfoot" style="margin-bottom:18px">Next: <a href="/mcp/help">connect your assistant</a> with it.</p>` : '';
+  const scopeName = sc => (SCOPES.find(x => x[0] === sc) || [, sc])[1];
+  main.innerHTML = made + group('', [item({ act: 'new', html: '<span class="txt"><b style="color:var(--accent)">New token</b><small>One for each assistant, so each can be revoked alone</small></span>' })]) +
+    group('Tokens', tokens.length ? tokens.map(t => item({
+      html: `<span class="txt"><b>${esc(t.name)}</b><small>${esc(scopeName(t.scopes))}${t.device ? ' · only ' + esc((devices.find(d => d.id === t.device) || { name: t.device }).name) : ''}${t.user ? ' · ' + esc(t.user) : ' · no owner: not for MCP'}</small></span>`,
+      right: `<button type="button" class="link-btn" data-revoke="${esc(t.name)}">Revoke</button>` }))
+      : [item({ html: '<span class="txt"><small>None yet.</small></span>' })], 'Revoking a token stops the assistant using it at once.');
+  main.querySelector('[data-act="new"]').onclick = () => sheet({ title: 'New token', saveLabel: 'Make', fields: [
+    { k: 'name', label: 'Name', value: 'claude', hint: 'Which assistant uses it: claude-code, chatgpt, …' },
+    { k: 'scopes', label: 'Allowed', type: 'select', value: SCOPES[0][0], options: SCOPES }],
+    save: async v => { newToken = await api('POST', '/api/v1/tokens', v); tokens = null; renderTokens(); } });
+  main.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
+    if (!confirm(`Revoke the token “${b.dataset.revoke}”? Assistants using it stop working.`)) return;
+    try { await api('DELETE', '/api/v1/tokens/' + encodeURIComponent(b.dataset.revoke)); toast('Revoked'); }
+    catch (e) { toast(e.message); }
+    if (newToken && newToken.name === b.dataset.revoke) newToken = null;
+    tokens = null; renderTokens();
+  });
+}
+
 /* ---------------- routing ---------------- */
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#/, '')) || 'devices';
@@ -635,9 +676,14 @@ function show() {
   else if (r.tab === 'agents' && r.add) renderAdd(r.sub);
   else if (r.tab === 'agents' && r.id) renderAgent(r.id);
   else if (r.tab === 'agents') renderAgents();
+  else if (r.id === 'tokens') renderTokens();
   else renderServer();
 }
-window.addEventListener('hashchange', () => { if (route().id !== agentCfgFor) agentCfgFor = null; show(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => {
+  if (route().id !== agentCfgFor) agentCfgFor = null;
+  if (route().id !== 'tokens') tokens = newToken = null; /* a new token is shown once */
+  show(); window.scrollTo(0, 0);
+});
 
 /* live-ish: lists refresh every few seconds while you look at them (not while editing) */
 setInterval(async () => {

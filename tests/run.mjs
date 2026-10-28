@@ -142,14 +142,17 @@ async function main() {
     req.on('end', () => { barkReqs.push({ url: req.url, body: b, ctype: req.headers['content-type'] }); res.writeHead(200); res.end('{"code":200}'); }); });
   await new Promise(r => barkSrv.listen(barkPort, '127.0.0.1', r));
   const aiToken = 'ai.' + crypto.randomBytes(24).toString('hex'), uiToken = 'uionly.' + crypto.randomBytes(24).toString('hex');
+  const mcpToken = 'claude.' + crypto.randomBytes(24).toString('hex'), mcpRoToken = 'looker.' + crypto.randomBytes(24).toString('hex');
   const sha = t => crypto.createHash('sha256').update(t).digest('hex');
   const hash = pw => { const [cmd, ...pre] = exe('remodroid-server'); return execFileSync(cmd, [...pre, 'hashpw', pw]).toString().trim(); };
   fs.mkdirSync(path.join(dir, 'web'));
   fs.writeFileSync(path.join(dir, 'web', 'index.html'), '<!doctype html><title>RemoDroid</title>');
-  for (const f of ['login.html', 'setup.css']) fs.copyFileSync(new URL('../web/' + f, import.meta.url), path.join(dir, 'web', f));
+  for (const f of ['login.html', 'setup.css', 'oauth.html']) fs.copyFileSync(new URL('../web/' + f, import.meta.url), path.join(dir, 'web', f));
   fs.writeFileSync(path.join(dir, 'server.ini'), `[http]
 listen = 127.0.0.1:${httpPort}
 web_root = ${dir}/web
+[server]
+state_dir = ${dir}/state
 [auth]
 session_days = 30
 max_failed_logins = 5
@@ -158,6 +161,7 @@ lockout_minutes = 1
 me = ${hash('pw-user')}
 [devices]
 router1 = ${hash('pw-device')}
+gone1 = ${hash('pw-device')}
 [device_names]
 router1 = Living room phone
 [notify]
@@ -165,6 +169,8 @@ bark_url = http://127.0.0.1:${barkPort}/key
 [api_tokens]
 ai = ${sha(aiToken)}
 uionly = ${sha(uiToken)} ui
+claude = ${sha(mcpToken)} user=me
+looker = ${sha(mcpRoToken)} ui,screenshot user=me
 [turn]
 urls = turn:127.0.0.1:3478?transport=udp
 shared_secret = turnsecret
@@ -267,7 +273,7 @@ interval_seconds = 2
 
   const viewer = await wsConnect(httpPort, '/ws/viewer', { Cookie: cookie, Origin: `http://127.0.0.1:${httpPort}` });
   const snap = await viewer.wait(m => m.t === 'devices');
-  ok(snap.d.devices.length === 1, 'viewer gets a devices snapshot');
+  ok(snap.d.devices.length === 2, 'viewer gets a devices snapshot');
 
   console.log('agent: ADB auth, push, server start, tunnel');
   start('agent', [...exe('remodroid-agent'), '-c', agentIni]);
@@ -424,6 +430,223 @@ interval_seconds = 2
   ok(r.status === 401, 'a wrong API token is 401');
   r = await fetch(base + '/api/v1/devices', { headers: bearer(aiToken) });
   ok(r.status === 200 && (await r.json()).devices[0].id === 'router1', 'API tokens list the devices');
+
+  console.log('MCP (mcp.md)');
+  const mbase = base + '/mcp/me', mcpUrl = mbase + '/router1';
+  let rpcId = 0;
+  const rpc = async (method, params, token = mcpToken, headers = {}) => {
+    const res = await fetch(mcpUrl, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream', ...headers }, body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }) });
+    return { status: res.status, j: await res.json().catch(() => null) };
+  };
+  const call = async (name, args, token) => (await rpc('tools/call', { name, arguments: args }, token)).j;
+  r = await fetch(mbase + '/devices');
+  ok(r.status === 401 && /resource_metadata=".*\/\.well-known\/oauth-protected-resource\/mcp\/me\/devices"/.test(r.headers.get('www-authenticate') || ''),
+    'MCP: no token is 401 with the OAuth resource metadata URL');
+  r = await fetch(mbase + '/devices', { headers: bearer(aiToken) });
+  ok(r.status === 403, 'MCP: a token without an owner is refused');
+  r = await fetch(mbase + '/devices', { headers: bearer(mcpToken) });
+  aj = await r.json();
+  ok(r.status === 200 && aj.devices[0].url === mcpUrl && aj.devices[0].mcp === true, 'MCP: the device list gives each device\'s MCP URL');
+  r = await fetch(base + '/mcp/someone/devices', { headers: bearer(mcpToken) });
+  ok(r.status === 404, 'MCP: another user\'s URL does not exist for this token');
+  let m = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+  ok(m.status === 200 && m.j.id === rpcId && m.j.result.protocolVersion === '2025-06-18' && m.j.result.serverInfo.name === 'remodroid' &&
+    m.j.result.capabilities.tools && /Living room phone/.test(m.j.result.instructions), 'MCP: initialize agrees on the version and names the phone');
+  m = await rpc('initialize', { protocolVersion: '1999-01-01' });
+  ok(m.j.result.protocolVersion === '2025-11-25', 'MCP: an unknown version gets the newest one');
+  r = await fetch(mcpUrl, { method: 'POST', headers: bearer(mcpToken), body: '{"jsonrpc":"2.0","method":"notifications/initialized"}' });
+  ok(r.status === 202 && (await r.text()) === '', 'MCP: a notification is 202 with no body');
+  r = await fetch(mcpUrl, { headers: bearer(mcpToken) });
+  ok(r.status === 405 && r.headers.get('allow') === 'POST', 'MCP: GET (an event stream) is 405');
+  m = await rpc('tools/list');
+  const names = m.j.result.tools.map(t => t.name);
+  ok(names.length === 10 && names.includes('tap') && m.j.result.tools.every(t => t.inputSchema.type === 'object' && t.description),
+    'MCP: tools/list has the 10 tools with schemas');
+  ok(m.j.result.tools.find(t => t.name === 'tap').annotations.destructiveHint === true &&
+    m.j.result.tools.find(t => t.name === 'get_ui').annotations.readOnlyHint === true, 'MCP: tools are annotated read-only or not');
+  m = await rpc('tools/list', {}, mcpRoToken);
+  ok(m.j.result.tools.map(t => t.name).sort().join() === 'get_ui,screenshot,wait_for', 'MCP: a ui,screenshot token sees only the looking tools');
+  m = await rpc('ping');
+  ok(m.j.result && Object.keys(m.j.result).length === 0, 'MCP: ping');
+  let res = await call('get_ui', {});
+  ok(res.result.isError === false && JSON.parse(res.result.content[0].text).ui_id === 1 && phone.apiRequests.at(-1).args.view === 'compact',
+    'MCP: get_ui returns the UI JSON');
+  res = await call('screenshot', {});
+  ok(res.result.content[0].type === 'image' && res.result.content[0].mimeType === 'image/jpeg' &&
+    Buffer.from(res.result.content[0].data, 'base64').equals(phone.shot(1024)) && phone.apiRequests.at(-1).args.max_edge === 1024 &&
+    /461x1024 screenshot/.test(res.result.content[1].text), 'MCP: screenshot is an image block (1024 px by default) plus its size');
+  res = await call('tap', { text: 'OK' });
+  let sent = phone.apiRequests.at(-1).args;
+  ok(res.result.isError === false && sent.action === 'tap' && sent.target.text === 'OK' && sent.wait.for === 'ui_changed',
+    'MCP: tap by selector, waiting for the screen to change');
+  res = await call('tap', { x: 100, y: 200 });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.target.space === 'image' && sent.target.w === 461 && sent.target.h === 1024 && sent.target.x === 100,
+    'MCP: tap coordinates are in the last screenshot\'s pixels');
+  await call('tap', { x: 100, y: 200, space: 'display' });
+  ok(phone.apiRequests.at(-1).args.target.space === undefined, 'MCP: space=display taps display pixels');
+  res = await call('tap', {});
+  ok(res.result.isError === true && /selector/.test(res.result.content[0].text), 'MCP: tap without a target is a tool error');
+  res = await call('tap', { text: '__viewer__' });
+  ok(res.result.isError === true && /^viewer_active: .*tell the user/.test(res.result.content[0].text),
+    'MCP: a person using the phone comes back as a tool error that says to stop');
+  await call('type_text', { text: '你好', into: { rid: 'search' } });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.action === 'set_text' && sent.text === '你好' && sent.target.rid === 'search', 'MCP: type_text into a field sets its text');
+  await call('type_text', { text: 'abc' });
+  ok(phone.apiRequests.at(-1).args.action === 'text', 'MCP: type_text without a field types');
+  await call('press_key', { key: 'Home' });
+  ok(phone.apiRequests.at(-1).args.action === 'home', 'MCP: press_key home');
+  await call('press_key', { key: 'enter' });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.action === 'key' && sent.key === 'enter', 'MCP: press_key enter');
+  await call('launch_app', { package: 'com.android.settings' });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.action === 'launch' && sent.package === 'com.android.settings' && sent.wait.timeout_ms === 5000, 'MCP: launch_app');
+  await call('swipe', { from_x: 1, from_y: 2, to_x: 3, to_y: 4, space: 'display' });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.action === 'swipe' && sent.from.x === 1 && sent.to.y === 4 && sent.duration_ms === 300, 'MCP: swipe');
+  await call('scroll', { direction: 'down', rid: 'list' });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.action === 'scroll' && sent.direction === 'down' && sent.target.rid === 'list', 'MCP: scroll a list');
+  await call('wait_for', { text: 'Done', gone: true, timeout_ms: 100 });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.action === 'wait' && sent.wait.for === 'gone' && sent.wait.selector.text === 'Done' && sent.wait.timeout_ms === 100, 'MCP: wait_for');
+  const before = phone.apiRequests.length;
+  res = await call('tap', { text: 'OK' }, mcpRoToken);
+  ok(res.result.isError === true && /control/.test(res.result.content[0].text) && phone.apiRequests.length === before,
+    'MCP: a read-only token cannot tap, and nothing reaches the phone');
+  res = await call('nope', {});
+  ok(res.error && res.error.code === -32602, 'MCP: an unknown tool is a JSON-RPC error');
+  m = await rpc('resources/read');
+  ok(m.j.error && m.j.error.code === -32601, 'MCP: an unknown method is -32601');
+  r = await fetch(mcpUrl, { method: 'POST', headers: bearer(mcpToken), body: '{not json' });
+  ok(r.status === 400 && (await r.json()).error.code === -32700, 'MCP: bad JSON is a parse error');
+  r = await fetch(mcpUrl, { method: 'POST', headers: bearer(mcpToken), body: '[{"jsonrpc":"2.0","id":1,"method":"ping"}]' });
+  ok(r.status === 400, 'MCP: batches are refused');
+  m = await rpc('ping', {}, mcpToken, { 'MCP-Protocol-Version': '2020-01-01' });
+  ok(m.status === 400, 'MCP: an unsupported MCP-Protocol-Version header is 400');
+  m = await rpc('ping', {}, mcpToken, { Origin: 'https://evil.example' });
+  ok(m.status === 403, 'MCP: a foreign Origin is refused');
+  r = await fetch(base + '/mcp/me/gone1', { method: 'POST', headers: bearer(mcpToken), body: JSON.stringify({ jsonrpc: '2.0', id: 1,
+    method: 'tools/call', params: { name: 'get_ui', arguments: {} } }) });
+  aj = await r.json();
+  ok(aj.result.isError === true && /^offline: .*Tell the user/.test(aj.result.content[0].text), 'MCP: an offline agent is a tool error');
+  r = await fetch(base + '/mcp/me/nosuch', { method: 'POST', headers: bearer(mcpToken), body: '{}' });
+  ok(r.status === 404, 'MCP: an unknown device is 404');
+  console.log('API tokens in the panel');
+  const tpost = body => fetch(base + '/api/v1/tokens', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  r = await tpost({ name: 'phone-bot', scopes: 'screenshot,ui' });
+  aj = await r.json();
+  ok(r.status === 201 && /^phone-bot\.[0-9a-f]{48}$/.test(aj.token) && aj.scopes === 'ui,screenshot' && aj.user === 'me', 'tokens: the panel makes one, owned by the user');
+  ok(new RegExp(`\\[api_tokens\\][^\\[]*phone-bot = ${sha(aj.token)} ui,screenshot user=me`).test(fs.readFileSync(path.join(dir, 'server.ini'), 'utf8')),
+    'tokens: only the hash is saved in server.ini');
+  const botToken = aj.token;
+  r = await fetch(mbase + '/devices', { headers: bearer(botToken) });
+  ok(r.status === 200, 'tokens: a new token works on the MCP URL at once');
+  r = await tpost({ name: 'phone-bot' });
+  ok(r.status === 409, 'tokens: names are unique');
+  r = await tpost({ name: 'x', scopes: 'ui,root' });
+  ok(r.status === 400, 'tokens: unknown scopes are refused');
+  r = await tpost({ name: 'bad name' });
+  ok(r.status === 400, 'tokens: names are letters, digits, - and _');
+  r = await fetch(base + '/api/v1/tokens', { headers: { Cookie: cookie } });
+  aj = await r.json();
+  ok(aj.tokens.some(t => t.name === 'phone-bot' && t.user === 'me' && t.scopes === 'ui,screenshot') && aj.tokens.some(t => t.name === 'ai' && t.user === '') &&
+    !JSON.stringify(aj).includes(sha(botToken)), 'tokens: the list shows names, scopes and owners, never hashes');
+  r = await fetch(base + '/api/v1/tokens', { headers: bearer(mcpToken) });
+  ok(r.status === 404, 'tokens: an API token cannot list or make tokens');
+  r = await fetch(base + '/api/v1/tokens/phone-bot', { method: 'DELETE', headers: { Cookie: cookie } });
+  ok(r.status === 204, 'tokens: revoke');
+  r = await fetch(mbase + '/devices', { headers: bearer(botToken) });
+  ok(r.status === 401, 'tokens: a revoked token stops working at once');
+  console.log('OAuth for claude.ai and ChatGPT');
+  r = await fetch(base + '/.well-known/oauth-protected-resource/mcp/me/router1');
+  aj = await r.json();
+  ok(aj.resource === mcpUrl && aj.authorization_servers[0] === base && r.headers.get('access-control-allow-origin') === '*',
+    'OAuth: the protected resource metadata names this server');
+  r = await fetch(base + '/.well-known/oauth-authorization-server');
+  const asm = await r.json();
+  ok(asm.issuer === base && asm.token_endpoint === base + '/oauth/token' && asm.registration_endpoint === base + '/oauth/register' &&
+    asm.code_challenge_methods_supported.includes('S256'), 'OAuth: authorization server metadata');
+  r = await fetch(base + '/oauth/register', { method: 'OPTIONS' });
+  ok(r.status === 204 && /POST/.test(r.headers.get('access-control-allow-methods')), 'OAuth: CORS preflight');
+  const cb = 'https://claude.ai/api/mcp/auth_callback';
+  r = await fetch(base + '/oauth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: 'Claude', redirect_uris: [cb], grant_types: ['authorization_code'], token_endpoint_auth_method: 'none' }) });
+  const client = await r.json();
+  ok(r.status === 201 && /^c_[0-9a-f]{32}$/.test(client.client_id) && client.token_endpoint_auth_method === 'none', 'OAuth: dynamic client registration');
+  ok(JSON.parse(fs.readFileSync(path.join(dir, 'state', 'oauth.json'), 'utf8')).clients[client.client_id].name === 'Claude', 'OAuth: clients are kept in state_dir/oauth.json');
+  r = await fetch(base + '/oauth/register', { method: 'POST', body: JSON.stringify({ redirect_uris: ['javascript:alert(1)'] }) });
+  ok(r.status === 400, 'OAuth: a dangerous redirect URI is refused');
+  const b64u = b => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const pkce = () => { const v = b64u(crypto.randomBytes(32)); return [v, b64u(crypto.createHash('sha256').update(v).digest())]; };
+  const authQ = (challenge, extra = {}) => '?' + new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: cb,
+    code_challenge: challenge, code_challenge_method: 'S256', state: 'st8', scope: 'ui screenshot control', resource: mcpUrl, ...extra });
+  let [verifier, challenge] = pkce();
+  let q = authQ(challenge);
+  r = await fetch(base + '/oauth/authorize' + q);
+  ok(r.status === 200 && /Allow access/.test(await r.text()), 'OAuth: /oauth/authorize is the consent page, before any login');
+  r = await fetch(base + '/api/v1/oauth/request' + q);
+  ok(r.status === 401, 'OAuth: the consent page needs the login');
+  r = await fetch(base + '/api/v1/oauth/request' + q, { headers: { Cookie: cookie } });
+  aj = await r.json();
+  ok(aj.client === 'Claude' && aj.device.name === 'Living room phone' && aj.redirect_host === 'claude.ai' && aj.user === 'me' &&
+    aj.scopes === 'ui,screenshot,control', 'OAuth: the consent page learns the app, the phone and where it goes back to');
+  const approve = (query, body) => fetch(base + '/api/v1/oauth/approve', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, ...body }) }).then(x => x.json());
+  aj = await approve(q, { allow: true, scopes: 'ui,screenshot' });
+  let obk = new URL(aj.redirect);
+  ok(obk.origin + obk.pathname === cb && obk.searchParams.get('state') === 'st8' && obk.searchParams.get('iss') === base &&
+    /^[0-9a-f]{64}$/.test(obk.searchParams.get('code')), 'OAuth: Allow sends the browser back with a code, the state and iss');
+  const tokenReq = (code, v, extra = {}) => fetch(base + '/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: cb, client_id: client.client_id, code_verifier: v, ...extra }) });
+  r = await tokenReq(obk.searchParams.get('code'), verifier);
+  const granted = await r.json();
+  ok(r.status === 200 && granted.token_type === 'Bearer' && /^oauth-claude-[0-9a-f]{8}\./.test(granted.access_token) && granted.scope === 'ui screenshot' &&
+    r.headers.get('cache-control') === 'no-store', 'OAuth: the code and verifier become an API token, with the scopes the user left on');
+  r = await tokenReq(obk.searchParams.get('code'), verifier);
+  ok(r.status === 400 && (await r.json()).error === 'invalid_grant', 'OAuth: a code works once');
+  m = await rpc('tools/list', {}, granted.access_token);
+  ok(m.j.result.tools.length === 3, 'OAuth: the token works on the MCP endpoint, with its scopes');
+  r = await fetch(mbase + '/devices', { headers: bearer(granted.access_token) });
+  aj = await r.json();
+  ok(aj.devices.length === 1 && aj.devices[0].id === 'router1', 'OAuth: a token for one phone lists only that phone');
+  r = await fetch(base + '/mcp/me/gone1', { method: 'POST', headers: bearer(granted.access_token), body: '{"jsonrpc":"2.0","id":1,"method":"ping"}' });
+  ok(r.status === 404, 'OAuth: … and cannot reach the others');
+  r = await fetch(base + '/api/v1/tokens', { headers: { Cookie: cookie } });
+  aj = await r.json();
+  ok(aj.tokens.some(t => granted.access_token.startsWith(t.name + '.') && t.device === 'router1' && t.user === 'me'), 'OAuth: the token shows in the panel, revocable');
+  [verifier, challenge] = pkce();
+  q = authQ(challenge);
+  aj = await approve(q, { allow: true });
+  r = await tokenReq(new URL(aj.redirect).searchParams.get('code'), 'not-the-verifier-' + 'x'.repeat(30));
+  ok(r.status === 400 && (await r.json()).error === 'invalid_grant', 'OAuth: a wrong code_verifier (PKCE) is refused');
+  [verifier, challenge] = pkce();
+  aj = await approve(authQ(challenge), { allow: true });
+  r = await tokenReq(new URL(aj.redirect).searchParams.get('code'), verifier);
+  const again = await r.json();
+  ok(again.access_token.split('.')[0] === granted.access_token.split('.')[0] && again.access_token !== granted.access_token, 'OAuth: allowing the same app again replaces its token');
+  r = await fetch(mbase + '/devices', { headers: bearer(granted.access_token) });
+  ok(r.status === 401, '… and the old one stops working');
+  aj = await approve(authQ(pkce()[1]), { allow: false });
+  obk = new URL(aj.redirect);
+  ok(obk.searchParams.get('error') === 'access_denied' && obk.searchParams.get('state') === 'st8' && !obk.searchParams.get('code'), 'OAuth: Cancel sends access_denied back');
+  r = await fetch(base + '/api/v1/oauth/request' + authQ(challenge, { client_id: 'c_nope' }), { headers: { Cookie: cookie } });
+  ok(r.status === 400, 'OAuth: an unknown client is an error on the page, not a redirect');
+  r = await fetch(base + '/api/v1/oauth/request' + authQ(challenge, { redirect_uri: 'https://evil.example/cb' }), { headers: { Cookie: cookie } });
+  ok(r.status === 400, 'OAuth: an unregistered redirect_uri is an error on the page, not a redirect');
+  aj = await approve(authQ('short'), { allow: true });
+  ok(new URL(aj.redirect).searchParams.get('error') === 'invalid_request', 'OAuth: no PKCE challenge is sent back as invalid_request');
+  r = await fetch(base + '/api/v1/oauth/request' + authQ(challenge, { resource: base + '/mcp/someone/router1' }), { headers: { Cookie: cookie } });
+  ok(r.status === 400 && /another RemoDroid user/.test((await r.json()).msg), 'OAuth: a connector for another user is refused');
+  r = await fetch(base + '/api/v1/oauth/approve', { method: 'POST', headers: { Cookie: cookie, Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: authQ(challenge), allow: true }) });
+  ok(r.status === 403, 'OAuth: approving from another site is refused');
+
+  r = await fetch(base + '/mcp/help', { redirect: 'manual' });
+  ok(r.status === 302 && /\/login\?next=\/mcp\/help/.test(r.headers.get('location')), 'MCP: /mcp/help is a page behind the login');
 
   console.log('notifications (WebSocket push + Bark)');
   ok(cfg.data.d.notify && cfg.data.d.notify.enabled === true, 'the [notify] config is pushed to the phone');

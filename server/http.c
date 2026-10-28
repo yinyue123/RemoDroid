@@ -304,7 +304,7 @@ void http_serve_static(conn_t *c, const http_req_t *r, const char *extra)
 
 /* ---------------- WebSocket upgrade ---------------- */
 
-static int origin_ok(const http_req_t *r)
+int http_origin_ok(const http_req_t *r)
 {
     size_t ol, hl;
     const char *o = req_header(r, "Origin", &ol);
@@ -443,8 +443,25 @@ static void handle_request(conn_t *c, const http_req_t *r)
         return;
     }
 
+    /* OAuth for MCP clients (oauth.c): metadata, registration, tokens; the consent page loads
+     * without the cookie (SameSite=Strict is not sent when an app sends you here) and logs in itself */
+    if (oauth_handle(c, r))
+        return;
+    if (req_is(r, "GET", "/oauth/authorize")) {
+        http_req_t pr = *r;
+        pr.path = "/oauth.html";
+        pr.path_len = 11;
+        http_serve_static(c, &pr, NULL);
+        return;
+    }
+    /* MCP for AI assistants (mcp.c): API tokens, never the login cookie; /mcp/help is a page */
+    if (r->path_len > 5 && !memcmp(r->path, "/mcp/", 5) && !req_is(r, "GET", "/mcp/help") && !req_is(r, "HEAD", "/mcp/help")) {
+        mcp_handle(c, r);
+        return;
+    }
+
     if (req_is(r, "POST", "/login")) {
-        if (!origin_ok(r)) { http_error(c, 403, "forbidden", "origin not allowed"); return; }
+        if (!http_origin_ok(r)) { http_error(c, 403, "forbidden", "origin not allowed"); return; }
         auth_login_request(c, r);
         return;
     }
@@ -469,7 +486,7 @@ static void handle_request(conn_t *c, const http_req_t *r)
 
     if (req_is(r, "GET", "/ws/viewer")) {
         if (!sess) { http_error(c, 401, "unauthorized", "log in first"); return; }
-        if (!origin_ok(r)) { http_error(c, 403, "forbidden", "origin not allowed"); return; }
+        if (!http_origin_ok(r)) { http_error(c, 403, "forbidden", "origin not allowed"); return; }
         snprintf(c->user, sizeof c->user, "%s", name);
         if (ws_upgrade(c, r, ROLE_VIEWER, NULL) == 0)
             hub_viewer_open(c);
@@ -478,10 +495,10 @@ static void handle_request(conn_t *c, const http_req_t *r)
 
     if (r->path_len >= 8 && !memcmp(r->path, "/api/v1/", 8)) {
         if (!sess) { /* AI clients: Authorization: Bearer <name>.<secret> ([api_tokens]) */
-            char scopes[64];
-            int a = auth_bearer(r, c, name, sizeof name, scopes, sizeof scopes);
+            api_token_t t;
+            int a = auth_bearer(r, c, &t);
             if (a == -2) { http_error(c, 429, "rate_limited", "too many failed logins"); return; }
-            if (a == 1) { api_token_handle(c, r, name, scopes); return; }
+            if (a == 1) { api_token_handle(c, r, t.name, t.scopes); return; }
             http_error(c, 401, "unauthorized", a == 0 ? "bad API token" : "log in first");
             return;
         }
@@ -505,6 +522,13 @@ static void handle_request(conn_t *c, const http_req_t *r)
     if (!sess && !req_is(r, "GET", "/setup.css") && !req_is(r, "GET", "/manifest.webmanifest") &&
         !req_is(r, "GET", "/icon.svg") && !req_is(r, "GET", "/icon-180.png")) {
         login_redirect(c, r);
+        return;
+    }
+    if (req_is(r, "GET", "/mcp/help") || req_is(r, "HEAD", "/mcp/help")) { /* the MCP guide (mcp.md) */
+        http_req_t mr = *r;
+        mr.path = "/mcp.html";
+        mr.path_len = 9;
+        http_serve_static(c, &mr, NULL);
         return;
     }
     http_serve_static(c, r, NULL);

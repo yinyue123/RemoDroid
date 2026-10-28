@@ -202,7 +202,8 @@ static void usage(void)
             "usage: remodroid-server [-c server.ini] [-v] [-t]     -t: check the configuration and exit\n"
             "       remodroid-server hashpw [password]   bcrypt hash for [users]/[devices]\n"
             "       remodroid-server gensecret           random device secret\n"
-            "       remodroid-server gentoken NAME [scopes]  API token for AI clients (ui,screenshot,control)\n"
+            "       remodroid-server gentoken NAME [scopes] [--user USER]  API token for AI clients\n"
+            "                            (scopes ui,screenshot,control; --user: the owner, for /mcp/USER/...)\n"
             "       remodroid-server [-c server.ini] settings    the setup wizard's settings, as JSON\n"
             "       remodroid-server [-c server.ini] configure   apply the setup wizard's form (JSON on stdin)\n"
 #ifdef _WIN32
@@ -277,22 +278,27 @@ int main(int argc, char **argv)
         free(h);
         return 0;
     }
-    if (argc > 1 && !strcmp(argv[1], "gentoken")) { /* API token for AI clients (skill-plan.md) */
-        const char *name = argc > 2 ? argv[2] : "", *scopes = argc > 3 ? argv[3] : API_SCOPES_ALL;
-        if (!*name || strlen(name) > 40 || strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(name)) {
-            fprintf(stderr, "usage: remodroid-server gentoken NAME [ui,screenshot,control]\n"
-                            "       NAME: letters, digits, - and _ (up to 40)\n");
+    if (argc > 1 && !strcmp(argv[1], "gentoken")) { /* API token for AI clients (skill-plan.md, mcp.md) */
+        const char *name = argc > 2 ? argv[2] : "", *scopes = API_SCOPES_ALL, *owner = NULL;
+        int bad = !auth_token_name_ok(name);
+        for (int i = 3; i < argc && !bad; i++) {
+            if (!strcmp(argv[i], "--user") && i + 1 < argc)
+                owner = argv[++i];
+            else if (argv[i][0] != '-' && i == 3)
+                scopes = argv[i];
+            else
+                bad = 1;
+        }
+        if (bad || (owner && (!*owner || strpbrk(owner, " \t=;[]")))) {
+            fprintf(stderr, "usage: remodroid-server gentoken NAME [ui,screenshot,control] [--user USER]\n"
+                            "       NAME: letters, digits, - and _ (up to 40)\n"
+                            "       USER: the panel user who owns it; needed for the MCP endpoint /mcp/USER/...\n");
             return 2;
         }
-        uint8_t r[24], h[32];
-        char secret[40], tok[96], hex[65];
-        rd_random(r, sizeof r);
-        rd_hex(r, sizeof r, secret);
-        snprintf(tok, sizeof tok, "%s.%s", name, secret);
-        rd_sha256(tok, strlen(tok), h);
-        rd_hex(h, sizeof h, hex);
+        char tok[96], hex[65];
+        auth_token_new(name, tok, sizeof tok, hex);
         printf("token (shown once; give it to the AI client):\n  %s\n\nadd to server.ini, then reload (kill -HUP):\n"
-               "  [api_tokens]\n  %s = %s %s\n", tok, name, hex, scopes);
+               "  [api_tokens]\n  %s = %s %s%s%s\n", tok, name, hex, scopes, owner ? " user=" : "", owner ? owner : "");
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "gensecret")) {

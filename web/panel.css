@@ -118,3 +118,4 @@ button.item:active,a.item:active{background:var(--paper-2)}
 .ice-edit .callout{margin:0}
 .ice-note{margin:0;font-size:14px;color:var(--muted)}
 .ice-more{display:grid;gap:12px}
+.cmd.raw code::before{content:none} /* a value to copy, not a shell command */

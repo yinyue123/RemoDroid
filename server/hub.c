@@ -12,6 +12,8 @@ typedef struct pend {
     unsigned gen;
     device_t *dev;
     int raw;           /* AI API: the agent answers with one binary message (hub_on_binary) */
+    hub_api_cb cb;     /* set: the answer goes to cb (mcp.c) instead of straight to the HTTP client */
+    void *ud;
     ev_timer t;
     struct pend *next;
 } pend_t;
@@ -488,6 +490,26 @@ void hub_conn_closed(conn_t *c)
 
 /* ---------------- REST → agent request/reply ---------------- */
 
+/* Hands an answer to a pending request's callback: always called once, with c NULL when
+ * the client is gone (so ud is freed), and errors as the REST API's {"error", "msg"} body. */
+static void pend_cb(pend_t *p, conn_t *c, int status, const char *type, const void *body, size_t n, const cJSON *headers)
+{
+    hub_api_cb cb = p->cb;
+    p->cb = NULL;
+    cb(c, p->ud, status, type, body, n, headers);
+}
+
+static void pend_cb_error(pend_t *p, conn_t *c, int status, const char *code, const char *text)
+{
+    cJSON *b = cJSON_CreateObject();
+    cJSON_AddStringToObject(b, "error", code);
+    cJSON_AddStringToObject(b, "msg", text);
+    char *s = cJSON_PrintUnformatted(b);
+    cJSON_Delete(b);
+    pend_cb(p, c, status, "application/json", s, strlen(s), NULL);
+    free(s);
+}
+
 static void pend_free(pend_t *p)
 {
     for (pend_t **pp = &pends; *pp; pp = &(*pp)->next) {
@@ -497,6 +519,8 @@ static void pend_free(pend_t *p)
         }
     }
     ev_timer_stop(S.loop, &p->t);
+    if (p->cb) /* never answered (the request is dropped): let the callback free its state */
+        p->cb(NULL, p->ud, 0, NULL, NULL, 0, NULL);
     free(p);
 }
 
@@ -519,7 +543,21 @@ static void finish_pend(long id, cJSON *m)
         if (p->id != id)
             continue;
         conn_t *c = p->c;
-        if (c && c->gen == p->gen && c->fd >= 0) {
+        if (p->cb) {
+            int live = c && c->gen == p->gen && c->fd >= 0;
+            if (live)
+                c->busy = 0;
+            if (!strcmp(msg_type(m), "ack")) {
+                char *s = cJSON_PrintUnformatted(msg_d(m));
+                pend_cb(p, live ? c : NULL, 200, "application/json", s, strlen(s), NULL);
+                free(s);
+            } else {
+                const char *code = msg_str(msg_d(m), "code", "io_error");
+                pend_cb_error(p, live ? c : NULL, code_status(code), code, msg_str(msg_d(m), "msg", code));
+            }
+            if (live)
+                ev_feed_fd_event(S.loop, c->fd, EV_READ);
+        } else if (c && c->gen == p->gen && c->fd >= 0) {
             c->busy = 0;
             if (!strcmp(msg_type(m), "ack")) {
                 cJSON *b = cJSON_CreateObject();
@@ -539,18 +577,27 @@ static void finish_pend(long id, cJSON *m)
 static void pend_timeout(struct ev_loop *loop, ev_timer *w, int revents)
 {
     pend_t *p = w->data;
-    if (p->c && p->c->gen == p->gen && p->c->fd >= 0) {
+    int live = p->c && p->c->gen == p->gen && p->c->fd >= 0;
+    if (live)
         p->c->busy = 0;
+    if (p->cb)
+        pend_cb_error(p, live ? p->c : NULL, 504, "timeout", "the agent did not answer in time");
+    else if (live)
         http_error(p->c, 504, "timeout", "the agent did not answer in time");
-    }
     pend_free(p);
 }
 
-static void forward(conn_t *c, device_t *d, const char *type, cJSON *payload, int raw, double timeout)
+static void forward(conn_t *c, device_t *d, const char *type, cJSON *payload, int raw, double timeout, hub_api_cb cb,
+                    void *ud)
 {
     if (!online(d)) {
         cJSON_Delete(payload);
-        http_error(c, 409, "offline", "the router agent is offline");
+        if (cb) {
+            pend_t tmp = { .cb = cb, .ud = ud };
+            pend_cb_error(&tmp, c, 409, "offline", "the router agent is offline");
+        } else {
+            http_error(c, 409, "offline", "the router agent is offline");
+        }
         return;
     }
     pend_t *p = calloc(1, sizeof *p);
@@ -559,6 +606,8 @@ static void forward(conn_t *c, device_t *d, const char *type, cJSON *payload, in
     p->gen = c->gen;
     p->dev = d;
     p->raw = raw;
+    p->cb = cb;
+    p->ud = ud;
     ev_timer_init(&p->t, pend_timeout, timeout, 0.);
     p->t.data = p;
     ev_timer_start(S.loop, &p->t);
@@ -570,15 +619,17 @@ static void forward(conn_t *c, device_t *d, const char *type, cJSON *payload, in
     ws_send_json(d->agent, m);
 }
 
-void hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *payload) { forward(c, d, type, payload, 0, 15.); }
+void hub_forward_cmd(conn_t *c, device_t *d, const char *type, cJSON *payload) { forward(c, d, type, payload, 0, 15., NULL, NULL); }
 
-void hub_forward_api(conn_t *c, device_t *d, const char *op, cJSON *args)
+void hub_forward_api_cb(conn_t *c, device_t *d, const char *op, cJSON *args, hub_api_cb cb, void *ud)
 {
     cJSON *p = cJSON_CreateObject();
     cJSON_AddStringToObject(p, "op", op);
     cJSON_AddItemToObject(p, "args", args ? args : cJSON_CreateObject());
-    forward(c, d, "api", p, 1, 45.); /* the phone may wait up to 30 s for the UI */
+    forward(c, d, "api", p, 1, 45., cb, ud); /* the phone may wait up to 30 s for the UI */
 }
+
+void hub_forward_api(conn_t *c, device_t *d, const char *op, cJSON *args) { hub_forward_api_cb(c, d, op, args, NULL, NULL); }
 
 /* An AI API response from the agent: u32 header length | {"id", "status", "type", "headers"} | body. */
 void hub_on_binary(conn_t *c, const uint8_t *m, size_t n)
@@ -594,7 +645,15 @@ void hub_on_binary(conn_t *c, const uint8_t *m, size_t n)
         if (p->id != id || !p->raw || p->dev != c->dev)
             continue;
         conn_t *v = p->c;
-        if (v && v->gen == p->gen && v->fd >= 0) {
+        if (p->cb) {
+            int live = v && v->gen == p->gen && v->fd >= 0;
+            if (live)
+                v->busy = 0;
+            pend_cb(p, live ? v : NULL, (int)msg_num(h, "status", 502), msg_str(h, "type", "application/octet-stream"), m + 4 + hl,
+                    n - 4 - hl, cJSON_GetObjectItemCaseSensitive(h, "headers"));
+            if (live)
+                ev_feed_fd_event(S.loop, v->fd, EV_READ);
+        } else if (v && v->gen == p->gen && v->fd >= 0) {
             char extra[1024] = "";
             size_t el = 0;
             cJSON *hs = cJSON_GetObjectItemCaseSensitive(h, "headers");

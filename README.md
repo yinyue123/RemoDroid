@@ -365,6 +365,20 @@ Design: [skill-plan.md](skill-plan.md). Writing skills: [skills/README.md](skill
 </details>
 
 <details>
+<summary><b>MCP</b>: use the phone from Claude, ChatGPT and other AI assistants</summary>
+
+Each phone has an MCP endpoint, `https://<panel>/mcp/<user>/<device>`, with tools to read the screen (`get_ui`,
+`screenshot`) and to use it (`tap`, `type_text`, `swipe`, `scroll`, `press_key`, `launch_app`, `wait_for`).
+claude.ai and ChatGPT sign in with OAuth (you tap Allow on a RemoDroid page); Claude Code, Claude Desktop, Codex
+and the Claude and OpenAI APIs use an API token from the panel (Server → API tokens). Every token can be revoked
+there, and a token without the `control` scope can only look.
+
+The panel's Agents tab links to the guide at `/mcp/help`, which shows your phones' URLs, makes a token and gives
+the setup for each assistant. Works on remodroid-server and the Worker. Design: [mcp.md](mcp.md).
+
+</details>
+
+<details>
 <summary><b>Phone notifications</b>: get the phone's notifications on your iPhone or through Bark</summary>
 
 The helper on the phone polls `dumpsys notification` (the only notification content the shell user can see),

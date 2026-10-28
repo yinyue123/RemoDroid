@@ -301,7 +301,43 @@ int auth_basic(const http_req_t *r, conn_t *c, int device, char *name_out, size_
     return a;
 }
 
-int auth_bearer(const http_req_t *r, conn_t *c, char *name_out, size_t name_cap, char *scopes_out, size_t scopes_cap)
+void auth_token_new(const char *name, char *tok, size_t tok_cap, char hex_out[65])
+{
+    uint8_t r[24], h[32];
+    char secret[49];
+    rd_random(r, sizeof r);
+    rd_hex(r, sizeof r, secret);
+    snprintf(tok, tok_cap, "%s.%s", name, secret);
+    rd_sha256(tok, strlen(tok), h);
+    rd_hex(h, sizeof h, hex_out);
+}
+
+int auth_token_name_ok(const char *name)
+{
+    size_t n = strlen(name);
+    return n && n <= 40 && strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == n;
+}
+
+void auth_token_parse(const char *entry, char *scopes, size_t scap, char *owner, size_t ocap, char *device, size_t dcap)
+{
+    snprintf(scopes, scap, "%s", API_SCOPES_ALL);
+    *owner = *device = 0;
+    int got_scopes = 0;
+    for (const char *w = strlen(entry) >= 64 ? entry + 64 : ""; *w;) {
+        while (*w == ' ' || *w == '\t')
+            w++;
+        size_t wl = strcspn(w, " \t");
+        if (wl > 5 && !memcmp(w, "user=", 5))
+            snprintf(owner, ocap, "%.*s", (int)(wl - 5), w + 5);
+        else if (wl > 7 && !memcmp(w, "device=", 7))
+            snprintf(device, dcap, "%.*s", (int)(wl - 7), w + 7);
+        else if (wl && !got_scopes)
+            snprintf(scopes, scap, "%.*s", (int)wl, w), got_scopes = 1;
+        w += wl;
+    }
+}
+
+int auth_bearer(const http_req_t *r, conn_t *c, api_token_t *t)
 {
     size_t vl;
     const char *v = req_header(r, "Authorization", &vl);
@@ -331,11 +367,8 @@ int auth_bearer(const http_req_t *r, conn_t *c, char *name_out, size_t name_cap,
             LOGW("bad API token from %s", c->ip);
         return 0;
     }
-    const char *sc = entry + 64;
-    while (*sc == ' ' || *sc == '\t')
-        sc++;
-    snprintf(scopes_out, scopes_cap, "%s", *sc ? sc : API_SCOPES_ALL);
-    snprintf(name_out, name_cap, "token:%s", name);
+    auth_token_parse(entry, t->scopes, sizeof t->scopes, t->owner, sizeof t->owner, t->device, sizeof t->device);
+    snprintf(t->name, sizeof t->name, "token:%s", name);
     return 1;
 }
 

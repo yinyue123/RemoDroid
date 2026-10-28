@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Allow access · RemoDroid</title>
+<meta name="description" content="An app such as Claude or ChatGPT asks to use your phone through RemoDroid (OAuth, mcp.md).">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="stylesheet" href="/setup.css">
+<style>
+main.consent{max-width:460px;padding-top:max(48px,10vh)}
+.consent .brand{margin:0 0 30px}
+.consent h1{font-size:clamp(30px,8vw,40px)}
+.consent .lede{font-size:16.5px;margin:0 0 22px}
+.consent .scopes{display:grid;gap:14px;margin:0 0 22px;padding:16px;border:1px solid var(--line);border-radius:var(--r);background:var(--card)}
+.consent .scopes small{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
+.consent .acts{display:flex;gap:10px;flex-wrap:wrap}
+.consent .acts .btn{flex:1;justify-content:center}
+.consent .who{margin-top:22px}
+</style>
+</head>
+<body>
+<main class="consent">
+  <div class="brand"><i>RD</i>RemoDroid</div>
+  <div id="box"><p class="note">Loading…</p></div>
+</main>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const box = $('#box'), query = location.search;
+
+function fail(msg) {
+  box.innerHTML = `<h1>Can’t <em>connect</em></h1><div class="callout bad" role="alert">${esc(msg)}</div>
+    <p class="note">Go back to the app and try adding the connector again.</p>`;
+}
+
+async function decide(allow, scopes) {
+  box.querySelectorAll('button').forEach(b => b.disabled = true);
+  try {
+    const r = await fetch('/api/v1/oauth/approve', { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, allow, scopes }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return fail(j.msg || `Error ${r.status}`);
+    box.innerHTML = `<h1>${allow ? 'Allowed' : 'Cancelled'}</h1><p class="note">Taking you back to the app…</p>`;
+    location.replace(j.redirect);
+  } catch (_) { fail('Cannot reach the server. Check your connection and try again.'); }
+}
+
+(async () => {
+  let r;
+  try { r = await fetch('/api/v1/oauth/request' + query, { credentials: 'same-origin' }); }
+  catch (_) { return fail('Cannot reach the server. Check your connection and try again.'); }
+  if (r.status === 401) { location.replace('/login?next=' + encodeURIComponent(location.pathname + query)); return; }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return fail(j.msg || `Error ${r.status}`);
+  if (j.error) return decide(false); /* a malformed request: the app gets the error back */
+  const can = s => (',' + j.scopes + ',').includes(',' + s + ',');
+  const what = j.device ? `your phone <b>${esc(j.device.name)}</b>` : 'your phones';
+  box.innerHTML = `<h1>Allow <em>${esc(j.client)}</em>?</h1>
+    <p class="lede"><b>${esc(j.client)}</b> wants to use ${what} through RemoDroid. You’ll go back to <b>${esc(j.redirect_host)}</b>.</p>
+    <div class="scopes">
+      ${can('ui') || can('screenshot') ? `<label class="check"><input type="checkbox" checked disabled><span>See the screen<small>Read what’s on it and take screenshots</small></span></label>` : ''}
+      ${can('control') ? `<label class="check"><input type="checkbox" id="ctl" checked><span>Control the phone<small>Tap, type, swipe and open apps. It’s told to ask you before sending, buying or deleting.</small></span></label>` : ''}
+    </div>
+    <div class="acts"><button class="btn" id="ok" type="button">Allow</button><button class="btn ghost" id="no" type="button">Cancel</button></div>
+    <p class="note who">Signed in as <b>${esc(j.user)}</b>. You can revoke this any time under Server → API tokens in the panel.</p>`;
+  $('#ok').onclick = () => decide(true, j.scopes.split(',').filter(s => s !== 'control' || ($('#ctl') && $('#ctl').checked)).join(','));
+  $('#no').onclick = () => decide(false);
+})();
+})();
+</script>
+</body>
+</html>
