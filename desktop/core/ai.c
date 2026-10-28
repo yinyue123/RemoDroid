@@ -320,7 +320,20 @@ static int do_action(const cJSON *a, const dsk_screen_t *s, char *err, size_t ca
         const char *t = msg_str(a, "text", NULL);
         if (!t)
             return snprintf(err, cap, "\"text\" is required"), -1;
-        dsk_text(t);
+        /* one character at a time, paced: in a burst, Windows 11's new Notepad (WinUI) turned
+         * "Hello from…" into "Hello 好好好…", the last character over and over */
+        for (const char *p = t; *p;) {
+            char ch[8];
+            size_t n = 1;
+            while (p[n] && ((unsigned char)p[n] & 0xC0) == 0x80 && n < sizeof ch - 1) /* the rest of a UTF-8 sequence */
+                n++;
+            memcpy(ch, p, n);
+            ch[n] = 0;
+            dsk_text(ch);
+            p += n;
+            if (*p)
+                pause_ms(8);
+        }
         return 0;
     }
     snprintf(err, cap, "unknown action \"%s\" (click, move, drag, scroll, key, text)", act);
