@@ -60,11 +60,15 @@ static const struct tool {
         "Touch and hold an element or a point, like tap. For context menus, selecting text, dragging icons.",
         "{'type':'object','properties':{" SEL "," POINT ",'duration_ms':{'type':'integer','minimum':300,'maximum':10000}}}" },
     [T_SWIPE] = { "swipe", "Swipe", "control", 0,
-        "Drag a finger from one point to another, for sliders, pull-to-refresh, unlock patterns and games. To move "
-        "through a list or page, use scroll instead.",
+        "Drag a finger from one point to another (from_x, from_y, to_x, to_y), for sliders, pull-to-refresh and games; or, "
+        "with path, through several points in one touch without lifting the finger: for a pattern lock, find the nine "
+        "dots (get_ui bounds or a screenshot) and pass their centres in the pattern’s order. To move through a list or "
+        "page, use scroll instead.",
         "{'type':'object','properties':{'from_x':{'type':'number'},'from_y':{'type':'number'},'to_x':{'type':'number'},"
-        "'to_y':{'type':'number'},'space':{'type':'string','enum':['screenshot','display']},'duration_ms':{'type':"
-        "'integer','minimum':50,'maximum':5000,'description':'Default 300'}},'required':['from_x','from_y','to_x','to_y']}" },
+        "'to_y':{'type':'number'},'path':{'type':'array','minItems':2,'maxItems':32,'description':'Points the finger "
+        "passes through, in order, instead of from/to','items':{'type':'object','properties':{'x':{'type':'number'},"
+        "'y':{'type':'number'}},'required':['x','y']}},'space':{'type':'string','enum':['screenshot','display']},"
+        "'duration_ms':{'type':'integer','minimum':50,'maximum':10000,'description':'Default 300; 200 per segment with path'}}}" },
     [T_SCROLL] = { "scroll", "Scroll", "control", 0,
         "Scroll the content: direction=down shows what is further down. With a selector, scrolls that list or page; "
         "without one, the middle of the screen.",
@@ -345,6 +349,35 @@ static cJSON *tool_request(int t, const cJSON *a, const device_t *d, const char 
         add_wait(req, "ui_changed", 2000);
         return req;
     case T_SWIPE: {
+        const cJSON *path = cJSON_GetObjectItemCaseSensitive(a, "path"), *e;
+        if (path) {
+            int n = cJSON_GetArraySize(path);
+            if (!cJSON_IsArray(path) || n < 2 || n > 32) {
+                *err = "path is a list of 2 to 32 points {x, y}";
+                break;
+            }
+            cJSON *pts = cJSON_AddArrayToObject(req, "path");
+            cJSON_ArrayForEach(e, path) {
+                cJSON *q = cJSON_Duplicate(e, 1), *sp = cJSON_GetObjectItemCaseSensitive(a, "space");
+                if (cJSON_IsObject(q) && sp)
+                    cJSON_AddItemToObject(q, "space", cJSON_Duplicate(sp, 1));
+                cJSON *pt = cJSON_IsObject(q) ? point(q, "x", "y", d, err) : NULL;
+                cJSON_Delete(q);
+                if (!pt) {
+                    if (!*err)
+                        *err = "each path point needs numbers x and y";
+                    break;
+                }
+                cJSON_AddItemToArray(pts, pt);
+            }
+            if (*err)
+                break;
+            cJSON_AddStringToObject(req, "action", "swipe");
+            if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(a, "duration_ms")))
+                cJSON_AddNumberToObject(req, "duration_ms", RD_MAX(50, RD_MIN(10000, (int)msg_num(a, "duration_ms", 0))));
+            add_wait(req, "ui_changed", 1500);
+            return req;
+        }
         cJSON *from = point(a, "from_x", "from_y", d, err), *to = from ? point(a, "to_x", "to_y", d, err) : NULL;
         if (!to) {
             cJSON_Delete(from);

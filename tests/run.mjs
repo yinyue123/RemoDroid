@@ -507,6 +507,17 @@ interval_seconds = 2
   await call('swipe', { from_x: 1, from_y: 2, to_x: 3, to_y: 4, space: 'display' });
   sent = phone.apiRequests.at(-1).args;
   ok(sent.action === 'swipe' && sent.from.x === 1 && sent.to.y === 4 && sent.duration_ms === 300, 'MCP: swipe');
+  res = await call('swipe', { path: [{ x: 300, y: 1500 }, { x: 540, y: 1700 }, { x: 300, y: 1900 }, { x: 540, y: 1900 }], space: 'display' });
+  sent = phone.apiRequests.at(-1).args;
+  ok(res.result.isError === false && sent.action === 'swipe' && sent.path.length === 4 && sent.path[3].x === 540 && sent.path[3].space === undefined &&
+    sent.wait.for === 'ui_changed', 'MCP: swipe through a path (a pattern lock), in one touch');
+  await call('swipe', { path: [{ x: 10, y: 20 }, { x: 30, y: 40 }] });
+  sent = phone.apiRequests.at(-1).args;
+  ok(sent.path[0].space === 'image' && sent.path[0].w === 461, 'MCP: path points are in screenshot pixels after a screenshot');
+  res = await call('swipe', { path: [{ x: 1, y: 2 }] });
+  ok(res.result.isError === true && /2 to 32/.test(res.result.content[0].text), 'MCP: a path needs two points');
+  res = await call('swipe', { path: [{ x: 1 }, { x: 3, y: 4 }], space: 'display' });
+  ok(res.result.isError === true && /x and y/.test(res.result.content[0].text), 'MCP: each path point needs x and y');
   await call('scroll', { direction: 'down', rid: 'list' });
   sent = phone.apiRequests.at(-1).args;
   ok(sent.action === 'scroll' && sent.direction === 'down' && sent.target.rid === 'list', 'MCP: scroll a list');

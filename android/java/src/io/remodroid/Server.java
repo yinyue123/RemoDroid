@@ -149,7 +149,7 @@ public final class Server implements Native.Listener {
     public void onLink(boolean up) {
         if (!up) return;
         try {
-            JSONObject d = new JSONObject().put("proto", 1).put("version", "0.3.0")
+            JSONObject d = new JSONObject().put("proto", 1).put("version", "0.3.1")
                     .put("android", android.os.Build.VERSION.RELEASE).put("sdk", Hidden.sdk())
                     .put("model", android.os.Build.MODEL)
                     .put("codecs", ScreenEncoder.hasHardwareHevc() ? new org.json.JSONArray().put("h265").put("h264")

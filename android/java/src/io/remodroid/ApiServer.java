@@ -223,6 +223,7 @@ final class ApiServer {
                         .put("encoder", Native.hasImageEncoder() ? "c" : "java"))
                 .put("actions", new JSONArray().put("tap").put("long_press").put("swipe").put("scroll").put("key")
                         .put("text").put("set_text").put("back").put("home").put("recents").put("launch").put("wait"))
+                .put("swipe_path", true) /* swipe {"path": [points]}: one continuous touch */
                 .put("viewer_active", Controller.lastInputAt > 0
                         && android.os.SystemClock.uptimeMillis() - Controller.lastInputAt < Actions.VIEWER_GRACE_MS);
     }

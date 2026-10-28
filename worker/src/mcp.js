@@ -153,10 +153,11 @@ const TOOLS = [
     description: 'Touch and hold an element or a point, like tap. For context menus, selecting text, dragging icons.',
     schema: obj({ ...SEL, ...POINT, duration_ms: { type: 'integer', minimum: 300, maximum: 10000 } }) },
   { name: 'swipe', title: 'Swipe', scope: 'control',
-    description: 'Drag a finger from one point to another, for sliders, pull-to-refresh, unlock patterns and games. To move through a list or page, use scroll instead.',
+    description: 'Drag a finger from one point to another (from_x, from_y, to_x, to_y), for sliders, pull-to-refresh and games; or, with path, through several points in one touch without lifting the finger: for a pattern lock, find the nine dots (get_ui bounds or a screenshot) and pass their centres in the pattern’s order. To move through a list or page, use scroll instead.',
     schema: obj({ from_x: { type: 'number' }, from_y: { type: 'number' }, to_x: { type: 'number' }, to_y: { type: 'number' },
-      space: S(undefined, { enum: ['screenshot', 'display'] }), duration_ms: { type: 'integer', minimum: 50, maximum: 5000, description: 'Default 300' } },
-      ['from_x', 'from_y', 'to_x', 'to_y']) },
+      path: { type: 'array', minItems: 2, maxItems: 32, description: 'Points the finger passes through, in order, instead of from/to',
+        items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] } },
+      space: S(undefined, { enum: ['screenshot', 'display'] }), duration_ms: { type: 'integer', minimum: 50, maximum: 10000, description: 'Default 300; 200 per segment with path' } }) },
   { name: 'scroll', title: 'Scroll', scope: 'control',
     description: 'Scroll the content: direction=down shows what is further down. With a selector, scrolls that list or page; without one, the middle of the screen.',
     schema: obj({ direction: S(undefined, { enum: ['down', 'up', 'left', 'right'] }), ...SEL }, ['direction']) },
@@ -222,6 +223,16 @@ function toolRequest(name, a, shot) {
         wait: wait('ui_changed', 2000) }];
     }
     case 'swipe': {
+      if (a.path !== undefined) {
+        if (!Array.isArray(a.path) || a.path.length < 2 || a.path.length > 32) throw new Error('path is a list of 2 to 32 points {x, y}');
+        const path = a.path.map(p => {
+          const pt = p && typeof p === 'object' && point({ ...p, ...(a.space ? { space: a.space } : {}) }, 'x', 'y', shot);
+          if (!pt) throw new Error('each path point needs numbers x and y');
+          return pt;
+        });
+        return ['action', { action: 'swipe', path, ...(typeof a.duration_ms === 'number' ? { duration_ms: clamp(a.duration_ms, 50, 10000, 300) } : {}),
+          wait: wait('ui_changed', 1500) }];
+      }
       const from = point(a, 'from_x', 'from_y', shot), to = from && point(a, 'to_x', 'to_y', shot);
       if (!to) throw new Error('from_x, from_y, to_x and to_y are required numbers');
       return ['action', { action: 'swipe', from, to, duration_ms: clamp(a.duration_ms, 50, 5000, 300), wait: wait('ui_changed', 1500) }];

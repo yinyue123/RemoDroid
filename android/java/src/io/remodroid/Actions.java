@@ -67,6 +67,14 @@ final class Actions {
                 return gesture(p[0], p[1], p[0], p[1], hold, 1);
             }
             case "swipe": {
+                JSONArray path = req.optJSONArray("path");
+                if (path != null) { /* one touch through every point, never lifted: pattern locks, drawing */
+                    if (path.length() < 2 || path.length() > 32)
+                        throw new ApiServer.Fault(400, "bad_request", "a path has 2 to 32 points", false);
+                    float[][] pts = new float[path.length()][];
+                    for (int i = 0; i < pts.length; i++) pts[i] = point(path.optJSONObject(i), req, di, epoch, res);
+                    return gesturePath(pts, Math.max(50, req.optLong("duration_ms", 200L * (pts.length - 1))));
+                }
                 float[] a, b;
                 if (target != null && req.has("direction")) { /* swipe across an element */
                     UiTree.Node n = resolveNode(target, req, di, epoch);
@@ -244,6 +252,23 @@ final class Actions {
         }
         if (x1 == x2 && y1 == y2) SystemClock.sleep(ms);
         return touch(MotionEvent.ACTION_UP, down, x2, y2) && ok;
+    }
+
+    /** Like gesture(), through several points: the finger stays down at each corner. */
+    private boolean gesturePath(float[][] p, long ms) {
+        long down = SystemClock.uptimeMillis(), seg = Math.max(16, ms / (p.length - 1));
+        int moves = (int) Math.max(2, seg / 16);
+        boolean ok = touch(MotionEvent.ACTION_DOWN, down, p[0][0], p[0][1]);
+        for (int s = 1; ok && s < p.length; s++) {
+            for (int i = 1; ok && i <= moves; i++) {
+                SystemClock.sleep(Math.max(1, seg / moves));
+                float f = (float) i / moves;
+                ok = touch(MotionEvent.ACTION_MOVE, down, p[s - 1][0] + (p[s][0] - p[s - 1][0]) * f,
+                        p[s - 1][1] + (p[s][1] - p[s - 1][1]) * f);
+            }
+        }
+        float[] end = p[p.length - 1];
+        return touch(MotionEvent.ACTION_UP, down, end[0], end[1]) && ok;
     }
 
     private boolean touch(int action, long down, float x, float y) {

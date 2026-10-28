@@ -252,6 +252,9 @@ async function main() {
   m = await rpc('tools/call', { name: 'tap', arguments: { x: 10, y: 20 } });
   let sent = phone.apiRequests.at(-1).args;
   ok(!m.j.result.isError && sent.target.space === 'image' && sent.target.w === 461, 'MCP: tap in screenshot pixels');
+  m = await rpc('tools/call', { name: 'swipe', arguments: { path: [{ x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 6 }], space: 'display' } });
+  sent = phone.apiRequests.at(-1).args;
+  ok(!m.j.result.isError && sent.action === 'swipe' && sent.path.length === 3 && sent.path[2].y === 6, 'MCP: swipe through a path');
   m = await rpc('tools/call', { name: 'type_text', arguments: { text: '你好', into: { rid: 'search' } } });
   sent = phone.apiRequests.at(-1).args;
   ok(sent.action === 'set_text' && sent.text === '你好', 'MCP: type_text');
