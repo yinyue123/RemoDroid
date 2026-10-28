@@ -9,6 +9,8 @@
 #include <sys/ipc.h>
 #include <sys/select.h>
 #include <sys/shm.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -42,6 +44,30 @@ static int on_x_error(Display *d, XErrorEvent *e)
     return 0;
 }
 
+/* The segment is made 0600, so an X server running as another user can't attach it — root too,
+ * inside a container that drops CAP_IPC_OWNER (the remote browser's Xorg on hqnode) — and the
+ * capture falls back to XGetImage: the whole screen through the socket for every frame. Make the
+ * server's user the segment's owner: we keep access as its creator, and nobody else gets any.
+ * Only over a local socket, where the peer's user is known. */
+static void shm_share_with_server(Display *d, int shmid)
+{
+    struct sockaddr_storage sa;
+    socklen_t salen = sizeof sa;
+    struct ucred cr;
+    socklen_t crlen = sizeof cr;
+    struct shmid_ds ds;
+    if (getsockname(ConnectionNumber(d), (struct sockaddr *)&sa, &salen) < 0 || sa.ss_family != AF_UNIX)
+        return;
+    if (getsockopt(ConnectionNumber(d), SOL_SOCKET, SO_PEERCRED, &cr, &crlen) < 0 || cr.uid == geteuid())
+        return;
+    if (shmctl(shmid, IPC_STAT, &ds) < 0)
+        return;
+    ds.shm_perm.uid = cr.uid;
+    if (shmctl(shmid, IPC_SET, &ds) < 0)
+        LOGW("capture: can't share the MIT-SHM segment with the X server's user %u: %s", (unsigned)cr.uid,
+             strerror(errno));
+}
+
 dsk_capture_t *dsk_capture_open(const dsk_screen_t *s, char *err, size_t cap)
 {
     dsk_capture_t *c = calloc(1, sizeof *c);
@@ -73,6 +99,8 @@ dsk_capture_t *dsk_capture_open(const dsk_screen_t *s, char *err, size_t cap)
             c->shm.shmaddr = c->img->data = c->shm.shmid >= 0 ? shmat(c->shm.shmid, NULL, 0) : (char *)-1;
             c->shm.readOnly = False;
             x_error = 0;
+            if (c->shm.shmaddr != (char *)-1)
+                shm_share_with_server(c->d, c->shm.shmid);
             if (c->shm.shmaddr != (char *)-1 && XShmAttach(c->d, &c->shm)) {
                 XSync(c->d, False);
                 c->use_shm = !x_error; /* fails over the network / in containers without shared IPC */

@@ -33,3 +33,15 @@ My OECT box has arrived, but the SSD is still on its way. Help me with following
 3. Document this plan in browser/backup.md. Explain how the whole system boots, with every detail so I can understand it: disk partation, mount process. U-Boot, and rootfs. Please provide your plan.
 
 Help me improve the browser further. It should support 6 users: Alice, Bob, Charlie, David, Eve, Frank. Each user will have their own cookies, history files and fingerprint data. Users can switch profile seamlessly. When I switch to another user, the previous profile closes completely, and the new user's profile loads along with their previously opened tabs. Additionally, add a history page. Include options to clear history and data as well as clear cookies. On the settings(...) page, add displays for cpu usage, memory usage, and disk usage. Add a favorite button so users can save bookmarks to their favourites list. Include a close button in the favourites section to allow  users to delete items.
+
+Could you help me implement an mcp. Since Android supports screen capture and operation. You help me implement an mcp api with these endpoints.
+https://addr/mcp/help.                  //guide
+https://addr/mcp/<username>/devices     //device list
+https://addr/mcp/<username>/<deviceid>  //mcp endpoint
+Auth: <passwd hash>
+
+Write an mcp guide to me. This is the first time to write a mcp. You need to tell me.
+1. Explain what a mcp is and how to write one
+2. Show me how to intergrate the mcp with claude or gpt
+3. Create an mcp implementation plan in mcp.md
+4. Add an mcp link to the agent page with instructions. When I click the mcp item, the URL should open and display a guide teching me how to use it.
