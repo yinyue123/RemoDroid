@@ -368,7 +368,8 @@ Design: [skill-plan.md](skill-plan.md). Writing skills: [skills/README.md](skill
 <summary><b>MCP</b>: use the phone from Claude, ChatGPT and other AI assistants</summary>
 
 Each phone has an MCP endpoint, `https://<panel>/mcp/<user>/<device>`, with tools to read the screen (`get_ui`,
-`screenshot`) and to use it (`tap`, `type_text`, `swipe`, `scroll`, `press_key`, `launch_app`, `wait_for`).
+`screenshot`) and to use it (`wake_phone`, `tap`, `type_text`, `swipe`, `scroll`, `press_key`, `launch_app`,
+`wait_for`); `wake_phone` finds the way past the lock screen and `swipe` can draw a pattern in one touch.
 claude.ai and ChatGPT sign in with OAuth (you tap Allow on a RemoDroid page); Claude Code, Claude Desktop, Codex
 and the Claude and OpenAI APIs use an API token from the panel (Server → API tokens). Every token can be revoked
 there, and a token without the `control` scope can only look.

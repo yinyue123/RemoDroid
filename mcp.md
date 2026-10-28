@@ -259,12 +259,13 @@ Each tool maps onto one existing REST call, so the C code is a table plus argume
 | `screenshot` | `GET /screenshot` | `screenshot` | `max_edge` (default 1024), `quality` (default 70) | An `image` block (JPEG) plus a text block with its size |
 | `tap` | `POST /actions` `tap` | `control` | a target (below) | `{"ok","verified","ui_id"}` |
 | `long_press` | `long_press` | `control` | target, `duration_ms` | as above |
-| `swipe` | `swipe` | `control` | `from`, `to` (points) or target + `direction`, `duration_ms` | as above |
+| `swipe` | `swipe` | `control` | `from_x`…`to_y`, or `path` (2–32 points drawn as one touch: pattern locks), `duration_ms` | as above |
 | `scroll` | `scroll` | `control` | `direction` (up/down/left/right), optional target | as above |
 | `type_text` | `set_text` with a target, else `text` | `control` | `text`, optional target | as above |
 | `press_key` | `back` / `home` / `recents` / `key` | `control` | `key`: back, home, recents, enter, or a key name | as above |
 | `launch_app` | `launch` | `control` | `package` | as above |
 | `wait_for` | `wait` with `wait.for` | `ui` | target, `gone`, `timeout_ms` | `{"ok","verified"}` |
+| `wake_phone` | `key WAKEUP`, `/ui`, and on the lock screen's clock a swipe up and `/ui` again | `control` | none | Unlocked (and the app in front), or locked with a pattern (the nine dot centres), a PIN or a password |
 
 **A target** is either a selector, `{"rid"|"text"|"text_contains"|"desc"|"desc_contains"|"label"|"cls", "index",
 "within"}`, or a point `{"x", "y"}`, in display pixels or, with `"space":"image","w","h"`, in the pixels of the
