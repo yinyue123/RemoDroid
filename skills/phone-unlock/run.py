@@ -2,8 +2,6 @@
 import os
 import sys
 import time
-import subprocess
-import shlex
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "python"))
 
@@ -85,21 +83,9 @@ def run(c):
             raise NeedsAI("do not resume partway through an unlock attempt", "draw_pattern")
         if c.capabilities().get("viewer_active"):
             raise NeedsAI("a person is using the phone", "draw_pattern")
-        commands = []
-        for index, (x, y) in enumerate(points):
-            event = "DOWN" if index == 0 else "MOVE"
-            commands.append(f"input touchscreen motionevent {event} {round(x)} {round(y)}")
-        x, y = points[-1]
-        commands.append(f"input touchscreen motionevent UP {round(x)} {round(y)}")
-        remote = ("/koolshare/remodroid/bin/remodroid-agent -c "
-                  "/jffs/configs/remodroid/agent.ini shell " + shlex.quote("; ".join(commands)))
-        try:
-            subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                            "admin@192.168.10.3", remote], check=True,
-                           capture_output=True, timeout=20)
-        except (subprocess.SubprocessError, OSError):
-            raise NeedsAI("pattern submission uncertain; inspect screen before any retry", "draw_pattern")
-        c.journal.append({"step": "draw_pattern", "side_effect": True, "ok": True})
+        # One touch through every dot, never lifted (swipe "path", phone server 0.3.1)
+        c.act("swipe", step="draw_pattern", side_effect=True,
+              path=[{"x": round(x), "y": round(y)} for x, y in points], duration_ms=200 * (len(points) - 1))
         return wait_until_unlocked(c)
 
     for digit in set(UNLOCK_SEQUENCE):
