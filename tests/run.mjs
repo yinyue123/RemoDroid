@@ -489,8 +489,8 @@ interval_seconds = 2
   res = await call('tap', {});
   ok(res.result.isError === true && /selector/.test(res.result.content[0].text), 'MCP: tap without a target is a tool error');
   res = await call('tap', { text: '__viewer__' });
-  ok(res.result.isError === true && /^viewer_active: .*tell the user/.test(res.result.content[0].text),
-    'MCP: a person using the phone comes back as a tool error that says to stop');
+  ok(res.result.isError === true && /^viewer_active: .*try again/.test(res.result.content[0].text),
+    'MCP: a person using the phone comes back as a tool error that says to wait');
   await call('type_text', { text: '你好', into: { rid: 'search' } });
   sent = phone.apiRequests.at(-1).args;
   ok(sent.action === 'set_text' && sent.text === '你好' && sent.target.rid === 'search', 'MCP: type_text into a field sets its text');
