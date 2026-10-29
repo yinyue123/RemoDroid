@@ -24,6 +24,7 @@ struct dsk_capture {
     IDXGIOutputDuplication *dup;
     ID3D11Texture2D *staging;
     int ptr_visible, ptr_x, ptr_y;
+    int ptr_gen; /* ptr_gen when the frame was last composed */
     uint8_t *shape;
     UINT shape_cap;
     DXGI_OUTDUPL_POINTER_SHAPE_INFO shape_info;
@@ -35,6 +36,16 @@ struct dsk_capture {
 
 /* ---------------- pointer ---------------- */
 
+/* dsk_capture_pointer(): hidden while a viewer draws its own; gen recomposes the last frame */
+static volatile LONG ptr_hidden, ptr_gen;
+void dsk_capture_pointer(int show)
+{
+    if (ptr_hidden == !show)
+        return;
+    InterlockedExchange(&ptr_hidden, !show);
+    InterlockedIncrement(&ptr_gen);
+}
+
 static void blend_px(uint8_t *q, uint8_t b, uint8_t g, uint8_t r, uint8_t a)
 {
     q[0] = (uint8_t)((b * a + q[0] * (255 - a)) / 255);
@@ -44,7 +55,7 @@ static void blend_px(uint8_t *q, uint8_t b, uint8_t g, uint8_t r, uint8_t a)
 
 static void draw_pointer(dsk_capture_t *c)
 {
-    if (!c->ptr_visible || !c->shape)
+    if (!c->ptr_visible || !c->shape || ptr_hidden)
         return;
     const DXGI_OUTDUPL_POINTER_SHAPE_INFO *si = &c->shape_info;
     int mono = si->Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME;
@@ -79,6 +90,7 @@ static void draw_pointer(dsk_capture_t *c)
 static void compose(dsk_capture_t *c, dsk_frame_t *f)
 {
     memcpy(c->out, c->clean, (size_t)c->w * c->h * 4);
+    c->ptr_gen = ptr_gen;
     draw_pointer(c);
     f->bgra = c->out;
     f->w = c->w;
@@ -157,11 +169,15 @@ static int dxgi_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
     DXGI_OUTDUPL_FRAME_INFO info;
     IDXGIResource *res = NULL;
     HRESULT hr = IDXGIOutputDuplication_AcquireNextFrame(c->dup, (UINT)(timeout_ms > 0 ? timeout_ms : 0), &info, &res);
-    if (hr == DXGI_ERROR_WAIT_TIMEOUT)
-        return 0;
+    if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+        if (!c->have || c->ptr_gen == ptr_gen)
+            return 0;
+        compose(c, f); /* the pointer was hidden or shown: the same picture without it, or with it */
+        return 1;
+    }
     if (FAILED(hr))
         return -1; /* ACCESS_LOST: mode change, secure desktop (UAC, lock screen): reopen */
-    int changed = 0, ok = 1;
+    int changed = c->ptr_gen != ptr_gen, ok = 1;
     if (info.LastMouseUpdateTime.QuadPart) {
         int vis = info.PointerPosition.Visible != 0;
         if (vis != c->ptr_visible || info.PointerPosition.Position.x != c->ptr_x ||
@@ -265,7 +281,7 @@ static int gdi_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
     if (!BitBlt(c->mdc, 0, 0, c->w, c->h, c->sdc, c->x, c->y, SRCCOPY | CAPTUREBLT))
         return -1;
     CURSORINFO ci = { .cbSize = sizeof ci };
-    if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING)) {
+    if (!ptr_hidden && GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING)) {
         ICONINFO ii;
         if (GetIconInfo(ci.hCursor, &ii)) {
             DrawIconEx(c->mdc, ci.ptScreenPos.x - c->x - (int)ii.xHotspot, ci.ptScreenPos.y - c->y - (int)ii.yHotspot,

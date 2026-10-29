@@ -115,6 +115,184 @@ class Probe:
         self.events.clear()
 
 
+async def trackpad(browser, http_port, probe, logs):
+    """An iPhone viewer with the trackpad (trackpad.md §11): the pointer stays in the middle of the
+    picture above the panel and moves by how far a finger moves; taps click at the pointer; two
+    fingers right-click, scroll and zoom; ⚙ speeds it up; ⌨ / ▭ / ⌄ switch the panel; the grip
+    resizes it within limits; a reload brings it all back. The screen is 1280×720."""
+    out, ok = {}, {}
+    ctx = await browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+    page = await ctx.new_page()
+    page.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
+    await page.goto(f"http://127.0.0.1:{http_port}/")
+    await page.fill("#user", "me")
+    await page.fill("#password", "pw")
+    await page.click("#go")
+    await page.wait_for_url(f"http://127.0.0.1:{http_port}/")
+    ready = "() => document.querySelector('#disc').hidden && document.querySelector('#video').videoWidth > 0"
+    await page.wait_for_function(ready, timeout=30000)
+    await page.wait_for_selector("#tpad:not([hidden])")
+    await page.wait_for_timeout(800)
+    cdp = await ctx.new_cdp_session(page)
+    touch = lambda kind, pts: cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": pts})
+    box = lambda sel: page.locator(sel).bounding_box()
+    scale = lambda: page.evaluate("() => new DOMMatrix(getComputedStyle(document.querySelector('#video')).transform).a")
+
+    async def pad():
+        b = await box("#tpadSurface")
+        return b["x"] + b["width"] / 2, b["y"] + b["height"] / 2 + 15
+
+    async def drag(x, y, dx, dy, steps=30, ms=50, fingers=1):
+        """slowly (no acceleration): 2 px every 50 ms"""
+        pts = lambda k: [{"x": x + i * 40 + dx * k / steps, "y": y + dy * k / steps, "id": i} for i in range(fingers)]
+        await touch("touchStart", pts(0))
+        for k in range(1, steps + 1):
+            await touch("touchMove", pts(k))
+            await asyncio.sleep(ms / 1000)
+        await touch("touchEnd", [])
+
+    async def tap(x, y, fingers=1):
+        await touch("touchStart", [{"x": x + i * 40, "y": y, "id": i} for i in range(fingers)])
+        await touch("touchEnd", [])
+
+    async def click_at(x, y, b=1, fingers=1):
+        probe.drain()
+        await tap(x, y, fingers)
+        ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == b and e["down"] == 1)
+        return ev and (ev["x"], ev["y"])
+
+    # the pointer: drawn at the middle of the area above the panel
+    cur, tpb = await box("#tpCursor"), await box("#tpad")
+    out["cursor"] = [round(cur["x"] + 1.5), round(cur["y"] + 1.5)]
+    ok["cursor_centred"] = abs(cur["x"] + 1.5 - 195) <= 2 and abs(cur["y"] + 1.5 - tpb["y"] / 2) <= 2
+    ok["scale_1"] = abs(await scale() - 1) < 0.01  # a screen pixel to a CSS pixel
+    x, y = await pad()
+    p0 = await click_at(x, y)  # the computer's pointer starts in the middle
+    out["start"] = p0
+    ok["tap_at_pointer"] = bool(p0 and abs(p0[0] - 640) <= 2 and abs(p0[1] - 360) <= 2)
+    # 60 px to the right moves the pointer 60 px; the tap after it lands there, wherever it is on the pad
+    await drag(x - 30, y, 60, 0)
+    p1 = await click_at(x - 80, y + 20)
+    out["moved"] = p1
+    ok["move_60"] = bool(p0 and p1 and abs(p1[0] - p0[0] - 60) <= 3 and abs(p1[1] - p0[1]) <= 3)
+    ok["cursor_still"] = (await box("#tpCursor"))["x"] == cur["x"]
+    # two taps: two clicks on one pixel, though the second lands elsewhere and wobbles
+    probe.drain()
+    await tap(x, y)
+    await touch("touchStart", [{"x": x + 50, "y": y - 30}])
+    await touch("touchMove", [{"x": x + 54, "y": y - 27}])
+    await touch("touchEnd", [])
+    downs = []
+    for _ in range(2):
+        ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == 1 and e["down"] == 1)
+        if ev:
+            downs.append((ev["x"], ev["y"]))
+    out["double"] = downs
+    ok["double_click"] = len(downs) == 2 and downs[0] == downs[1] == p1
+    # two fingers: tap = right click at the pointer; drag up = scroll down (natural)
+    await asyncio.sleep(0.4)
+    r = await click_at(x - 20, y, b=3, fingers=2)
+    ok["right_click"] = r == p1
+    probe.drain()
+    await drag(x - 20, y + 40, 0, -80, steps=10, ms=30, fingers=2)
+    ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] in (4, 5))
+    ok["scroll_down"] = bool(ev and ev["b"] == 5)
+    # ⚙: Move speed 2× doubles the same move
+    await page.wait_for_timeout(1200)  # the scroll's momentum
+    await page.locator("#tpSet").tap()
+    ok["settings_clear"] = (await box(".tpset"))["y"] + (await box(".tpset"))["height"] <= (await box("#tpad"))["y"]
+    await page.locator('.tpset input[aria-label="Move speed"]').evaluate("r => { r.value = 2; r.dispatchEvent(new Event('input')); }")
+    await drag(x - 30, y, 30, 0)
+    p2 = await click_at(x, y)
+    out["moved_2x"] = p2
+    ok["move_2x"] = bool(p2 and abs(p2[0] - p1[0] - 60) <= 3)
+    await page.locator('.tpset input[aria-label="Move speed"]').evaluate("r => { r.value = 1; r.dispatchEvent(new Event('input')); }")
+    await page.locator(".tpset .hd button").tap()
+    # pinch out: the picture grows about the pointer, which stays put; it stops at 4×
+    await touch("touchStart", [{"x": x - 5, "y": y, "id": 0}, {"x": x + 5, "y": y, "id": 1}])
+    for k in range(1, 25):
+        await touch("touchMove", [{"x": x - 5 - k * 4, "y": y, "id": 0}, {"x": x + 5 + k * 4, "y": y, "id": 1}])
+        await asyncio.sleep(0.02)
+    await touch("touchEnd", [])
+    await page.wait_for_timeout(500)
+    out["zoom"] = round(await scale(), 2)
+    ok["zoom_max_4"] = abs(out["zoom"] - 4) < 0.01
+    p3 = await click_at(x, y)
+    ok["zoom_keeps_pointer"] = p3 == p2
+    # ⤢: the whole screen, and back
+    await page.locator("#tpFit").tap()
+    await page.wait_for_timeout(500)
+    vb, tpb = await box("#video"), await box("#tpad")
+    ok["whole_screen"] = abs(vb["width"] - 390) <= 2 or abs(vb["height"] - tpb["y"]) <= 2
+    await page.locator("#tpFit").tap()
+    await page.wait_for_timeout(500)
+    ok["whole_and_back"] = abs(await scale() - 4) < 0.01
+    # ⌨ types; ▭ brings the trackpad back
+    await page.locator("#tpKb").tap()
+    await page.wait_for_selector("#tpadKeys:not([hidden])")
+    probe.drain()
+    for label in ("a", "b"):
+        await page.locator("#tpadKeys .k", has_text=re.compile("^" + label + "$")).first.tap()
+        await page.wait_for_timeout(120)
+    got = []
+    for _ in range(2):
+        ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1)
+        if ev:
+            got.append(ev["keysym"])
+    ok["keyboard_types"] = got == ["a", "b"]
+    await page.locator("#tpadKeys .k", has_text=re.compile("^▭$")).tap()
+    await page.wait_for_selector("#tpadSurface:not([hidden])")
+    # ⌄: the panel folds to a button, the pointer moves to the middle of the screen with the picture
+    await page.locator("#tpHide").tap()
+    await page.wait_for_selector("#tpBall:not([hidden])")
+    await page.wait_for_timeout(400)
+    cur = await box("#tpCursor")
+    ok["collapsed_centre"] = await page.locator("#tpad").is_hidden() and abs(cur["y"] + 1.5 - 422) <= 2
+    p4 = await click_at(195, 200)  # the picture is a trackpad too
+    ok["collapsed_same_point"] = p4 == p2
+    await page.locator("#tpBall").tap()
+    await page.wait_for_selector("#tpad:not([hidden])")
+    await page.wait_for_timeout(400)  # it grows back from nothing
+    ok["ball_restores"] = await page.locator("#tpadSurface").is_visible()
+    # the grip: up as far as it goes stops at 55% of the screen; down, at 120 px
+    await page.wait_for_timeout(400)
+    g = await box("#tpGrip")
+    await drag(g["x"] + g["width"] / 2, g["y"] + 8, 0, -450, steps=20, ms=20)
+    await page.wait_for_timeout(400)
+    hi = (await box("#tpad"))["height"]
+    await drag(g["x"] + g["width"] / 2, 844 - hi + 8, 0, 400, steps=20, ms=20)
+    await page.wait_for_timeout(400)
+    lo = (await box("#tpad"))["height"]
+    out["grip"] = [round(hi), round(lo)]
+    ok["grip_limits"] = abs(hi - 844 * .55) <= 2 and abs(lo - 120) <= 2
+    # a reload brings back the panel's size and the zoom
+    await page.wait_for_timeout(800)
+    await page.reload()
+    await page.wait_for_function(ready, timeout=30000)
+    await page.wait_for_selector("#tpad:not([hidden])")
+    await page.wait_for_timeout(800)
+    ok["reload_kept"] = abs((await box("#tpad"))["height"] - 120) <= 2 and abs(await scale() - 4) < 0.01
+    # the computer's own pointer is left out of the picture (cursor.show), and comes back in Direct mode:
+    # count the pixels around it (in the yellow quadrant) that aren't yellow
+    off_yellow = """() => { const v = document.querySelector('#video'), c = document.createElement('canvas');
+        c.width = v.videoWidth; c.height = v.videoHeight; const g = c.getContext('2d'); g.drawImage(v, 0, 0);
+        const px = g.getImageData(%d, %d, 16, 12).data; let n = 0;
+        for (let i = 0; i < px.length; i += 4) if (Math.abs(px[i] - 255) + Math.abs(px[i + 1] - 242) + px[i + 2] > 90) n++;
+        return n; }""" % (p2[0] - 7, p2[1] + 2)
+    out["pointer_px"] = [await page.evaluate(off_yellow)]
+    await page.locator("#ball").tap()
+    await page.locator('#menu button[data-act="settings"]').tap()
+    await page.get_by_role("button", name="Direct", exact=True).tap()
+    await page.locator("#sheet-settings button[data-close]").tap()
+    await page.wait_for_timeout(1200)
+    out["pointer_px"].append(await page.evaluate(off_yellow))
+    ok["pointer_hidden"] = out["pointer_px"][0] == 0 and out["pointer_px"][1] > 5
+    ok["direct_off"] = await page.locator("#tpad").is_hidden() and await page.locator("#tpCursor").is_hidden()
+    out["ok"] = ok
+    await ctx.close()
+    return out
+
+
 async def run(args):
     b = os.path.abspath(args.bin)
     d = tempfile.mkdtemp(prefix="remodroid-desktop-")
@@ -330,10 +508,12 @@ notify = false
             res["hud"] = await page.inner_text("#hud")
             res["errors"] = [l for l in logs if "PAGEERROR" in l][:5]
             await ctx.close()
-            # a phone-sized touch screen (an iPhone viewer): tap = click, long press = right click,
-            # two fingers = scroll
+            # a phone-sized touch screen (an iPhone viewer) set to Direct: tap = click where it touches,
+            # long press = right click, two fingers = scroll (the trackpad, a phone's default, comes after)
             await asyncio.sleep(1.5)
             tctx = await browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
+            await tctx.add_init_script("""try { const k = 'remodroid-v1', s = JSON.parse(localStorage.getItem(k) || '{}');
+                s.touchCtl = 'direct'; localStorage.setItem(k, JSON.stringify(s)); } catch (e) {}""")
             # the viewer runs on the computer itself here: it would take the agent's virtual pad for a
             # controller paired with it and feed its state back into pad 1
             await tctx.add_init_script("Navigator.prototype.getGamepads = () => [];")
@@ -525,6 +705,8 @@ notify = false
             else:
                 res["pad"] = "skipped (no /dev/uinput)"
             await tctx.close()
+            await asyncio.sleep(1.5)
+            res["trackpad"] = await trackpad(browser, http_port, probe, logs)
             # a Mac viewer: Ctrl+C stays Ctrl+C (a terminal's interrupt), ⌘C becomes Ctrl+C (copy)
             await asyncio.sleep(1.5)
             mctx = await browser.new_context(viewport={"width": 1280, "height": 720})
@@ -559,6 +741,7 @@ notify = false
                                 and res.get("edit_moved") and res.get("edit_kept") and res.get("cookie_kept")
                                 and (res.get("look") == {"turned": True, "tilted": True, "back": True}
                                      or (not os.environ.get("CI") and res.get("look") == "not readable here"))))
+              and isinstance(res.get("trackpad"), dict) and all(res["trackpad"]["ok"].values())
               and res.get("mac_ctrl_c") == {"state": 4, "ctrl": True, "super": False}
               and res.get("mac_cmd_c") == {"state": 4, "ctrl": True, "super": False}
               and (not sound or (isinstance(res.get("sound"), dict) and res["sound"]["packets_2s"] >= 80 and res["sound"]["energy_2s"] > 0.01))

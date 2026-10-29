@@ -58,6 +58,7 @@ unsigned long dsk_clip_seq(void) { return 0; }
 char *dsk_clip_get(void) { return NULL; }
 int dsk_clip_set(const char *utf8) { return 0; }
 int dsk_screen_power(int on) { return 0; }
+void dsk_capture_pointer(int show) { (void)show; }
 int dsk_pad_supported(char *why, size_t cap) { return 1; }
 int dsk_pad_open(int index) { rec("pad %d open", index); return 0; }
 void dsk_pad_update(int index, const dsk_pad_t *p)

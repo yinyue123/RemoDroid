@@ -34,8 +34,19 @@ struct dsk_capture {
     int dirty;           /* damage seen since the last grab */
     int last_cx, last_cy;
     unsigned long last_cursor;
+    int ptr_gen;         /* ptr_gen at the last grab */
     uint8_t *out;        /* the frame with the pointer drawn in */
 };
+
+/* dsk_capture_pointer(): hidden while a viewer draws its own; gen makes every capture grab again */
+static volatile int ptr_hidden, ptr_gen;
+void dsk_capture_pointer(int show)
+{
+    if (ptr_hidden == !show)
+        return;
+    ptr_hidden = !show;
+    ptr_gen++;
+}
 
 static int x_error;
 static int on_x_error(Display *d, XErrorEvent *e)
@@ -161,7 +172,7 @@ static int wait_fd(int fd, int ms)
  * a phone shows no pointer, and the one the fingers drag along would sit on whatever was last tapped. */
 static int draw_cursor(dsk_capture_t *c, uint8_t *dst, int stride)
 {
-    if (!c->fixes || dsk_touch_points() > 0)
+    if (!c->fixes || dsk_touch_points() > 0 || ptr_hidden)
         return 0;
     XFixesCursorImage *ci = XFixesGetCursorImage(c->d);
     if (!ci)
@@ -196,14 +207,14 @@ static int draw_cursor(dsk_capture_t *c, uint8_t *dst, int stride)
 int dsk_capture_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
 {
     uint64_t t0 = rd_mono_ms();
-    int changed = drain(c) || c->dirty || !c->damage;
+    int changed = drain(c) || c->dirty || !c->damage || c->ptr_gen != ptr_gen;
     while (!changed && (int)(rd_mono_ms() - t0) < timeout_ms) {
         int left = timeout_ms - (int)(rd_mono_ms() - t0);
         /* the pointer moves without damage: look at it every 16 ms */
         if (wait_fd(ConnectionNumber(c->d), left < 16 ? left : 16) < 0 && errno != EINTR)
             return -1;
         changed = drain(c);
-        if (!changed && c->fixes && dsk_touch_points() <= 0) {
+        if (!changed && c->fixes && dsk_touch_points() <= 0 && !ptr_hidden) {
             Window r, ch;
             int rx, ry, wx, wy;
             unsigned mask;
@@ -215,6 +226,7 @@ int dsk_capture_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
     if (!changed)
         return 0;
     c->dirty = 0;
+    c->ptr_gen = ptr_gen;
     x_error = 0;
     XImage *img = c->img;
     if (c->use_shm) {

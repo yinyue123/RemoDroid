@@ -48,6 +48,9 @@ dsk_capture_t *dsk_capture_open(const dsk_screen_t *s, char *err, size_t cap);
  * call), 0 when nothing changed, -1 when capture broke (reopen). */
 int            dsk_capture_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms);
 void           dsk_capture_close(dsk_capture_t *c);
+/* Whether capture draws the pointer into the picture (the default) or leaves it out, for a viewer that
+ * draws its own (trackpad.md §9). Applies to captures already running; safe from any thread. */
+void           dsk_capture_pointer(int show);
 
 /* ---- hardware video (capture + encode on the GPU); optional: open returns NULL ---- */
 typedef struct {

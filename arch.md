@@ -1731,7 +1731,7 @@ what changes is that no router or phone process is involved. Design and decision
   reset (0x05) messages (§8.2 of the design). `desktop/core/keymap.c` maps a usage to a Windows scan code, a macOS
   `kVK_` code and a Linux evdev code; the viewer's table must match it (`desk_test` checks).
 - **ctrl:** the phone's messages (`session.ready`, `quality.set`, `stats`, `text`, `clip.*`, `file.*`, …) with the
-  same shapes, plus `screen.select`; `session.ready` carries `platform`, `screens`, `home` and `upload_dir`.
+  same shapes, plus `screen.select` and `cursor.show` (trackpad.md §9); `session.ready` carries `platform`, `screens`, `home` and `upload_dir`.
 - **Pairing:** the app (or `remodroid-desktopd pair`) redeems a panel code with `common/enroll.c`, the code the
   router's `remodroid-agent enroll` uses, and writes `[server]` into the per-user `desktop.ini`.
 - **Reading order:** `desktop/core/rd_agent.h` → `agent.c` (`on_loop`, `on_server_message`, `rtc_on_session`) →

@@ -39,6 +39,21 @@
   <header><span class="grip" aria-hidden="true">⠿⠿</span><span class="ttl">keyboard</span><button type="button" id="fkbMore" aria-label="Shortcuts and text">⋯</button><button type="button" id="fkbHide" aria-label="Hide keyboard">⌄</button></header>
   <div class="rows" id="fkbRows"></div>
 </div>
+<div class="tpad" id="tpad" role="group" aria-label="Trackpad" hidden>
+  <div class="grip" id="tpGrip" role="separator" aria-orientation="horizontal" aria-label="Drag to resize, double-tap for the default size"><i></i></div>
+  <div class="surface" id="tpadSurface">
+    <div class="bar">
+      <button type="button" id="tpKb" aria-label="Keyboard"><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/></svg></button>
+      <button type="button" id="tpSet" aria-label="Trackpad settings">⚙</button>
+      <span class="sp"></span>
+      <button type="button" id="tpFit" aria-label="Whole screen or the last zoom"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      <button type="button" id="tpHide" aria-label="Collapse">⌄</button>
+    </div>
+  </div>
+  <div class="keys" id="tpadKeys" hidden><span class="edge l" aria-hidden="true"></span><span class="edge r" aria-hidden="true"></span><div class="rows" id="tpadRows" style="display:contents"></div></div>
+</div>
+<div id="tpCursor" hidden><svg viewBox="0 0 24 24"><path d="M1.5 1.5v17.2l4.6-4.4 3 6.9 3.1-1.3-3-6.8h6.5z" fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+<button id="tpBall" type="button" aria-label="Show the trackpad" hidden><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/></svg></button>
 <div class="menu" id="menu" role="menu" hidden>
   <button type="button" role="menuitem" data-act="back"><svg viewBox="0 0 24 24"><path d="M16 5L7 12l9 7z"/></svg>Back</button>
   <button type="button" role="menuitem" data-act="home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>Home</button>

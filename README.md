@@ -304,10 +304,15 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
 - **Touch** works as on the phone, multi-touch included. The **floating ball** opens the menu: lock, reconnect,
   full screen, sound, photo upload, clipboard and settings.
 - **On a computer** the mouse and keyboard go straight through (keys are physical, so the computer's own layout
-  applies; ⌘ and Ctrl swap when only one side is a Mac). From an iPhone: tap to click, long-press to right-click,
-  drag with one finger, scroll with two. **Keyboard** opens a floating on-screen keyboard for an iPad or iPhone
-  (drag it by its grip; tap **ctrl** then **c** for Ctrl+C), its **⋯** sends text and shortcuts, and **Next screen**
-  switches monitors.
+  applies; ⌘ and Ctrl swap when only one side is a Mac). From an iPhone, the bottom of the screen is a
+  **trackpad**, like a Mac's: the pointer stays in the middle of a magnified picture, so the computer's text is
+  readable, and the picture slides under it. Tap to click, tap twice to double-click, tap then drag to drag,
+  two-finger tap to right-click, scroll with two fingers, spread them to zoom; **⤢** shows the whole screen,
+  **⌨** switches to a docked keyboard (its **▭** switches back), **⌄** folds it to a button, the grip on top
+  resizes it and **⚙** sets the speed ([`trackpad.md`](trackpad.md)). Settings → Stream → **Touch control: Direct**
+  taps where you touch instead (long-press to right-click), the default on an iPad. There, **Keyboard** opens a
+  floating on-screen keyboard (drag it by its grip; tap **ctrl** then **c** for Ctrl+C), its **⋯** sends text
+  and shortcuts, and **Next screen** switches monitors.
 - **Games on a computer** (Linux, e.g. a Steam Deck in Desktop Mode): **Gamepad** puts touch controls over the
   picture, laid out like Steam Link's (sticks, D-pad, A/B/X/Y, bumpers, triggers); hold the phone sideways.
   Drag a finger across the picture (anywhere off the buttons) to turn the camera, as in PUBG: the swipe's

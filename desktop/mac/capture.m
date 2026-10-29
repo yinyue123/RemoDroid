@@ -1,5 +1,5 @@
 /* macOS video: ScreenCaptureKit delivers changed frames only,
- * with the pointer drawn in. Two consumers:
+ * with the pointer drawn in (unless dsk_capture_pointer(0)). Two consumers:
  *   dsk_hwvideo  NV12 at the encode size, scaled by the GPU, straight into a
  *                VideoToolbox session (H.264 / HEVC); no CPU copy.
  *   dsk_capture  BGRA at full size for the software encoder (fallback). */
@@ -21,8 +21,36 @@ typedef void (*frame_cb)(void *ud, CVPixelBufferRef pb, CMTime pts);
 @property(nonatomic) void *ud;
 @property(atomic) BOOL broken;
 @property(nonatomic, strong) SCStream *stream;
+@property(nonatomic, strong) SCStreamConfiguration *config;
 @property(nonatomic, strong) dispatch_queue_t queue;
 @end
+
+/* dsk_capture_pointer(): the running streams, so a change reaches them without a restart */
+static NSHashTable<RDStream *> *live_streams;
+static BOOL ptr_hidden;
+
+/* with @synchronized([RDStream class]) held */
+static void apply_pointer(RDStream *r)
+{
+    BOOL show = !ptr_hidden;
+    if (r.config.showsCursor == show)
+        return;
+    r.config.showsCursor = show;
+    [r.stream updateConfiguration:r.config
+                completionHandler:^(NSError *error) {
+                    if (error)
+                        LOGW("capture: pointer %s: %s", show ? "on" : "off", error.localizedDescription.UTF8String ?: "?");
+                }];
+}
+
+void dsk_capture_pointer(int show)
+{
+    @synchronized([RDStream class]) {
+        ptr_hidden = !show;
+        for (RDStream *r in live_streams)
+            apply_pointer(r);
+    }
+}
 
 @implementation RDStream
 - (void)stream:(SCStream *)stream didOutputSampleBuffer:(CMSampleBufferRef)sb ofType:(SCStreamOutputType)type
@@ -79,7 +107,9 @@ static RDStream *open_stream(const dsk_screen_t *s, int w, int h, int fps, OSTyp
     c.height = (size_t)h;
     c.minimumFrameInterval = CMTimeMake(1, fps > 0 ? fps : 30);
     c.pixelFormat = fmt;
-    c.showsCursor = YES;
+    @synchronized([RDStream class]) {
+        c.showsCursor = ptr_hidden ? NO : YES;
+    }
     c.queueDepth = 4;
     if (fmt == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
         c.colorMatrix = kCGDisplayStreamYCbCrMatrix_ITU_R_709_2;
@@ -103,6 +133,13 @@ static RDStream *open_stream(const dsk_screen_t *s, int w, int h, int fps, OSTyp
         snprintf(err, cap, "capture: %s", se.localizedDescription.UTF8String ?: "?");
         return nil;
     }
+    r.config = c;
+    @synchronized([RDStream class]) {
+        if (!live_streams)
+            live_streams = [NSHashTable weakObjectsHashTable];
+        [live_streams addObject:r];
+        apply_pointer(r); /* in case it changed while this stream was starting */
+    }
     LOGI("capture: ScreenCaptureKit %dx%d from display %u (%s)", w, h, want,
          fmt == kCVPixelFormatType_32BGRA ? "BGRA" : "NV12");
     return r;
@@ -113,6 +150,9 @@ static void close_stream(RDStream *r)
     if (!r)
         return;
     r.cb = NULL;
+    @synchronized([RDStream class]) {
+        [live_streams removeObject:r];
+    }
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     [r.stream stopCaptureWithCompletionHandler:^(NSError *error) {
         dispatch_semaphore_signal(sem);

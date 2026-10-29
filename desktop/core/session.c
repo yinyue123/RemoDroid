@@ -177,6 +177,7 @@ void session_ended(const char *reason)
     input_pads_close();
     files_cancel_all();
     dsk_session(0);
+    dsk_capture_pointer(1); /* the next viewer may have no pointer of its own */
     cJSON_Delete(S.quality);
     free(S.clip_sent);
     free(S.clip_set);
@@ -230,6 +231,7 @@ void session_channel_open(const char *label)
     if (*why)
         cJSON_AddStringToObject(caps, "gamepad_problem", why);
     cJSON_AddBoolToObject(caps, "view_only", D.view_only);
+    cJSON_AddBoolToObject(caps, "cursor_hide", 1); /* ctrl cursor.show */
     cJSON_AddStringToObject(d, "home", rd_home_dir());
     char up[1024];
     const char *u = desk_conf("files", "upload_dir", "");
@@ -453,6 +455,9 @@ static void control(cJSON *m)
             error(m, "unsupported", "cannot change the display power");
         else
             reply(m, NULL);
+    } else if (!strcmp(t, "cursor.show")) {
+        dsk_capture_pointer(msg_bool(d, "show", 1));
+        reply(m, NULL);
     } else if (!strcmp(t, "screen.select")) {
         desk_refresh_screens();
         int i = (int)msg_num(d, "index", 0);

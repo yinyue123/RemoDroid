@@ -242,6 +242,7 @@ the same, so the viewer's HUD, quality sheet, keyboard sheet and file sheet keep
 | `screen.power` | turns displays off/on (Windows `SC_MONITORPOWER`, macOS `pmset displaysleepnow`, Linux DPMS) |
 | `shell.exec`, `logcat.*`, `rotate` | `unsupported` (shell can be enabled with `[desktop] allow_shell`, §12) |
 | new: `screen.select {index}` | switches the captured monitor |
+| new: `cursor.show {show}` | leaves the pointer out of the captured picture (`false`) for a viewer that draws its own, the trackpad ([`trackpad.md`](trackpad.md) §9); back on at the session's end |
 
 When a session ends, or when the input channel sends reset (0x05), `input.c` releases every key and mouse
 button it is holding, and centres the virtual gamepads (unplugged at the session's end). A dropped connection
@@ -472,6 +473,7 @@ On a desktop, 0x01 touch with pointer 0 maps to left-button down/move/up, which 
 - `session.ready.d` gains `platform`, plus `screens: [{index, w, h, primary, name}]` and `screen` (the
   captured one).
 - New `screen.select {index}` → ack, then `screen.changed` as today.
+- New `cursor.show {show}` → ack; `session.ready.caps.cursor_hide` says the agent takes it ([`trackpad.md`](trackpad.md) §9).
 - `quality.set.preset` accepts `"native"` on desktops.
 
 ---
@@ -496,7 +498,8 @@ them. In fullscreen on Chromium, `navigator.keyboard.lock()` also captures Esc, 
 A viewer setting **"Mac ⌘ ↔ Ctrl"** (on by default when a Mac browser controls Windows or Linux) swaps the
 two modifiers' usages.
 
-**Touch viewer** (iPhone controlling a desktop): tap → left click, long press → right click, one-finger drag
+**Touch viewer** (iPhone controlling a desktop): a phone gets the trackpad ([`trackpad.md`](trackpad.md)); with
+Settings → Stream → Touch control: Direct (an iPad's default): tap → left click, long press → right click, one-finger drag
 → left drag, two-finger drag → scroll. The existing keyboard sheet (`#kbText`) types through ctrl `text`. A
 new **Keys** sheet has Esc, Tab, Win/⌘, Ctrl+Alt+Del-style combos, F1–F12 and arrows, sent as 0x04
 sequences. Local pinch-zoom and pan of the picture come in M5.

@@ -15,7 +15,8 @@ const DEFAULTS = {
   mode: 'auto', preset: '720p', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: false,
   screenOff: true, lockOnDisc: true, grace: 10, rotation: 'auto', clipSync: true, autoPaste: false, overheat: 45,
   destDir: '/sdcard/DCIM/RemoDroid', mediaScan: true, overwrite: false, maxMb: 2048, route: 'auto', relay: false,
-  audio: true, sound: true, device: '', swapCmd: 'auto', turn: ''
+  audio: true, sound: true, device: '', swapCmd: 'auto', turn: '',
+  touchCtl: 'auto', tpMove: 1, tpScroll: 1, tpNatural: true
 };
 const S = Object.assign({}, DEFAULTS);
 /* The gamepad's settings (layout, edited positions, see-through, swipe speed, zoom) also live in a cookie,
@@ -405,6 +406,8 @@ function onChannel(label, data) {
     $('#disc').hidden = true; ball.hidden = !!openId;
     toast(`Connected · ${codecLabel()}${d.caps && d.caps.view_only ? ' · view only' : ''}`);
     if (desk()) { renderQuickKeys(); if (document.fullscreenElement) lockKeys(true); }
+    tpSync();
+    if (tp.on) { tpPointer(); queueMove(tp.cx, tp.cy, 0); } /* the computer's pointer to where this one is */
     if (S.mode !== 'auto' || S.preset !== '720p') sendCtrl('quality.set', quality());
     if (!S.sound && d.caps && d.caps.audio) sendCtrl('audio.set', { on: false }); /* keep the phone's speaker */
     syncMenuStates();
@@ -448,9 +451,13 @@ function setView(v) {
   S.view = Object.assign({}, S.view, { [(st.device && st.device.id) || '-']: v });
   save(); layout();
 }
+/* The trackpad (trackpad.md): on, the pointer (cx, cy: 0..1 of the screen), the zoom (CSS px per screen
+ * pixel; 0 = not chosen yet), the visible area above the panel, and the fingers of the gesture going on. */
+const tp = { on: false, dev: null, cx: .5, cy: .5, scale: 0, lastScale: 0, area: null, pts: new Map(), g: null, lastTap: -1e9 };
 function layout() {
   const safe = bounds();
   fitStage(safe);
+  if (tp.on) { tpRelayout(); return; }
   const ins = standalone() ? { t: 0, r: 0, b: 0, l: 0 } : safe;
   const W = stage.clientWidth - ins.l - ins.r, H = stage.clientHeight - ins.t - ins.b;
   let w, h;
@@ -462,7 +469,7 @@ function layout() {
   const at = (room, size, f) => size <= room ? (room - size) / 2 : clamp(room / 2 - f * size, room - size, 0);
   st.fill = Math.max(W / (w * sc), H / (h * sc)); /* the zoom that just fills the screen */
   for (const e of [video, cv]) {
-    e.style.width = cw + 'px'; e.style.height = ch + 'px';
+    e.style.width = cw + 'px'; e.style.height = ch + 'px'; e.style.transform = '';
     e.style.left = Math.floor(ins.l + at(W, cw, v.x)) + 'px'; e.style.top = Math.floor(ins.t + at(H, ch, v.y)) + 'px';
   }
   if (S.lc) layoutCheck(true);
@@ -516,6 +523,7 @@ function norm(e) {
   return [clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)];
 }
 function down(e) {
+  if (tpTake(e)) return; /* the stage's trackpad listeners take it */
   if (desk() && !rawTouch(e)) { deskPointer('down', e); return; }
   e.preventDefault(); closeMenu();
   try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
@@ -525,6 +533,7 @@ function down(e) {
   sendTouch(0, pid, x, y, e.pressure || 1);
 }
 function move(e) {
+  if (tpTake(e)) return;
   if (desk() && !rawTouch(e)) { deskPointer('move', e); return; }
   if (!pidMap.has(e.pointerId)) return;
   e.preventDefault();
@@ -534,6 +543,7 @@ function move(e) {
   sendTouch(2, pid, x, y, e.pressure || 1);
 }
 function up(e, action) {
+  if (tpTake(e)) return;
   if (desk() && !rawTouch(e)) { deskPointer(action === 1 ? 'up' : 'cancel', e); return; }
   if (!pidMap.has(e.pointerId)) return;
   const pid = pidMap.get(e.pointerId), [x, y] = norm(e);
@@ -898,7 +908,8 @@ function bounds() {
 }
 function placeBall(x, y, snap) {
   const W = innerWidth, H = innerHeight, s = ball.offsetWidth || 58;
-  const minX = B.l + MARGIN, maxX = W - B.r - MARGIN - s, minY = B.t + MARGIN, maxY = H - B.b - MARGIN - s;
+  const bottom = tp.on && tp.area ? Math.min(H - B.b, tp.area.b) : H - B.b; /* above the trackpad */
+  const minX = B.l + MARGIN, maxX = W - B.r - MARGIN - s, minY = B.t + MARGIN, maxY = Math.max(minY, bottom - MARGIN - s);
   if (snap) x = (x + s / 2 < W / 2) ? minX : maxX;
   x = clamp(x, minX, maxX); y = clamp(y, minY, maxY);
   ball.style.left = x + 'px'; ball.style.top = y + 'px';
@@ -966,7 +977,7 @@ function syncMenuStates() {
   $('#menuStats').classList.toggle('on', S.stats);
   if (!dk && !fkb.el.hidden) hideFkb(); /* the floating keyboard and the gamepad are for computers */
   if (!dk && !gpad.hidden) hideGpad();
-  menu.querySelector('[data-act="keys"]').classList.toggle('on', dk && !fkb.el.hidden);
+  menu.querySelector('[data-act="keys"]').classList.toggle('on', dk && (!fkb.el.hidden || (tp.on && tpPrefs().state === 'keyboard')));
   $('#menuPad').hidden = !dk;
   $('#menuPad').classList.toggle('on', !gpad.hidden);
   const snd = $('#menuSound'), audible = S.sound && !video.muted;
@@ -1038,7 +1049,8 @@ document.addEventListener('webkitfullscreenchange', () => { layout(); syncMenuSt
 menu.addEventListener('click', e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const a = b.dataset.act;
-  if (a === 'keys' && desk()) { closeMenu(); fkb.el.hidden ? showFkb() : hideFkb(); }
+  if (a === 'keys' && desk() && tp.on) { closeMenu(); tpShow(tpPrefs().state === 'keyboard' ? 'trackpad' : 'keyboard'); }
+  else if (a === 'keys' && desk()) { closeMenu(); fkb.el.hidden ? showFkb() : hideFkb(); }
   else if (a === 'gamepad') { closeMenu(); gpad.hidden ? showGpad() : hideGpad(); }
   else if (['photo', 'clip', 'settings', 'keys', 'turn'].includes(a)) { closeMenu(); openSheet(a); }
   else if (['back', 'home', 'recents'].includes(a)) { sendCtrl('nav', { button: a }).catch(() => toast('Not connected')); closeMenu(); }
@@ -1273,7 +1285,7 @@ $('#kbText').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preve
  * key codes, desktop/core/keymap.c). Shift and Ctrl are one-shot: Ctrl then c is Ctrl+C. ⌫ and the
  * arrows repeat while held. Drag it by its grip; the spot is remembered per browser. */
 const FKB = { abc: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'], sym1: ['1234567890', '-/:;()$&@"', '.,?!\''], sym2: ['[]{}#%^*+=', '_\\|~<>`"\':', '.,?!\''] };
-const AK = { esc: 111, tab: 61, enter: 66, bksp: 67, up: 19, down: 20, left: 21, right: 22, ctrl: 113, shift: 59 };
+const AK = { esc: 111, tab: 61, enter: 66, bksp: 67, up: 19, down: 20, left: 21, right: 22, ctrl: 113, shift: 59, alt: 57, meta: 117 };
 /* the key a character sits on, for Ctrl+character */
 function charKey(ch) {
   const c = ch.toLowerCase();
@@ -1281,22 +1293,22 @@ function charKey(ch) {
   if (c >= '0' && c <= '9') return 7 + c.charCodeAt(0) - 48;
   return { '-': 69, '=': 70, '[': 71, ']': 72, '\\': 73, ';': 74, '\'': 75, '`': 68, ',': 55, '.': 56, '/': 76, ' ': 62 }[c] || 0;
 }
-const fkb = { el: $('#fkb'), layer: 'abc', shift: false, ctrl: false, pos: null, drag: null };
+const fkb = { el: $('#fkb'), layer: 'abc', shift: false, ctrl: false, alt: false, meta: false, pos: null, drag: null };
 try { fkb.pos = JSON.parse(localStorage.getItem(KEY + '-kb') || 'null'); } catch (e) {}
 function fkbSend(t, d) {
   if (!st.connected) { toast('Not connected'); return; }
   sendCtrl(t, d).catch(() => {});
 }
-function fkbUnlatch() { if (fkb.shift || fkb.ctrl) { fkb.shift = fkb.ctrl = false; renderFkb(); } }
+function fkbUnlatch() { if (fkb.shift || fkb.ctrl || fkb.alt || fkb.meta) { fkb.shift = fkb.ctrl = fkb.alt = fkb.meta = false; renderFkb(); } }
 function fkbKey(code) { /* a key, with the latched modifiers held around it */
-  const mods = [fkb.ctrl && AK.ctrl, fkb.shift && AK.shift].filter(Boolean);
+  const mods = [fkb.ctrl && AK.ctrl, fkb.alt && AK.alt, fkb.meta && AK.meta, fkb.shift && AK.shift].filter(Boolean);
   for (const m of mods) fkbSend('key', { action: 'down', code: m });
   fkbSend('key', { action: 'press', code });
   for (const m of mods.reverse()) fkbSend('key', { action: 'up', code: m });
   fkbUnlatch();
 }
 function fkbChar(ch) {
-  if (fkb.ctrl && charKey(ch)) { fkbKey(charKey(ch)); return; }
+  if ((fkb.ctrl || fkb.alt || fkb.meta) && charKey(ch)) { fkbKey(charKey(ch)); return; }
   fkbSend('text', { text: fkb.shift && fkb.layer === 'abc' ? ch.toUpperCase() : ch });
   fkbUnlatch();
 }
@@ -1332,23 +1344,32 @@ function fkbBtn(label, act, o = {}) {
   b.addEventListener('click', e => { if (e.detail === 0) act(); }); /* Enter / Space on a focused key */
   return b;
 }
+/* the floating keyboard, or the trackpad's docked one (which adds ⋯, ▭ back to the trackpad, ⌄ collapse,
+ * and alt and ⌘ / Win, since a computer needs them) */
 function renderFkb() {
+  const docked = tp.on && tpPrefs().state === 'keyboard';
   const rows = FKB[fkb.layer], abc = fkb.layer === 'abc', caps = s => fkb.shift && abc ? s.toUpperCase() : s;
   const chars = s => [...s].map(ch => fkbBtn(caps(ch), () => fkbChar(ch)));
   const kr = (cls, ...keys) => el('div', { class: 'kr' + (cls ? ' ' + cls : '') }, ...keys);
-  $('#fkbRows').replaceChildren(
+  const mac = st.device && st.device.platform === 'macos', win = st.device && st.device.platform === 'windows';
+  const latch = (k, label, title) => fkbBtn(label, () => { fkb[k] = !fkb[k]; renderFkb(); }, { on: fkb[k], title });
+  (docked ? $('#tpadRows') : $('#fkbRows')).replaceChildren(
     kr('', fkbBtn('esc', () => fkbKey(AK.esc)), fkbBtn('tab', () => fkbKey(AK.tab)), fkbBtn('.', () => fkbChar('.')),
       fkbBtn('←', () => fkbKey(AK.left), { repeat: 1, title: 'Left' }), fkbBtn('↓', () => fkbKey(AK.down), { repeat: 1, title: 'Down' }),
       fkbBtn('↑', () => fkbKey(AK.up), { repeat: 1, title: 'Up' }), fkbBtn('→', () => fkbKey(AK.right), { repeat: 1, title: 'Right' }),
-      fkbBtn('⌄', hideFkb, { title: 'Hide keyboard' })),
+      ...(docked ? [fkbBtn('⋯', () => openSheet('keys'), { title: 'Shortcuts and text' }),
+        fkbBtn('▭', () => tpShow('trackpad'), { title: 'Trackpad' }), fkbBtn('⌄', () => tpShow('collapsed'), { title: 'Collapse' })]
+        : [fkbBtn('⌄', hideFkb, { title: 'Hide keyboard' })])),
     kr('', ...chars(rows[0])),
     kr(abc ? 'inset' : '', ...chars(rows[1])),
     kr('', abc ? fkbBtn('⇧', () => { fkb.shift = !fkb.shift; renderFkb(); }, { grow: 1.4, on: fkb.shift, title: 'Shift' })
       : fkbBtn(fkb.layer === 'sym1' ? '#+=' : '123', () => { fkb.layer = fkb.layer === 'sym1' ? 'sym2' : 'sym1'; renderFkb(); }, { grow: 1.4 }),
       ...chars(rows[2]), fkbBtn('⌫', () => fkbKey(AK.bksp), { grow: 1.4, repeat: 1, title: 'Backspace' })),
     kr('', fkbBtn(abc ? '?123' : 'abc', () => { fkb.layer = abc ? 'sym1' : 'abc'; renderFkb(); }, { grow: 1.4 }),
-      fkbBtn('ctrl', () => { fkb.ctrl = !fkb.ctrl; renderFkb(); }, { on: fkb.ctrl, title: 'Ctrl, for the next key' }),
-      fkbBtn('␣', () => fkbChar(' '), { grow: 4, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
+      latch('ctrl', 'ctrl', 'Ctrl, for the next key'),
+      ...(docked ? [latch('alt', mac ? '⌥' : 'alt', mac ? 'Option, for the next key' : 'Alt, for the next key'),
+        latch('meta', mac ? '⌘' : win ? 'win' : 'super', mac ? 'Command, for the next key' : win ? 'Windows key, for the next key' : 'Super, for the next key')] : []),
+      fkbBtn('␣', () => fkbChar(' '), { grow: docked ? 3 : 4, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
       fkbBtn('↵', () => fkbKey(AK.enter), { grow: 1.4, title: 'Enter' })));
 }
 function placeFkb(x, y) {
@@ -1364,7 +1385,7 @@ function showFkb() {
   else placeFkb((innerWidth - r.width) / 2, innerHeight - B.b - r.height - 12); /* bottom centre */
   syncMenuStates();
 }
-function hideFkb() { fkb.el.hidden = true; fkb.shift = fkb.ctrl = false; syncMenuStates(); }
+function hideFkb() { fkb.el.hidden = true; fkb.shift = fkb.ctrl = fkb.alt = fkb.meta = false; syncMenuStates(); }
 const fkbHead = fkb.el.querySelector('header');
 fkbHead.addEventListener('pointerdown', e => {
   if (e.target.closest('button')) return;
@@ -1381,6 +1402,448 @@ for (const t of ['pointerup', 'pointercancel']) fkbHead.addEventListener(t, () =
 $('#fkbHide').addEventListener('click', hideFkb);
 $('#fkbMore').addEventListener('click', () => openSheet('keys'));
 window.addEventListener('resize', () => { if (!fkb.el.hidden) placeFkb(fkb.pos.x, fkb.pos.y); });
+
+/* ---- computers: the trackpad, for a phone (trackpad.md) ----
+ * The bottom of the screen is a trackpad (or the docked keyboard, or folded away to a button). The
+ * pointer is drawn here, in the middle of the picture above the panel, and the picture slides under it,
+ * magnified so the computer's text is readable. A finger moves the pointer by how far it moves, not by
+ * where it touches: tap = click, two taps = double click, tap then drag = drag, two-finger tap = right
+ * click, two fingers scroll (with momentum) or pinch to zoom. The pointer goes out as absolute 0x03
+ * moves and the scroll as 0x02, like a mouse's; the zoom stays here. The picture takes the same
+ * gestures as the pad. */
+const tpad = $('#tpad'), tpSurface = $('#tpadSurface'), tpKeys = $('#tpadKeys'), tpCur = $('#tpCursor'), tpBall = $('#tpBall');
+const TP_MAX = 4, TP_SLOP = 8, TP_TAP_MS = 250, TP_AGAIN_MS = 300, TP_GRIP = 16;
+const tpTake = e => tp.on && e.pointerType === 'touch';
+const phoneSized = () => (navigator.maxTouchPoints || 0) > 0 && Math.min(screen.width, screen.height) < 500;
+function tpWanted() {
+  if (!desk() || !gpad.hidden) return false;
+  if (st.ready && st.ready.caps && st.ready.caps.touch > 0) return false; /* a touch screen there takes fingers as they are */
+  return S.touchCtl === 'trackpad' || (S.touchCtl !== 'direct' && phoneSized());
+}
+/* the panel: its state, and its sizes per orientation (the trackpad's height as a fraction of the
+ * screen, the keyboard's key height and, sideways, its width) */
+const tpPrefs = () => (S.tpPanel = Object.assign({ state: 'trackpad', portrait: {}, landscape: {} }, S.tpPanel));
+const tpOrient = () => innerWidth > innerHeight ? 'landscape' : 'portrait';
+const tpSizes = () => { const p = tpPrefs(), o = tpOrient(); return (p[o] = p[o] || {}); };
+/* the largest panel: 55% of the screen, and the picture always keeps 35% */
+const tpMaxH = () => Math.max(0, Math.min(innerHeight * .55, innerHeight * .65 - B.t - B.b));
+const tpKbH = kh => TP_GRIP + 5 * kh + 4 * 5 + 6; /* the grip, five rows of keys, the gaps, the bottom margin */
+function tpKeyH() {
+  const def = tpOrient() === 'landscape' ? 34 : 46, room = (tpMaxH() - tpKbH(0)) / 5;
+  return Math.max(24, Math.min(clamp(tpSizes().key || def, 34, 58), room));
+}
+function tpPanelH(state) {
+  if (state === 'collapsed') return 0;
+  if (state === 'keyboard') return tpKbH(tpKeyH());
+  const max = tpMaxH();
+  return clamp((tpSizes().pad || .38) * innerHeight, Math.min(120, max), max);
+}
+const tpSize = h => { tpad.style.height = `calc(${Math.round(h)}px + env(safe-area-inset-bottom, 0px))`; };
+function tpKbWidth() {
+  const land = tpOrient() === 'landscape';
+  tpad.classList.toggle('land', land);
+  tpKeys.style.setProperty('--kw', land ? clamp(tpSizes().kbw || 720, Math.min(480, innerWidth), innerWidth) + 'px' : 'none');
+  tpad.style.setProperty('--kh', tpKeyH() + 'px');
+}
+
+/* ---- on and off ---- */
+function tpSync() {
+  const on = tpWanted(), id = st.device && st.device.id;
+  if (!on && !tp.on) return;
+  if (on && tp.dev !== id) { if (tp.saveT) tpSaveView(); tp.dev = id; tpLoadView(); }
+  if (on !== tp.on) {
+    tp.on = on;
+    tpGestureEnd();
+    if (on) { hideFkb(); tpShow(tpPrefs().state, false); }
+    else { tpad.hidden = tpBall.hidden = true; tpSetClose(); tpSaveView(); }
+    tpPointer();
+  }
+  tpCur.hidden = !on;
+  layout(); restoreBall(); syncMenuStates();
+}
+/* leave the computer's own pointer out of the picture while this one is drawn (agent ctrl cursor.show) */
+function tpPointer() {
+  if (st.ready && st.ready.caps && st.ready.caps.cursor_hide) sendCtrl('cursor.show', { show: !tp.on }).catch(() => {});
+}
+function tpLoadView() {
+  const v = viewOf();
+  tp.scale = v.scale || 0; tp.lastScale = v.lastScale || 0;
+  tp.cx = v.cx === undefined ? .5 : v.cx; tp.cy = v.cy === undefined ? .5 : v.cy;
+}
+function tpSaveView() {
+  clearTimeout(tp.saveT); tp.saveT = 0;
+  if (!tp.scale) return;
+  const r = n => Math.round(n * 1e4) / 1e4, k = tp.dev || '-'; /* the computer this view is of */
+  S.view = Object.assign({}, S.view, { [k]:
+    Object.assign({ z: 1, x: .5, y: .5 }, (S.view || {})[k], { scale: r(tp.scale), lastScale: r(tp.lastScale), cx: r(tp.cx), cy: r(tp.cy) }) });
+  save();
+}
+const tpSaveSoon = () => { clearTimeout(tp.saveT); tp.saveT = setTimeout(tpSaveView, 600); };
+
+/* ---- the picture under the pointer ---- */
+function tpScreen() {
+  if (st.ready && st.screen.w) return [st.screen.w, st.screen.h];
+  return [video.videoWidth || 1920, video.videoHeight || 1080];
+}
+/* the visible area: from the top of the screen (the safe area in Safari) to the top of the panel */
+function tpMeasure() {
+  B = bounds();
+  const ins = standalone() ? { t: 0, r: 0, b: 0, l: 0 } : B, W = stage.clientWidth, H = stage.clientHeight;
+  const top = tpad.hidden ? H : tpad.getBoundingClientRect().top;
+  tp.area = { l: ins.l, t: ins.t, r: W - ins.r, b: Math.max(ins.t + 1, Math.min(H - ins.b, top)) };
+}
+const tpFit = () => { const a = tp.area, [w, h] = tpScreen(); return Math.min((a.r - a.l) / w, (a.b - a.t) / h); };
+const tpHi = () => Math.max(TP_MAX, tpFit());
+function tpLayout() {
+  if (!tp.area) tpMeasure();
+  if (!tp.scale) tp.scale = Math.max(1, tpFit()); /* a screen pixel to a CSS pixel: text as big as on the computer */
+  const a = tp.area, [w, h] = tpScreen(), s = tp.scale, ax = (a.l + a.r) / 2, ay = (a.t + a.b) / 2;
+  const x = ax - tp.cx * w * s, y = ay - tp.cy * h * s;
+  for (const e of [video, cv]) {
+    e.style.left = e.style.top = '0px'; e.style.width = w + 'px'; e.style.height = h + 'px';
+    e.style.transformOrigin = '0 0'; e.style.transform = `translate(${x}px,${y}px) scale(${s})`;
+  }
+  tpCur.style.transform = `translate(${ax - 1.5}px,${ay - 1.5}px)`; /* the arrow's tip on the anchor */
+}
+/* from layout(): the window changed, or the picture did */
+function tpRelayout() {
+  if (!tp.drag && tpPrefs().state !== 'collapsed') { tpKbWidth(); tpSize(tpPanelH(tpPrefs().state)); }
+  tpMeasure(); tpLayout();
+  if (tpBall.hidden === false) placeTpBall();
+}
+/* while the panel animates, the anchor and the picture move with it, frame by frame */
+function tpFollow(ms) {
+  cancelAnimationFrame(tp.followRaf);
+  const end = now() + ms;
+  const step = () => {
+    tpMeasure(); tpLayout(); tpSetPlace();
+    if (now() < end) { tp.followRaf = requestAnimationFrame(step); return; }
+    tp.followRaf = 0;
+    if (tp.scale < tpFit()) tpZoomTo(tpFit()); /* "the whole screen" stays the whole screen */
+    restoreBall();
+  };
+  step();
+}
+
+/* ---- zoom ---- */
+/* past the limits the picture follows the fingers with resistance, and springs back on release */
+function tpRubber(s) {
+  const lo = tpFit(), hi = tpHi();
+  return s > hi ? hi * Math.pow(s / hi, .3) : s < lo ? lo * Math.pow(s / lo, .3) : s;
+}
+function tpZoomTo(s, ms = 180) {
+  cancelAnimationFrame(tp.zoomRaf);
+  const s0 = tp.scale || s, t0 = now();
+  const step = () => {
+    const k = Math.min(1, (now() - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+    tp.scale = s0 * Math.pow(s / s0, e); tpLayout();
+    tp.zoomRaf = k < 1 ? requestAnimationFrame(step) : 0;
+    if (k >= 1) tpSaveSoon();
+  };
+  step();
+}
+/* ⤢: the whole screen, and back to the zoom you had */
+function tpWhole() {
+  const fit = tpFit();
+  if (tp.scale > fit * 1.02) { tp.lastScale = tp.scale; tpZoomTo(fit, 220); }
+  else tpZoomTo(tp.lastScale > fit * 1.02 ? tp.lastScale : Math.max(1, fit * 2), 220);
+}
+
+/* ---- the pointer ---- */
+/* acceleration, like a Mac's: a slow finger moves the pointer as far as it moves, a quick one up to 4 times as far */
+const tpGain = v => 1 + 3 * Math.pow(clamp((v - 50) / 750, 0, 1), 1.3); /* v: px/s */
+function tpMoveBy(dx, dy) { /* CSS px over the picture as it is drawn */
+  const [w, h] = tpScreen(), s = tp.scale;
+  tp.cx = clamp(tp.cx + dx / (w * s), 0, 1); tp.cy = clamp(tp.cy + dy / (h * s), 0, 1);
+  tpLayout();
+  queueMove(tp.cx, tp.cy, tp.g && tp.g.mode === 'drag' ? 1 : 0);
+}
+const TP_BITS = [1, 4, 2]; /* DOM buttons of left, middle, right */
+function tpClick(button) {
+  flushMove();
+  sendMouse(0, 0, 0, tp.cx, tp.cy);
+  sendMouse(1, button, TP_BITS[button], tp.cx, tp.cy);
+  sendMouse(2, button, 0, tp.cx, tp.cy);
+}
+/* the content follows the fingers (natural scrolling), as far as they move over the picture */
+function tpScroll(dx, dy) {
+  const k = 1.5 * S.tpScroll / tp.scale * (S.tpNatural ? -1 : 1);
+  sendScroll(tp.cx, tp.cy, dx * k, dy * k);
+}
+function tpMomentum(vx, vy) { /* px/ms when the fingers left: keep going, slowing down */
+  tpMomStop();
+  if (Math.hypot(vx, vy) < .25) return;
+  let last = now();
+  const step = () => {
+    const t = now(), dt = t - last, f = Math.pow(.95, dt / 16);
+    last = t;
+    tpScroll(vx * dt, vy * dt);
+    vx *= f; vy *= f;
+    tp.mom = Math.hypot(vx, vy) > .02 ? requestAnimationFrame(step) : 0;
+  };
+  tp.mom = requestAnimationFrame(step);
+}
+function tpMomStop() { cancelAnimationFrame(tp.mom); tp.mom = 0; }
+/* while dragging, a finger resting at the edge of what it touches keeps the pointer going that way */
+function tpEdge(p) {
+  const g = tp.g, a = tp.area, r = g.el === tpSurface ? tpSurface.getBoundingClientRect() : { left: a.l, right: a.r, top: a.t, bottom: a.b }, m = 22;
+  const ex = p.x < r.left + m ? -1 : p.x > r.right - m ? 1 : 0, ey = p.y < r.top + m ? -1 : p.y > r.bottom - m ? 1 : 0;
+  tp.edge = ex || ey ? { ex, ey } : null;
+  if (!tp.edge || tp.edgeRaf) return;
+  const step = () => {
+    if (!tp.edge || !tp.g || tp.g.mode !== 'drag') { tp.edgeRaf = 0; return; }
+    tpMoveBy(tp.edge.ex * 6, tp.edge.ey * 6);
+    tp.edgeRaf = requestAnimationFrame(step);
+  };
+  tp.edgeRaf = requestAnimationFrame(step);
+}
+
+/* ---- gestures (§5) ----
+ * tp.g: { n: most fingers down, t0, mode: null | 'move' | 'drag' | 'two' (undecided) | 'scroll' | 'zoom',
+ * lead: the finger that moves the pointer, far: how far it went, cx0/cy0: the pointer at touch-down,
+ * again: it came down just after a tap (so moving it drags) } */
+function tpPair() {
+  const [p, q] = tp.pts.values();
+  return [{ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, Math.hypot(p.x - q.x, p.y - q.y)];
+}
+function tpGestureEnd() {
+  const g = tp.g;
+  if (g && g.mode === 'drag') { flushMove(); sendMouse(2, 0, 0, tp.cx, tp.cy); }
+  tp.g = null; tp.pts.clear(); tp.edge = null;
+  tpMomStop();
+}
+function tpTouch(type, e) {
+  e.preventDefault();
+  const t = now();
+  if (type === 'down') {
+    closeMenu(); tpMomStop();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    tp.pts.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t });
+    const g = tp.g, n = tp.pts.size;
+    if (n === 1 || !g) {
+      tp.g = { n: 1, t0: t, mode: null, lead: e.pointerId, far: 0, v: 0, cx0: tp.cx, cy0: tp.cy, el: e.currentTarget, again: t - tp.lastTap < TP_AGAIN_MS };
+    } else if (g.mode !== 'drag') { /* a drag ignores a resting palm */
+      g.n = Math.max(g.n, n);
+      if (n === 2) { const [c, d] = tpPair(); Object.assign(g, { mode: 'two', c0: c, c, d0: d, s0: tp.scale, vx: 0, vy: 0, ct: t }); }
+    }
+    return;
+  }
+  const p = tp.pts.get(e.pointerId), g = tp.g;
+  if (!p || !g) return;
+  if (type === 'move') {
+    const dx = e.clientX - p.x, dy = e.clientY - p.y, dt = Math.max(1, t - p.t);
+    p.x = e.clientX; p.y = e.clientY; p.t = t;
+    if (g.n === 1) {
+      if (e.pointerId !== g.lead) return;
+      g.far = Math.max(g.far, Math.hypot(p.x - p.sx, p.y - p.sy));
+      if (!g.mode && g.far > TP_SLOP) {
+        g.mode = g.again ? 'drag' : 'move';
+        if (g.mode === 'drag') { /* the button goes down where the pointer was when the finger landed */
+          flushMove(); sendMouse(0, 0, 0, g.cx0, g.cy0); sendMouse(1, 0, 1, g.cx0, g.cy0);
+        }
+      }
+      const v = Math.hypot(dx, dy) / dt * 1000;
+      g.v = g.v ? g.v * .6 + v * .4 : v;
+      const k = tpGain(g.v) * S.tpMove;
+      tpMoveBy(dx * k, dy * k);
+      if (g.mode === 'drag') tpEdge(p);
+      return;
+    }
+    if (!['two', 'scroll', 'zoom'].includes(g.mode) || tp.pts.size < 2) return;
+    const [c, d] = tpPair();
+    if (g.mode === 'two') { /* the first 10 px decide, once: fingers spreading or closing zoom, together they scroll */
+      if (Math.abs(d - g.d0) > 10) Object.assign(g, { mode: 'zoom', d0: d, s0: tp.scale });
+      else if (Math.hypot(c.x - g.c0.x, c.y - g.c0.y) > 10) Object.assign(g, { mode: 'scroll', c, ct: t });
+      return;
+    }
+    if (g.mode === 'zoom') { tp.scale = tpRubber(g.s0 * d / g.d0); tpLayout(); return; }
+    const sx = c.x - g.c.x, sy = c.y - g.c.y, sdt = Math.max(1, t - g.ct);
+    g.vx = g.vx * .5 + sx / sdt * .5; g.vy = g.vy * .5 + sy / sdt * .5;
+    g.c = c; g.ct = t;
+    tpScroll(sx, sy);
+    return;
+  }
+  tp.pts.delete(e.pointerId);
+  if (e.pointerId === g.lead) tp.edge = null;
+  if (tp.pts.size) return;
+  tp.g = null; tp.edge = null;
+  if (g.mode === 'drag') { flushMove(); sendMouse(2, 0, 0, tp.cx, tp.cy); }
+  else if (type !== 'up') { /* cancelled: no click */ }
+  else if (g.n === 1 && g.far <= TP_SLOP && t - g.t0 < TP_TAP_MS) {
+    /* a tap: a finger that wobbled still clicks where the pointer was, so a double click's two clicks land on one pixel */
+    tp.cx = g.cx0; tp.cy = g.cy0; tpLayout();
+    tpClick(0);
+    tp.lastTap = t;
+  } else if (g.mode === 'two' && t - g.t0 < 300) {
+    if (g.far <= TP_SLOP) { tp.cx = g.cx0; tp.cy = g.cy0; tpLayout(); }
+    tpClick(g.n >= 3 ? 1 : 2); /* two fingers: right click; three: middle */
+  } else if (g.mode === 'scroll' && t - g.ct < 80) tpMomentum(g.vx, g.vy);
+  if (g.mode === 'zoom') { const s = clamp(tp.scale, tpFit(), tpHi()); if (s !== tp.scale) tpZoomTo(s); }
+  tpSaveSoon();
+}
+for (const el of [stage, tpSurface]) {
+  el.addEventListener('pointerdown', e => { if (tpTake(e) && !e.target.closest('button')) tpTouch('down', e); });
+  el.addEventListener('pointermove', e => { if (tpTake(e)) tpTouch('move', e); });
+  el.addEventListener('pointerup', e => { if (tpTake(e)) { tpTouch('up', e); unmute(); } });
+  el.addEventListener('pointercancel', e => { if (tpTake(e)) tpTouch('cancel', e); });
+}
+
+/* ---- the panel: trackpad, keyboard, collapsed (§6) ---- */
+function tpShow(state, animate = true) {
+  const p = tpPrefs();
+  if (state === 'collapsed' && p.state !== 'collapsed') p.from = p.state;
+  p.state = state; save();
+  tpSetClose();
+  const kb = state === 'keyboard';
+  if (!kb) fkbUnlatch();
+  tpSurface.hidden = kb; tpKeys.hidden = !kb;
+  if (kb) renderFkb();
+  tpKbWidth();
+  tpad.classList.toggle('held', !animate);
+  clearTimeout(tp.hideT);
+  if (state === 'collapsed') {
+    tpSize(0);
+    const fold = () => { if (tp.on && tpPrefs().state === 'collapsed') { tpad.hidden = true; tpBall.hidden = false; placeTpBall(); tpFollow(0); } };
+    if (animate) tp.hideT = setTimeout(fold, 200); else fold();
+  } else {
+    tpBall.hidden = true;
+    if (tpad.hidden) { tpSize(0); tpad.hidden = false; void tpad.offsetHeight; }
+    tpSize(tpPanelH(state));
+  }
+  tpFollow(animate ? 260 : 0);
+  syncMenuStates();
+}
+$('#tpKb').addEventListener('click', () => tpShow('keyboard'));
+$('#tpHide').addEventListener('click', () => tpShow('collapsed'));
+$('#tpFit').addEventListener('click', tpWhole);
+$('#tpSet').addEventListener('click', () => { tp.set ? tpSetClose() : tpSettings(); });
+
+/* the grip: drag to resize (the trackpad's height, or the keyboard's keys), double-tap for the default */
+const tpGrip = $('#tpGrip');
+let tpGripTap = 0;
+tpGrip.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const t = now(), st0 = tpPrefs().state;
+  if (t - tpGripTap < 300) { /* double tap */
+    tpGripTap = 0;
+    delete tpSizes()[st0 === 'keyboard' ? 'key' : 'pad']; save();
+    tpShow(st0);
+    return;
+  }
+  tpGripTap = t;
+  try { tpGrip.setPointerCapture(e.pointerId); } catch (_) {}
+  tp.drag = { id: e.pointerId, y: e.clientY, h: tpPanelH(st0), state: st0 };
+  tpad.classList.add('held'); tpGrip.classList.add('on');
+});
+tpGrip.addEventListener('pointermove', e => {
+  const d = tp.drag;
+  if (!d || e.pointerId !== d.id) return;
+  const want = d.h + d.y - e.clientY, max = tpMaxH();
+  let lo, hi;
+  if (d.state === 'keyboard') {
+    const room = Math.max(24, Math.min(58, (max - tpKbH(0)) / 5));
+    d.key = clamp((want - tpKbH(0)) / 5, Math.min(34, room), room);
+    tpad.style.setProperty('--kh', d.key + 'px');
+    lo = hi = tpKbH(d.key);
+  } else { lo = Math.min(120, max); hi = max; d.pad = clamp(want, lo, hi) / innerHeight; }
+  /* past a limit the panel stops with a little give */
+  tpSize(want > hi ? hi + (want - hi) * .2 : want < lo ? lo - (lo - want) * .2 : want);
+  tpMeasure(); tpLayout(); tpSetPlace();
+});
+for (const t of ['pointerup', 'pointercancel']) tpGrip.addEventListener(t, e => {
+  const d = tp.drag;
+  if (!d || e.pointerId !== d.id) return;
+  tp.drag = null;
+  tpad.classList.remove('held'); tpGrip.classList.remove('on');
+  if (d.key !== undefined) tpSizes().key = Math.round(d.key);
+  if (d.pad !== undefined) tpSizes().pad = Math.round(d.pad * 1000) / 1000;
+  save();
+  tpSize(tpPanelH(d.state));
+  tpFollow(260);
+});
+/* sideways, the keyboard is centred and its sides drag to make it narrower or wider */
+for (const edge of tpKeys.querySelectorAll('.edge')) {
+  let id = null;
+  edge.addEventListener('pointerdown', e => { e.preventDefault(); id = e.pointerId; try { edge.setPointerCapture(id); } catch (_) {} });
+  edge.addEventListener('pointermove', e => {
+    if (e.pointerId !== id) return;
+    tpSizes().kbw = Math.round(clamp(2 * Math.abs(e.clientX - innerWidth / 2), Math.min(480, innerWidth), innerWidth));
+    tpKbWidth();
+  });
+  for (const t of ['pointerup', 'pointercancel']) edge.addEventListener(t, e => { if (e.pointerId === id) { id = null; save(); } });
+}
+
+/* collapsed: a round keyboard button, dragged anywhere (remembered); a tap brings the panel back */
+let tpBallPos = null;
+try { tpBallPos = JSON.parse(localStorage.getItem(KEY + '-tpball') || 'null'); } catch (e) {}
+function placeTpBall(x, y) {
+  const s = tpBall.offsetWidth || 46, m = 12;
+  if (x === undefined) {
+    x = tpBallPos ? tpBallPos.fx * innerWidth : innerWidth;
+    y = tpBallPos ? tpBallPos.fy * innerHeight : innerHeight;
+  }
+  x = clamp(x, B.l + m, innerWidth - B.r - m - s); y = clamp(y, B.t + m, innerHeight - B.b - m - s);
+  tpBall.style.left = x + 'px'; tpBall.style.top = y + 'px';
+  return { x, y };
+}
+let tpBallDrag = null;
+tpBall.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  try { tpBall.setPointerCapture(e.pointerId); } catch (_) {}
+  const r = tpBall.getBoundingClientRect();
+  tpBallDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, moved: false };
+});
+tpBall.addEventListener('pointermove', e => {
+  const d = tpBallDrag;
+  if (!d || e.pointerId !== d.id) return;
+  const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+  if (!d.moved && Math.hypot(dx, dy) > 6) d.moved = true;
+  if (d.moved) placeTpBall(d.ox + dx, d.oy + dy);
+});
+for (const t of ['pointerup', 'pointercancel']) tpBall.addEventListener(t, e => {
+  const d = tpBallDrag;
+  if (!d || e.pointerId !== d.id) return;
+  tpBallDrag = null;
+  if (d.moved) {
+    const r = tpBall.getBoundingClientRect();
+    tpBallPos = { fx: r.left / innerWidth, fy: r.top / innerHeight };
+    try { localStorage.setItem(KEY + '-tpball', JSON.stringify(tpBallPos)); } catch (_) {}
+  } else if (t === 'pointerup') tpShow(tpPrefs().from === 'keyboard' ? 'keyboard' : 'trackpad');
+});
+tpBall.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tpShow(tpPrefs().from === 'keyboard' ? 'keyboard' : 'trackpad'); } });
+
+/* ⚙: the trackpad's settings, just above the panel, so the pad stays free to try them on */
+function tpSetPlace() {
+  if (tp.set && tp.area) tp.set.style.setProperty('--tpb', Math.round(innerHeight - tp.area.b + 8) + 'px');
+}
+function tpSetClose() {
+  if (!tp.set) return;
+  tp.set.remove(); tp.set = null;
+  $('#tpSet').classList.remove('on');
+}
+function tpSettings() {
+  const box = el('div', { class: 'gset tpset', role: 'dialog', 'aria-label': 'Trackpad settings' });
+  box.addEventListener('pointerdown', e => e.stopPropagation());
+  const x = n => (Math.round(n * 100) / 100) + '×';
+  const nat = el('input', { type: 'checkbox', class: 'sw', 'aria-label': 'Natural scrolling' });
+  nat.checked = !!S.tpNatural;
+  nat.addEventListener('change', () => { S.tpNatural = nat.checked; save(); });
+  box.append(
+    el('div', { class: 'hd' }, el('span', { text: 'Trackpad' }), el('button', { type: 'button', text: '✕', 'aria-label': 'Close', onclick: tpSetClose })),
+    ...slider('Move speed', .25, 3, .05, S.tpMove, x, n => { S.tpMove = n; save(); }),
+    ...slider('Scrolling speed', .25, 3, .05, S.tpScroll, x, n => { S.tpScroll = n; save(); }),
+    el('div', { class: 'row sw-row' }, el('span', { text: 'Natural scrolling · the content follows the fingers' }), nat),
+    el('div', { class: 'btns' }, el('button', { type: 'button', class: 'btn', text: 'Reset', onclick: () => {
+      Object.assign(S, { tpMove: DEFAULTS.tpMove, tpScroll: DEFAULTS.tpScroll, tpNatural: DEFAULTS.tpNatural });
+      const p = tpPrefs(); p.portrait = {}; p.landscape = {};
+      save(); tpSetClose(); tpShow(p.state); tpSettings();
+    } })));
+  document.body.append(box);
+  tp.set = box;
+  $('#tpSet').classList.add('on');
+  tpSetPlace();
+}
+window.addEventListener('resize', tpSync);
 
 /* ---- computers: the on-screen gamepad, and real controllers (Joy-Con, DualSense, Xbox pads paired
  * with the iPhone or iPad, through the Gamepad API) ----
@@ -1636,17 +2099,18 @@ window.addEventListener('pointermove', e => {
 for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, e => { if (EDIT.drag && e.pointerId === EDIT.drag.id) EDIT.drag = null; }, true);
 /* ⚙: the picture's zoom and position, and how see-through the buttons are */
 const padAlpha = () => gpad.style.setProperty('--ga', S.padAlpha || .5);
+/* a row of the ⚙ cards (the gamepad's, the trackpad's): label, slider, value */
+function slider(label, min, max, step, val, fmt, on) {
+  const out = el('span', { class: 'val', text: fmt(val) });
+  const r = el('input', { type: 'range', min, max, step, 'aria-label': label });
+  r.value = val;
+  r.addEventListener('input', () => { out.textContent = fmt(+r.value); on(+r.value); });
+  return [el('div', { class: 'row' }, el('span', { text: label }), r, out)];
+}
 function padSettings() {
   const box = el('div', { class: 'gset' });
   box.addEventListener('pointerdown', e => e.stopPropagation());
   const v = viewOf();
-  const slider = (label, min, max, step, val, fmt, on) => {
-    const out = el('span', { class: 'val', text: fmt(val) });
-    const r = el('input', { type: 'range', min, max, step, 'aria-label': label });
-    r.value = val;
-    r.addEventListener('input', () => { out.textContent = fmt(+r.value); on(+r.value); });
-    return [el('div', { class: 'row' }, el('span', { text: label }), r, out)];
-  };
   const pct = n => Math.round(n * 100) + '%';
   const zoom = slider('Zoom', 1, 3, .05, v.z, pct, z => setView(Object.assign(viewOf(), { z })));
   const px = slider('Left · right', 0, 1, .01, v.x, pct, x => setView(Object.assign(viewOf(), { x })));
@@ -1681,10 +2145,11 @@ function showGpad() {
   renderGpad();
   gpad.hidden = false;
   document.body.classList.add('gpad-on'); /* the ball moves to the top, between ⚙ and × */
+  tpSync(); /* the trackpad steps aside for it */
   if (innerHeight > innerWidth) toast('Turn the phone sideways for the gamepad');
   syncMenuStates();
 }
-function hideGpad() { if (EDIT.on) padEdit(false); gpad.hidden = true; document.body.classList.remove('gpad-on'); padRest(); padFlush(); syncMenuStates(); }
+function hideGpad() { if (EDIT.on) padEdit(false); gpad.hidden = true; document.body.classList.remove('gpad-on'); padRest(); padFlush(); tpSync(); syncMenuStates(); }
 /* real controllers: read every frame while one is connected (Safari lists a pad after its first press) */
 function padPoll() {
   PAD.poll = 0;
@@ -1862,6 +2327,7 @@ function changed(key) {
   if (key === 'rotation') sendCtrl('rotate', { to: S.rotation }).catch(() => {});
   if (AGENT_KEYS.includes(key)) cmd('agent.config', { [key]: S[key] }, 'Saved to the router');
   if (key === 'stats') tickStats();
+  if (key === 'touchCtl') tpSync();
 }
 const lbl = (text, help) => el('div', { class: 'lbl' }, text, help ? el('small', { text: help }) : null);
 function seg(key, opts) {
@@ -1931,6 +2397,9 @@ function renderTab(id) {
     add(group('Overlay',
       toggleRow('stats', 'Stats overlay', 'fps, bitrate, round-trip time, decoder, last input bytes'),
       toggleRow('touches', 'Show touches', 'Draw your touch points (demo stream only)')));
+    if (desk()) add(group('Touch control',
+      segRow('touchCtl', 'Fingers on the screen', [['auto', 'Auto'], ['trackpad', 'Trackpad'], ['direct', 'Direct']],
+        'Trackpad: a pad at the bottom moves a pointer that stays in the middle of a magnified picture, like a Mac\'s trackpad. Direct: tap where you touch. Auto picks Trackpad on a phone.')));
     if (desk()) add(group('Keyboard',
       segRow('swapCmd', '⌘ and Ctrl', [['auto', 'Auto'], ['on', 'Swap'], ['off', 'As is']], 'Auto maps them when only one side is a Mac: from a Mac, ⌘C copies on Windows or Linux and Ctrl+C still stops a terminal; towards a Mac, Ctrl+C copies.')));
   }
@@ -2132,6 +2601,7 @@ function renderComputerTab(add) {
 }
 function deviceChanged() {
   if (desk() !== !!st.wasDesk) { st.wasDesk = desk(); renderQuickKeys(); video.style.cursor = desk() ? 'default' : ''; }
+  tpSync();
   if (!menu.hidden) syncMenuStates();
   if (openId === 'settings' && ['phone', 'conn'].includes(currentTab)) { if (statusRefresh) statusRefresh(); }
   tickStats();
