@@ -45,3 +45,6 @@ Write an mcp guide to me. This is the first time to write a mcp. You need to tel
 2. Show me how to intergrate the mcp with claude or gpt
 3. Create an mcp implementation plan in mcp.md
 4. Add an mcp link to the agent page with instructions. When I click the mcp item, the URL should open and display a guide teching me how to use it.
+
+Are you familliar with Magic Trackpad? When I use my iPhone to control my Windows or macos, the screen is so large that I cannot see text clearly. I can use the trackpad to zoom out by spread two fingers. The cursor should always remain centered. Since the trackpad occupies space, the cursor should be positioned between the top of screen and the top of the keyboard. I can scroll the screen using a two-finger scroll on the trackpad. I can double-click or single-click just like an Apple trackpad. When I open the keyboard, there is a key that lets me quickly switch between trackpad and keyboard modes. There is also a collapse key; when I press it, the keyboard hides and becomes a small botton with a keyboard icon. I can adjust both the keyboard size of trackboard size if I want, though there are limits. Write this plan in trackpad.md.
+
