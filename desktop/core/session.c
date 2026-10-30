@@ -164,6 +164,7 @@ void session_connected(const char *sid, const char *codec, const char *profile, 
     }
     S.clip_seq = dsk_clip_seq();
     dsk_session(1);
+    dsk_screen_power(1); /* a display that went to sleep gives the capture no frames: the viewer would see black */
     desk_refresh_screens();
     apply_max_kbps();
     start_video();

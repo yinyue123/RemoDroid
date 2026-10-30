@@ -145,17 +145,25 @@ static void rate_control(cc_t *c, double now)
 {
     double acked = c->acked_bps;
     switch (c->usage) {
-    case U_OVER:
+    case U_OVER: {
+        /* What got through measures the path only while the sender fills it. An idle screen sends a
+         * trickle, and a delay blip then would sink the target to it (the floor): the next scroll got
+         * 0.3 Mbps and blurred. App-limited, the target steps down from itself and not below the start
+         * rate, and the blip isn't congestion (which would cap the target at what's sent, below). */
+        int limited = acked < 0.5 * c->delay_bps;
         if (c->state != S_DECREASE || now - c->last_change > 0.2) {
-            double target = 0.85 * (acked > 0 ? acked : c->delay_bps);
+            double target = limited ? RD_MAX(0.85 * c->delay_bps, RD_MIN(c->start_bps, c->delay_bps))
+                                    : 0.85 * (acked > 0 ? acked : c->delay_bps);
             if (target < c->delay_bps)
                 c->delay_bps = target;
             c->last_decrease_bps = c->delay_bps;
             c->last_change = now;
         }
-        c->last_congestion = now;
+        if (!limited)
+            c->last_congestion = now;
         c->state = S_DECREASE;
         break;
+    }
     case U_UNDER:
         c->state = S_HOLD;
         break;

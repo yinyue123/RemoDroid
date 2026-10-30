@@ -30,6 +30,8 @@ struct rtp {
     rtp_stats_t st;
     uint32_t sr_ntp_mid; /* middle 32 bits of the last SR's NTP time */
     double sr_sent_at;
+    uint32_t rr_seq;     /* the extended highest sequence number of the last receiver report */
+    int rr_have;
 };
 
 /* ---------------- helpers ---------------- */
@@ -299,7 +301,13 @@ static void handle_rr_block(rtp_t *r, const uint8_t *b, double now)
         if (rtt < 65536u * 5)
             r->st.rtt_ms = (int)((uint64_t)rtt * 1000 / 65536);
     }
-    if (r->cc)
+    /* a report covering a handful of packets (an idle screen sends a few a second) says little: one lost
+     * of eight reads as 12% and would halve the target, so only reports of 20 packets or more count,
+     * as in libwebrtc */
+    uint32_t ext = rd_get_be32(b + 8), packets = r->rr_have ? ext - r->rr_seq : 0;
+    r->rr_seq = ext;
+    r->rr_have = 1;
+    if (r->cc && packets >= 20)
         cc_on_loss(r->cc, r->st.loss, now);
 }
 

@@ -149,13 +149,15 @@ static int configure(dsk_hwvideo_t *v, IMFActivate *act, char *err, size_t cap)
         return -1;
     }
     /* A constant bitrate is shared out per frame by the frame rate, but a screen sends a frame only when
-     * it changes, so a scroll's frames can each get a sliver of it (and most of it go unsent). Being
-     * measured on the CPU encoder ([video] mf_max_fps, mf_timing = real): off by default for now. */
+     * it changes: scrolling on the win11 VM came at 7 frames a second, each given a 60th of the bitrate
+     * (QP 33 at 8 Mbps, most of it unsent). Microsoft's CPU encoder, which can't do 60 anyway, budgets
+     * for 30 at most and is told how long each frame really stands for (QP 25). A GPU's keeps the
+     * fixed times until it's measured. [video] mf_max_fps and mf_timing (real | fixed) override. */
     v->rate_fps = c->fps > 0 ? c->fps : 30;
-    long cap_fps = desk_conf_int("video", "mf_max_fps", 0);
+    long cap_fps = desk_conf_int("video", "mf_max_fps", v->software ? 30 : 0);
     if (cap_fps > 0)
         v->rate_fps = RD_MIN(v->rate_fps, (int)cap_fps);
-    v->real_time = !strcmp(desk_conf("video", "mf_timing", "fixed"), "real");
+    v->real_time = !strcmp(desk_conf("video", "mf_timing", v->software ? "real" : "fixed"), "real");
     LOGI("video: %s budgets for %d fps, %s frame times", v->name, v->rate_fps, v->real_time ? "real" : "fixed");
     if (SUCCEEDED(IMFTransform_QueryInterface(v->mft, &RD_IID_ICodecAPI, (void **)&v->api))) {
         set_bool(v->api, &RD_AVLowLatencyMode, 1);
