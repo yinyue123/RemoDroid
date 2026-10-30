@@ -813,7 +813,11 @@ function rtcRoute(rep, ag) {
   if (!pair) rep.forEach(r => { if (!pair && r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
   if (!pair) return null;
   const l = rep.get(pair.localCandidateId) || {}, r = rep.get(pair.remoteCandidateId) || {};
-  const relayed = l.candidateType === 'relay' || r.candidateType === 'relay';
+  const clean = a => a ? String(a).replace(/[^0-9A-Za-z.:_\[\]-]/g, '') : '';
+  ag = ag || {};
+  const peer = clean(ag.peer), aLocal = clean(ag.local), aMapped = clean(ag.mapped), aRelay = clean(ag.relay);
+  /* the far end sending through its own relay looks, from here, like a peer-reflexive address: it says so */
+  const relayed = l.candidateType === 'relay' || r.candidateType === 'relay' || !!aRelay;
   const nat = [l.candidateType, r.candidateType].some(t => t === 'srflx' || t === 'prflx');
   const mode = relayed ? 'relayed (TURN)' : nat ? 'direct, through NAT' : 'direct, same network';
   const proto = (l.candidateType === 'relay' && l.relayProtocol) || l.protocol || '';
@@ -821,9 +825,6 @@ function rtcRoute(rep, ag) {
   const known = a => a && a !== '0.0.0.0' && a !== '::';
   const own = known(l.relatedAddress) ? hostPort(l.relatedAddress, l.relatedPort) : `this device${l.relatedPort ? ', port ' + (l.relatedPort | 0) : ''}`;
   const mine = known(l.address) ? hostPort(l.address, l.port) : `this device${l.port ? ', port ' + (l.port | 0) : ''}`;
-  const clean = a => a ? String(a).replace(/[^0-9A-Za-z.:_\[\]-]/g, '') : '';
-  ag = ag || {};
-  const peer = clean(ag.peer), aLocal = clean(ag.local), aMapped = clean(ag.mapped), aRelay = clean(ag.relay);
   let from, relay = [], to = hostPort(r.address, r.port);
   if (l.candidateType === 'relay') { /* we send to our TURN server, which sends on from its address */
     from = own;
