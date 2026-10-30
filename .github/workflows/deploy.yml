@@ -1,0 +1,106 @@
+# Updates the test machines from one build: the relay server and its viewer, and the computer
+# agents. A runner fetches the packages and streams them, with the machines' settings, to a machine
+# on the Tailscale network, which runs back/ts-update.sh to push them over Tailscale.
+#
+# Everything about the machines is in the repository's secrets (the repo is public):
+#   DEPLOY_SSH_HOST, DEPLOY_SSH_PORT, DEPLOY_SSH_KNOWN_HOSTS   the Tailscale machine (user@host, port, its host keys)
+#   DEPLOY_SSH_KEY     a key that machine's authorized_keys lets run only ts-update.sh --ssh
+#   DEPLOY_CONF_<NAME> each of ts-update.sh's settings (SERVER, SERVER_PORT, SERVER_CT, JUMP, SX, SX_USER,
+#                      WIN_VM, WIN_USER, DECK, PC, PC_USER), written into the ts-update.conf it gets
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: "latest (release), a release (0.5.8), main (the newest passing build of main) or a build run's id"
+        default: latest
+      targets:
+        description: "any of: server sx win11 deck"
+        default: server sx win11 deck
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Which build
+        id: which
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ inputs.build }}
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          echo "$TARGETS" | grep -qxE '[a-z0-9 ]+' || { echo "bad targets: $TARGETS"; exit 1; }
+          case "$BUILD" in
+            latest) echo "release=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)" >> "$GITHUB_OUTPUT" ;;
+            [0-9]*.*) echo "release=v$BUILD" >> "$GITHUB_OUTPUT" ;;
+            main) echo "run=$(gh run list -R "$GITHUB_REPOSITORY" -w build -b main -e push -s success -L 1 --json databaseId -q '.[0].databaseId')" >> "$GITHUB_OUTPUT" ;;
+            [0-9]*) echo "run=$BUILD" >> "$GITHUB_OUTPUT" ;;
+            *) echo "unknown build: $BUILD"; exit 1 ;;
+          esac
+      - name: Fetch a release's packages
+        if: steps.which.outputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.which.outputs.release }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D pkgs \
+            -p 'remodroid-[0-9]*-linux-x86_64.tar.gz' -p 'RemoDroid-[0-9]*-linux-x86_64.AppImage' \
+            -p 'remodroid-desktop_*_amd64.deb' -p 'RemoDroid-[0-9]*-windows-x86_64.zip' -p SHA256SUMS
+      - name: Fetch a build's packages
+        if: steps.which.outputs.run
+        uses: actions/download-artifact@v5
+        with:
+          name: packages
+          path: pkgs
+          run-id: ${{ steps.which.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Keep what the targets use
+        run: |
+          cd pkgs
+          for f in *; do
+            case "$f" in
+              remodroid-[0-9]*-linux-x86_64.tar.gz|RemoDroid-[0-9]*-linux-x86_64.AppImage|remodroid-desktop_*_amd64.deb|RemoDroid-[0-9]*-windows-x86_64.zip|SHA256SUMS) ;;
+              *) rm -f "$f" ;;
+            esac
+          done
+          ls -l
+      - name: The machines' settings
+        env:
+          SERVER: ${{ secrets.DEPLOY_CONF_SERVER }}
+          SERVER_PORT: ${{ secrets.DEPLOY_CONF_SERVER_PORT }}
+          SERVER_CT: ${{ secrets.DEPLOY_CONF_SERVER_CT }}
+          JUMP: ${{ secrets.DEPLOY_CONF_JUMP }}
+          SX: ${{ secrets.DEPLOY_CONF_SX }}
+          SX_USER: ${{ secrets.DEPLOY_CONF_SX_USER }}
+          WIN_VM: ${{ secrets.DEPLOY_CONF_WIN_VM }}
+          WIN_USER: ${{ secrets.DEPLOY_CONF_WIN_USER }}
+          DECK: ${{ secrets.DEPLOY_CONF_DECK }}
+          PC: ${{ secrets.DEPLOY_CONF_PC }}
+          PC_USER: ${{ secrets.DEPLOY_CONF_PC_USER }}
+        run: |
+          for n in SERVER SERVER_PORT SERVER_CT JUMP SX SX_USER WIN_VM WIN_USER DECK PC PC_USER; do
+            v=$(printenv "$n" || true)
+            [ -z "$v" ] || printf '%s=%s\n' "$n" "$v"
+          done > pkgs/ts-update.conf
+          sed 's/=.*/=…/' pkgs/ts-update.conf
+      - name: Update the machines through the Tailscale one
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          KNOWN: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+          tar -C pkgs -c . | ssh -i ~/.ssh/deploy -p "${PORT:-22}" -o BatchMode=yes -o ServerAliveInterval=15 "$HOST" "$TARGETS"
