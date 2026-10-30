@@ -474,7 +474,8 @@ On a desktop, 0x01 touch with pointer 0 maps to left-button down/move/up, which 
   captured one).
 - New `screen.select {index}` → ack, then `screen.changed` as today.
 - New `cursor.show {show}` → ack; `session.ready.caps.cursor_hide` says the agent takes it ([`trackpad.md`](trackpad.md) §9).
-- `quality.set.preset` accepts `"native"` on desktops.
+- `quality.set.preset` accepts `"native"` on desktops. The viewer keeps a computer's resolution apart from a phone's (`S.deskPreset`), Native by
+  default: any downscale of a desktop blurs its text (a 1024×768 screen at 720p becomes 960×720).
 
 ---
 

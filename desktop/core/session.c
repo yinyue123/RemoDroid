@@ -71,16 +71,20 @@ static int short_side(const char *preset)
 
 static const char *preset(void) { return msg_str(S.quality, "preset", desk_conf("video", "preset", "1080p")); }
 
+static int manual(void) { return !strcmp(msg_str(S.quality, "mode", desk_conf("video", "mode", "auto")), "manual"); }
+
 static void start_video(void)
 {
     int max_fps = (int)desk_conf_int("video", "max_fps", 60);
     int max_kbps = (int)desk_conf_int("video", "max_bitrate_kbps", 20000);
+    int want_kbps = RD_MIN((int)msg_num(S.quality, "kbps", 4000), max_kbps);
     video_req_t r = {
         .codec = !strcmp(S.codec, "h265") ? VC_H265 : VC_H264,
         .high = S.high,
         .short_side = short_side(preset()),
         .fps = RD_MIN((int)msg_num(S.quality, "fps", max_fps), max_fps),
-        .kbps = S.target_kbps ? S.target_kbps : RD_MIN((int)msg_num(S.quality, "kbps", 4000), max_kbps),
+        /* manual: the bitrate chosen; auto: the network's estimate (it starts at the chosen one) */
+        .kbps = manual() || !S.target_kbps ? want_kbps : S.target_kbps,
         .software = !strcmp(desk_conf("video", "encoder", "auto"), "software"),
     };
     if (video_start(&r) < 0)
@@ -191,7 +195,7 @@ void session_keyframe(void) { video_keyframe(); }
 void session_bitrate(int kbps)
 {
     S.target_kbps = kbps;
-    if (strcmp(msg_str(S.quality, "mode", desk_conf("video", "mode", "auto")), "manual"))
+    if (!manual())
         video_bitrate(kbps);
 }
 
@@ -389,8 +393,7 @@ static void control(cJSON *m)
         if (strcmp(msg_str(d, "codec", "auto"), "auto") && strcmp(msg_str(d, "codec", ""), S.codec))
             error(m, "unsupported", "the codec changes on the next connection");
         apply_max_kbps();
-        int manual = !strcmp(msg_str(d, "mode", ""), "manual");
-        if (manual)
+        if (manual())
             video_bitrate(RD_MIN((int)msg_num(d, "kbps", 4000), (int)desk_conf_int("video", "max_bitrate_kbps", 20000)));
         if (strcmp(preset(), op) || (int)msg_num(d, "fps", old_fps) != old_fps)
             start_video();

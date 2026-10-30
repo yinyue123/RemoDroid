@@ -42,6 +42,9 @@ struct dsk_hwvideo {
     DWORD out_size;
     uint8_t *i420, *nv12;
     int have_frame, want_key;
+    int software;                 /* Microsoft's own encoder, on the CPU */
+    int rate_fps;                 /* the frame rate the encoder budgets for */
+    LONGLONG last_t;              /* the last input's time, 100 ns */
     uint64_t last_in_ms;
     int outputs;
     uint8_t *seqhdr;              /* SPS/PPS (VPS) from the output type */
@@ -142,13 +145,19 @@ static int configure(dsk_hwvideo_t *v, IMFActivate *act, char *err, size_t cap)
         snprintf(err, cap, "%s: no event generator", v->name);
         return -1;
     }
+    /* A constant bitrate is shared out per frame by the frame rate. The CPU encoder can't keep up with
+     * 60 fps anyway, and a screen sends a frame only when it changes, so budgeting for 60 left each frame
+     * of a scroll a sliver of the bitrate (and most of it unsent): it budgets for 30 at most. */
+    v->rate_fps = c->fps > 0 ? c->fps : 30;
+    if (v->software)
+        v->rate_fps = RD_MIN(v->rate_fps, 30);
     if (SUCCEEDED(IMFTransform_QueryInterface(v->mft, &RD_IID_ICodecAPI, (void **)&v->api))) {
         set_bool(v->api, &RD_AVLowLatencyMode, 1);
         set_u32(v->api, &RD_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
         set_u32(v->api, &RD_AVEncCommonMeanBitRate, (ULONG)c->kbps * 1000);
-        set_u32(v->api, &RD_AVEncMPVGOPSize, (ULONG)(c->fps > 0 ? c->fps : 30) * 60); /* keyframes mostly on request */
+        set_u32(v->api, &RD_AVEncMPVGOPSize, (ULONG)v->rate_fps * 60); /* keyframes mostly on request */
     }
-    UINT64 size = (UINT64)c->width << 32 | (UINT32)c->height, rate = (UINT64)(c->fps > 0 ? c->fps : 30) << 32 | 1;
+    UINT64 size = (UINT64)c->width << 32 | (UINT32)c->height, rate = (UINT64)v->rate_fps << 32 | 1;
     IMFMediaType *ot = NULL, *it = NULL;
     MFCreateMediaType(&ot);
     IMFMediaType_SetGUID(ot, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
@@ -241,6 +250,7 @@ dsk_hwvideo_t *dsk_hwvideo_open(const dsk_video_cfg_t *c, dsk_au_cb cb, void *ud
             break;
         UINT32 n;
         IMFActivate **acts = find_encoders(h265, kinds[k], &n);
+        v->software = kinds[k] == MFT_ENUM_FLAG_SYNCMFT;
         for (UINT32 i = 0; i < n && !v->mft; i++)
             if (configure(v, acts[i], why, sizeof why) < 0) {
                 LOGI("video: %s", why);
@@ -387,9 +397,14 @@ static int feed(dsk_hwvideo_t *v)
     MFCreateSample(&s);
     IMFSample_AddBuffer(s, mb);
     IMFMediaBuffer_Release(mb);
-    LONGLONG t = (LONGLONG)rd_mono_ms() * 10000;
+    /* how long this frame stands for: the time since the last one (a screen sends frames only as it
+     * changes), between a 60th of a second and 100 ms, so its share of the bitrate follows */
+    LONGLONG t = (LONGLONG)rd_mono_ms() * 10000, dur = 10000000 / v->rate_fps;
+    if (v->last_t && t > v->last_t)
+        dur = RD_MIN(RD_MAX(t - v->last_t, 10000000 / 60), 1000000);
+    v->last_t = t;
     IMFSample_SetSampleTime(s, t);
-    IMFSample_SetSampleDuration(s, 10000000 / (c->fps > 0 ? c->fps : 30));
+    IMFSample_SetSampleDuration(s, dur);
     if (v->want_key && v->api) {
         set_u32(v->api, &RD_AVEncVideoForceKeyFrame, 1);
         v->want_key = 0;

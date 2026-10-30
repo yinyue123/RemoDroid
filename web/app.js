@@ -12,7 +12,7 @@ const DEMO = location.hash === '#demo' || location.protocol === 'file:' || locat
 /* ================= settings (per-viewer conveniences) ================= */
 const KEY = 'remodroid-v1';
 const DEFAULTS = {
-  mode: 'auto', preset: '720p', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: false,
+  mode: 'auto', preset: '720p', deskPreset: 'native', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: false,
   screenOff: true, lockOnDisc: true, grace: 10, rotation: 'auto', clipSync: true, autoPaste: false, overheat: 45,
   destDir: '/sdcard/DCIM/RemoDroid', mediaScan: true, overwrite: false, maxMb: 2048, route: 'auto', relay: false,
   audio: true, sound: true, device: '', swapCmd: 'auto', turn: '',
@@ -408,7 +408,7 @@ function onChannel(label, data) {
     if (desk()) { renderQuickKeys(); if (document.fullscreenElement) lockKeys(true); }
     tpSync();
     if (tp.on) { tpPointer(); queueMove(tp.cx, tp.cy, 0); } /* the computer's pointer to where this one is */
-    if (S.mode !== 'auto' || S.preset !== '720p') sendCtrl('quality.set', quality());
+    if (S.mode !== 'auto' || quality().preset !== '720p') sendCtrl('quality.set', quality());
     if (!S.sound && d.caps && d.caps.audio) sendCtrl('audio.set', { on: false }); /* keep the phone's speaker */
     syncMenuStates();
     syncClip();
@@ -2389,14 +2389,16 @@ for (const [id, label] of TABS) {
   b.addEventListener('click', () => renderTab(id));
   $('#tabs').append(b);
 }
+/* a computer has its own resolution, Native at first: shrinking a desktop blurs every letter (a 1024×768
+ * screen at 720p is drawn at 960×720) */
 function quality() {
-  return { mode: S.mode, preset: S.preset, fps: S.fps, kbps: S.kbps, codec: S.codec };
+  return { mode: S.mode, preset: desk() ? S.deskPreset : S.preset, fps: S.fps, kbps: S.kbps, codec: S.codec };
 }
 /* names the agent understands in agent.config (agent/phone.c) */
 const AGENT_KEYS = ['screenOff', 'lockOnDisc', 'grace', 'clipSync', 'autoPaste', 'overheat', 'rotation', 'route', 'relay', 'destDir', 'mediaScan', 'overwrite', 'maxMb', 'audio'];
 function changed(key) {
   save();
-  if (['mode', 'preset', 'fps', 'kbps', 'codec'].includes(key)) {
+  if (['mode', 'preset', 'deskPreset', 'fps', 'kbps', 'codec'].includes(key)) {
     sendCtrl('quality.set', quality(), true).then(() => toast('Quality updated')).catch(e => { if (!DEMO) toast(e.msg || e.message); });
     if (key === 'codec') toast('The codec changes on the next connection');
   }
@@ -2466,7 +2468,8 @@ function renderTab(id) {
   if (id === 'stream') {
     add(group('Quality',
       segRow('mode', 'Quality mode', [['auto', 'Auto'], ['manual', 'Manual']], 'Auto adapts bitrate and resolution to the network.'),
-      segRow('preset', 'Resolution', desk() ? [['native', 'Native'], '1080p', '720p', '540p'] : ['1080p', '720p', '540p', '360p'], 'Changing it restarts the encoder for about 0.2 s.'),
+      desk() ? segRow('deskPreset', 'Resolution', [['native', 'Native'], '1080p', '720p', '540p'], 'Native keeps text sharp; a lower one saves bandwidth. Changing it restarts the encoder for about 0.2 s.')
+        : segRow('preset', 'Resolution', ['1080p', '720p', '540p', '360p'], 'Changing it restarts the encoder for about 0.2 s.'),
       segRow('fps', 'Frame rate', [[30, '30'], [60, '60'], [90, '90'], [120, '120']]),
       rangeRow('kbps', S.mode === 'auto' ? 'Max bitrate' : 'Bitrate', 1000, 20000, 500, v => (v / 1000).toFixed(1) + ' Mbps'),
       segRow('codec', 'Codec', [['auto', 'Auto'], ['h265', 'H.265'], ['h264', 'H.264']], 'Auto uses H.265 when this iPhone decodes it in hardware.')));
