@@ -1411,6 +1411,7 @@ function renderFkb() {
     kr('', fkbBtn('esc', () => fkbKey(AK.esc)), fkbBtn('tab', () => fkbKey(AK.tab)), fkbBtn('.', () => fkbChar('.')),
       fkbBtn('←', () => fkbKey(AK.left), { repeat: 1, title: 'Left' }), fkbBtn('↓', () => fkbKey(AK.down), { repeat: 1, title: 'Down' }),
       fkbBtn('↑', () => fkbKey(AK.up), { repeat: 1, title: 'Up' }), fkbBtn('→', () => fkbKey(AK.right), { repeat: 1, title: 'Right' }),
+      fkbBtn('🌐', nextInputMethod, { title: 'Next input method' }),
       ...(docked ? [] : [fkbBtn('⌄', hideFkb, { title: 'Hide keyboard' })])),
     kr('', ...chars(rows[0])),
     kr(abc ? 'inset' : '', ...chars(rows[1])),
@@ -1418,11 +1419,10 @@ function renderFkb() {
       : fkbBtn(fkb.layer === 'sym1' ? '#+=' : '123', () => { fkb.layer = fkb.layer === 'sym1' ? 'sym2' : 'sym1'; renderFkb(); }, { grow: 1.4 }),
       ...chars(rows[2]), fkbBtn('⌫', () => fkbKey(AK.bksp), { grow: 1.4, repeat: 1, title: 'Backspace' })),
     kr('', fkbBtn(abc ? '?123' : 'abc', () => { fkb.layer = abc ? 'sym1' : 'abc'; renderFkb(); }, { grow: 1.4 }),
-      fkbBtn('🌐', nextInputMethod, { title: 'Next input method' }),
       latch('ctrl', 'ctrl', 'Ctrl, for the next key'),
       ...(docked ? [latch('alt', mac ? '⌥' : 'alt', mac ? 'Option, for the next key' : 'Alt, for the next key'),
         latch('meta', mac ? '⌘' : win ? 'win' : '❖', mac ? 'Command, for the next key' : win ? 'Windows key, for the next key' : 'Super, for the next key')] : []),
-      fkbBtn('␣', () => fkbChar(' '), { grow: docked ? 2.6 : 3.6, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
+      fkbBtn('␣', () => fkbChar(' '), { grow: docked ? 3 : 4, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
       fkbBtn('↵', () => fkbKey(AK.enter), { grow: 1.4, title: 'Enter' })));
 }
 function placeFkb(x, y) {

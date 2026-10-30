@@ -278,6 +278,9 @@ async def trackpad(browser, http_port, probe, logs):
     ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keysym"] == "space", 3)
     out["globe"] = ev and {"state": ev["state"]}
     ok["globe_super_space"] = bool(ev and ev["state"] & 0x40)
+    gb = await page.locator("#tpadKeys .k", has_text=re.compile("^🌐$")).first.bounding_box()
+    eb = await page.locator("#tpadKeys .k", has_text=re.compile("^esc$")).first.bounding_box()
+    ok["globe_top_row"] = abs(gb["y"] - eb["y"]) < 1
     await page.locator("#tpKb").tap()
     await page.wait_for_selector("#tpadSurface:not([hidden])")
     # ⌄: the panel folds to a button; the pointer and the picture stay where they are
