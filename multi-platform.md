@@ -560,6 +560,10 @@ codec = auto                 ; auto | h264 | h265
 preset = 1080p               ; 720p | 1080p | native
 max_fps = 60
 max_bitrate_kbps = 20000
+mf_timing = real            ; Windows: real (each frame stands for the time since the last; Microsoft's
+                             ; CPU encoder's default) | fixed (the frame rate's; a GPU encoder's default)
+mf_max_fps = 30              ; Windows: the frame rate the encoder budgets the bitrate for, at most
+                             ; (30 for the CPU encoder by default, none for a GPU's)
 
 [files]
 upload_dir = ~/Downloads/RemoDroid
