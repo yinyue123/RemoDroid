@@ -272,6 +272,12 @@ async def trackpad(browser, http_port, probe, logs):
         if ev:
             got.append(ev["keysym"])
     ok["keyboard_types"] = got == ["a", "b"]
+    # 🌐: the next input method, with the computer's shortcut (Linux: Super+Space)
+    probe.drain()
+    await page.locator("#tpadKeys .k", has_text=re.compile("^🌐$")).first.tap()
+    ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keysym"] == "space", 3)
+    out["globe"] = ev and {"state": ev["state"]}
+    ok["globe_super_space"] = bool(ev and ev["state"] & 0x40)
     await page.locator("#tpKb").tap()
     await page.wait_for_selector("#tpadSurface:not([hidden])")
     # ⌄: the panel folds to a button; the pointer and the picture stay where they are

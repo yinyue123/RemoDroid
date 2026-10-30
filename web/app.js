@@ -1331,7 +1331,15 @@ $('#kbText').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preve
  * key codes, desktop/core/keymap.c). Shift and Ctrl are one-shot: Ctrl then c is Ctrl+C. ⌫ and the
  * arrows repeat while held. Drag it by its grip; the spot is remembered per browser. */
 const FKB = { abc: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'], sym1: ['1234567890', '-/:;()$&@"', '.,?!\''], sym2: ['[]{}#%^*+=', '_\\|~<>`"\':', '.,?!\''] };
-const AK = { esc: 111, tab: 61, enter: 66, bksp: 67, up: 19, down: 20, left: 21, right: 22, ctrl: 113, shift: 59, alt: 57, meta: 117 };
+const AK = { esc: 111, tab: 61, enter: 66, bksp: 67, up: 19, down: 20, left: 21, right: 22, ctrl: 113, shift: 59, alt: 57, meta: 117, space: 62 };
+/* 🌐: the computer's next input method (keyboard layout or IME), with its own shortcut, as the iPhone's
+ * globe key does: Win+Space on Windows, Ctrl+Space on macOS, Super+Space on Linux (GNOME's) */
+function nextInputMethod() {
+  const mod = st.device && st.device.platform === 'macos' ? AK.ctrl : AK.meta;
+  fkbSend('key', { action: 'down', code: mod });
+  fkbSend('key', { action: 'press', code: AK.space });
+  fkbSend('key', { action: 'up', code: mod });
+}
 /* the key a character sits on, for Ctrl+character */
 function charKey(ch) {
   const c = ch.toLowerCase();
@@ -1410,10 +1418,11 @@ function renderFkb() {
       : fkbBtn(fkb.layer === 'sym1' ? '#+=' : '123', () => { fkb.layer = fkb.layer === 'sym1' ? 'sym2' : 'sym1'; renderFkb(); }, { grow: 1.4 }),
       ...chars(rows[2]), fkbBtn('⌫', () => fkbKey(AK.bksp), { grow: 1.4, repeat: 1, title: 'Backspace' })),
     kr('', fkbBtn(abc ? '?123' : 'abc', () => { fkb.layer = abc ? 'sym1' : 'abc'; renderFkb(); }, { grow: 1.4 }),
+      fkbBtn('🌐', nextInputMethod, { title: 'Next input method' }),
       latch('ctrl', 'ctrl', 'Ctrl, for the next key'),
       ...(docked ? [latch('alt', mac ? '⌥' : 'alt', mac ? 'Option, for the next key' : 'Alt, for the next key'),
         latch('meta', mac ? '⌘' : win ? 'win' : '❖', mac ? 'Command, for the next key' : win ? 'Windows key, for the next key' : 'Super, for the next key')] : []),
-      fkbBtn('␣', () => fkbChar(' '), { grow: docked ? 3 : 4, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
+      fkbBtn('␣', () => fkbChar(' '), { grow: docked ? 2.6 : 3.6, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
       fkbBtn('↵', () => fkbKey(AK.enter), { grow: 1.4, title: 'Enter' })));
 }
 function placeFkb(x, y) {

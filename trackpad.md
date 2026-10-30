@@ -73,7 +73,7 @@ Keyboard open (the same panel, switched; the same size and the same header, with
 │ q w e r t y u i o p          │
 │  a s d f g h j k l           │
 │ ⇧ z x c v b n m ⌫            │
-│ 123 ctrl alt ⌘  ␣   ↵        │
+│ 123 🌐 ctrl alt ⌘  ␣   ↵     │  ← 🌐 = the computer's next input method
 └──────────────────────────────┘
 ```
 
@@ -280,6 +280,9 @@ click sound. The keys go over the ctrl channel as `text` and `key`, as they do n
   needs them (Alt+Tab, ⌘Tab, Win key menus). They are sent the same way as `ctrl` (Android key codes
   that `desktop/core/keymap.c` maps: `KEYCODE_ALT_LEFT` 57, `KEYCODE_META_LEFT` 117).
 - The **⋯** key in the top row opens the existing Keys sheet (F-keys and combinations).
+- **🌐**, next to 123 as on the iPhone's keyboard, switches the computer to its next input method
+  (keyboard layout or IME, such as Chinese ↔ English) with the computer's own shortcut: Win+Space on
+  Windows, Ctrl+Space on macOS, Super+Space on Linux (GNOME's). The floating keyboard has it too.
 
 In trackpad mode the docked panel replaces the floating keyboard: the **Keyboard** item in the menu
 opens the panel in its keyboard state. The floating keyboard stays for the Direct mode (§8) and for an
