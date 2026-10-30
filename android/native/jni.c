@@ -181,7 +181,7 @@ static void n_set_direct(JNIEnv *env, jclass cls, jboolean direct) { rd_rtc_set_
 
 static jstring n_stats(JNIEnv *env, jclass cls)
 {
-    char buf[512];
+    char buf[1024];
     rd_rtc_stats(buf, sizeof buf);
     return (*env)->NewStringUTF(env, buf);
 }

@@ -36,7 +36,7 @@ static struct {
     ev_timer stats_timer;
     cmd_t *head, *tail;
     size_t queued_video;
-    char stats[512];
+    char stats[1024];
     size_t dc_buffered;
     rtc_opts_t opts;
     char listen[128];
@@ -83,15 +83,16 @@ static void on_stats(struct ev_loop *loop, ev_timer *w, int revents)
 {
     rtc_stats_t s;
     rtc_get_stats(H.rtc, &s);
-    char buf[512];
+    char buf[1024];
     snprintf(buf, sizeof buf,
              "{\"connected\":%s,\"target_kbps\":%d,\"acked_kbps\":%d,\"rtt_ms\":%d,\"loss_pct\":%.1f,"
              "\"packets\":%llu,\"bytes\":%llu,\"retransmits\":%llu,\"nacks\":%llu,\"plis\":%llu,"
-             "\"local\":\"%s\",\"remote\":\"%s\",\"cc\":\"%s\",\"audio_packets\":%llu}",
+             "\"local\":\"%s\",\"remote\":\"%s\",\"cc\":\"%s\",\"audio_packets\":%llu,"
+             "\"local_addr\":\"%s\",\"mapped_addr\":\"%s\",\"relay_addr\":\"%s\",\"remote_addr\":\"%s\"}",
              s.connected ? "true" : "false", s.target_kbps, s.acked_kbps, s.rtt_ms, s.loss * 100,
              (unsigned long long)s.packets, (unsigned long long)s.bytes, (unsigned long long)s.retransmits,
              (unsigned long long)s.nacks, (unsigned long long)s.plis, s.local_type, s.remote_type, s.cc_state,
-             (unsigned long long)s.audio_packets);
+             (unsigned long long)s.audio_packets, s.local_addr, s.mapped_addr, s.relay_addr, s.remote_addr);
     size_t buffered = rtc_dc_buffered(H.rtc);
     rd_mutex_lock(&H.mu);
     memcpy(H.stats, buf, sizeof buf);

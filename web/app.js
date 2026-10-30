@@ -796,16 +796,18 @@ function drawTouches(c, W, H, u, t) {
 /* ================= HUD ================= */
 /* The path the media takes, from the selected ICE candidate pair, as addresses:
  *   from   this device's own address:port, and (NAT …) the public one the internet sees it as
- *   relay  a TURN server's address:port forwarding the packets, when one does
- *   to     the far end's address:port (the computer's, or the relay's that stands for it)
+ *   relay  a TURN server's address:port forwarding the packets, when one does (ours, theirs)
+ *   to     the far end's own address:port, and its public one
  * Candidate types: host = an address on the device itself, srflx/prflx = the public address a NAT
- * maps it to (found through STUN, or from the first packets), relay = an address on a TURN server. */
+ * maps it to (found through STUN, or from the first packets), relay = an address on a TURN server.
+ * The browser hides its own addresses and those it learnt from packets; the far end's own view of the
+ * pair (stats.route: local, mapped, relay, and peer, where our packets come from) fills them in. */
 const hostPort = (a, p) => { /* addresses come from the far end's offer: nothing but an address */
   if (!a) return '?';
   a = String(a).replace(/[^0-9A-Za-z.:_-]/g, '');
   return (a.includes(':') ? `[${a}]` : a) + (p ? ':' + (p | 0) : '');
 };
-function rtcRoute(rep) {
+function rtcRoute(rep, ag) {
   let pair = null;
   rep.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = rep.get(r.selectedCandidatePairId); });
   if (!pair) rep.forEach(r => { if (!pair && r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
@@ -819,15 +821,23 @@ function rtcRoute(rep) {
   const known = a => a && a !== '0.0.0.0' && a !== '::';
   const own = known(l.relatedAddress) ? hostPort(l.relatedAddress, l.relatedPort) : `this device${l.relatedPort ? ', port ' + (l.relatedPort | 0) : ''}`;
   const mine = known(l.address) ? hostPort(l.address, l.port) : `this device${l.port ? ', port ' + (l.port | 0) : ''}`;
-  let from, relay = '', to = hostPort(r.address, r.port);
+  const clean = a => a ? String(a).replace(/[^0-9A-Za-z.:_\[\]-]/g, '') : '';
+  ag = ag || {};
+  const peer = clean(ag.peer), aLocal = clean(ag.local), aMapped = clean(ag.mapped), aRelay = clean(ag.relay);
+  let from, relay = [], to = hostPort(r.address, r.port);
   if (l.candidateType === 'relay') { /* we send to our TURN server, which sends on from its address */
     from = own;
-    relay = mine + ' (ours)';
-  } else {
-    from = l.candidateType === 'host' ? mine : `${own} (NAT ${mine})`;
+    relay.push(mine + ' (ours)');
+  } else if (l.candidateType === 'host') {
+    from = mine;
+  } else { /* through our NAT: the far end sees the public address:port our packets come from */
+    from = `${own} (NAT ${peer || mine})`;
   }
-  if (r.candidateType === 'relay') { relay = relay ? relay + ', ' + to + ' (theirs)' : to + ' (theirs)'; to = `the ${noun()}, behind it`; }
-  return { mode, proto, from, relay, to };
+  if (aRelay) relay.push(aRelay + ' (theirs)');
+  else if (r.candidateType === 'relay') relay.push(to + ' (theirs)');
+  if (aLocal) to = aMapped && aMapped !== aLocal ? `${aLocal} (NAT ${aMapped})` : aLocal;
+  else if (r.candidateType === 'relay') to = `the ${noun()}, behind it`;
+  return { mode, proto, from, relay: relay.join(', '), to };
 }
 let prevBytes = 0, prevT = 0;
 async function tickStats() {
@@ -849,7 +859,7 @@ async function tickStats() {
         if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded' && r.currentRoundTripTime != null)
           st.localStats.rtt = Math.round(r.currentRoundTripTime * 1000);
       });
-      st.localStats.route = rtcRoute(rep);
+      st.localStats.route = rtcRoute(rep, st.phoneStats && st.phoneStats.route);
     } catch (_) {}
   }
   const hud = $('#hud');

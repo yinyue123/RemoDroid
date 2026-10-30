@@ -173,6 +173,27 @@ static int send_path(ice_t *ice, int path, const struct sockaddr_storage *to, co
 
 /* ---------------- candidates ---------------- */
 
+void ice_selected_addrs(const ice_t *ice, char *host, char *mapped, char *relay, char *remote, size_t cap)
+{
+    host[0] = mapped[0] = relay[0] = remote[0] = 0;
+    if (ice->selected < 0)
+        return;
+    const pair_t *p = &ice->pairs[ice->selected];
+    const struct sockaddr_storage *ra = &ice->remote[p->remote].addr;
+    addr_str(ra, remote, cap);
+    for (int i = 0; i < ice->nlocal; i++) {
+        const lcand_t *c = &ice->local[i];
+        if (c->addr.ss_family != ra->ss_family && c->type != C_RELAY)
+            continue;
+        if (c->type == C_HOST && !host[0])
+            addr_str(&c->addr, host, cap);
+        else if (c->type == C_SRFLX && !mapped[0])
+            addr_str(&c->addr, mapped, cap);
+        else if (c->type == C_RELAY && p->path == PATH_RELAY && !relay[0])
+            addr_str(&c->addr, relay, cap);
+    }
+}
+
 static uint32_t cand_prio(int type, int local_pref) { return (uint32_t)TYPE_PREF[type] << 24 | (uint32_t)local_pref << 8 | 255; }
 
 static uint32_t foundation(const lcand_t *c)

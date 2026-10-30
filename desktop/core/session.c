@@ -584,7 +584,7 @@ void session_tick(void)
     if (!S.active || !S.ctrl_open)
         return;
     check_clipboard();
-    char st[512];
+    char st[1024];
     rd_rtc_stats(st, sizeof st);
     cJSON *s = cJSON_Parse(st);
     int w, h;
@@ -602,6 +602,13 @@ void session_tick(void)
     cJSON_AddNumberToObject(d, "width", w);
     cJSON_AddNumberToObject(d, "height", h);
     cJSON_AddStringToObject(d, "path", !strcmp(msg_str(s, "local", ""), "relay") ? "relay" : "direct");
+    /* the connection as this end sees it: its own address, the public one its NAT maps that to, its TURN
+     * allocation when it sends through one, and where the viewer's packets come from */
+    cJSON *rt = cJSON_AddObjectToObject(d, "route");
+    cJSON_AddStringToObject(rt, "local", msg_str(s, "local_addr", ""));
+    cJSON_AddStringToObject(rt, "mapped", msg_str(s, "mapped_addr", ""));
+    cJSON_AddStringToObject(rt, "relay", msg_str(s, "relay_addr", ""));
+    cJSON_AddStringToObject(rt, "peer", msg_str(s, "remote_addr", ""));
     cJSON_AddStringToObject(d, "panel", "on");
     cJSON_AddNumberToObject(d, "inputs", input_events());
     cJSON_AddBoolToObject(d, "audio", audio_running());

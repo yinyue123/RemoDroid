@@ -588,6 +588,7 @@ void rtc_get_stats(rtc_t *r, rtc_stats_t *st)
     st->audio_packets = s->audio_packets;
     int rtt = 0;
     ice_selected(s->ice, &st->local_type, &st->remote_type, &rtt);
+    ice_selected_addrs(s->ice, st->local_addr, st->mapped_addr, st->relay_addr, st->remote_addr, sizeof st->local_addr);
     st->rtt_ms = rtt;
     if (s->rtp) {
         rtp_stats_t rs;

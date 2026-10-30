@@ -46,6 +46,7 @@ typedef struct {
     uint64_t packets, bytes, retransmits, nacks, plis, audio_packets;
     const char *local_type, *remote_type; /* "host"/"relay", "srflx"/"prflx"/… */
     const char *cc_state;
+    char local_addr[64], mapped_addr[64], relay_addr[64], remote_addr[64]; /* ice_selected_addrs() */
 } rtc_stats_t;
 
 int    rtc_global_init(void);
