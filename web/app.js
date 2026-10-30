@@ -2467,7 +2467,7 @@ function renderTab(id) {
 
   if (id === 'stream') {
     add(group('Quality',
-      segRow('mode', 'Quality mode', [['auto', 'Auto'], ['manual', 'Manual']], 'Auto adapts bitrate and resolution to the network.'),
+      segRow('mode', 'Quality mode', [['auto', 'Auto'], ['manual', 'Manual']], 'Auto adapts the bitrate to the network, up to the max. Manual keeps the bitrate you set, and on a congested network eases it to half of it at most.'),
       desk() ? segRow('deskPreset', 'Resolution', [['native', 'Native'], '1080p', '720p', '540p'], 'Native keeps text sharp; a lower one saves bandwidth. Changing it restarts the encoder for about 0.2 s.')
         : segRow('preset', 'Resolution', ['1080p', '720p', '540p', '360p'], 'Changing it restarts the encoder for about 0.2 s.'),
       segRow('fps', 'Frame rate', [[30, '30'], [60, '60'], [90, '90'], [120, '120']]),

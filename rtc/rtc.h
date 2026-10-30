@@ -66,6 +66,10 @@ int    rtc_audio(rtc_t *r, const uint8_t *opus, size_t n, int64_t pts_us);
 void   rtc_end_session(rtc_t *r, const char *reason);
 void   rtc_get_stats(rtc_t *r, rtc_stats_t *s);
 void   rtc_set_max_kbps(rtc_t *r, int max_kbps);
+void   rtc_set_min_kbps(rtc_t *r, int min_kbps);   /* <= 0: the default, 300 */
+/* The bandwidth estimate starts over from kbps (<= 0: the default, 2500), which is also what an idle
+ * sender keeps it at. */
+void   rtc_set_estimate(rtc_t *r, int kbps);
 void   rtc_set_direct(rtc_t *r, int direct);
 
 #endif

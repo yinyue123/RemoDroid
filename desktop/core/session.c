@@ -91,13 +91,20 @@ static void start_video(void)
         LOGE("session: cannot start video");
 }
 
-static void apply_max_kbps(void)
+/* The network's estimate, which the encoder follows, between limits: auto, from 300 kbps up to the max
+ * bitrate; manual, the bitrate set, easing down to half of it at most when the path is congested (and
+ * kept at it while the screen is idle). restart: the estimate starts over (manual: from the bitrate set). */
+static void apply_limits(int restart)
 {
     int max_kbps = (int)desk_conf_int("video", "max_bitrate_kbps", 20000);
-    int want = (int)msg_num(S.quality, "kbps", max_kbps);
+    int want = RD_MIN((int)msg_num(S.quality, "kbps", max_kbps), max_kbps);
     rtc_t *r = rd_rtc_stack();
-    if (r)
-        rtc_set_max_kbps(r, RD_MIN(want, max_kbps));
+    if (!r)
+        return;
+    rtc_set_max_kbps(r, want);
+    rtc_set_min_kbps(r, manual() ? want / 2 : 0);
+    if (restart)
+        rtc_set_estimate(r, manual() ? want : 0);
 }
 
 static cJSON *screen_json(const dsk_screen_t *s)
@@ -166,7 +173,7 @@ void session_connected(const char *sid, const char *codec, const char *profile, 
     dsk_session(1);
     dsk_screen_power(1); /* a display that went to sleep gives the capture no frames: the viewer would see black */
     desk_refresh_screens();
-    apply_max_kbps();
+    apply_limits(1);
     start_video();
     S.audio_ok = audio;
     session_audio_update();
@@ -195,9 +202,8 @@ void session_keyframe(void) { video_keyframe(); }
 
 void session_bitrate(int kbps)
 {
-    S.target_kbps = kbps;
-    if (!manual())
-        video_bitrate(kbps);
+    S.target_kbps = kbps; /* within the limits of apply_limits(), so manual too */
+    video_bitrate(kbps);
 }
 
 void session_channel_open(const char *label)
@@ -388,12 +394,14 @@ static void control(cJSON *m)
         const char *old_preset = preset();
         char op[16];
         snprintf(op, sizeof op, "%s", old_preset);
-        int old_fps = (int)msg_num(S.quality, "fps", 0);
+        int old_fps = (int)msg_num(S.quality, "fps", 0), was_manual = manual();
+        int old_kbps = (int)msg_num(S.quality, "kbps", 0);
         cJSON_Delete(S.quality);
         S.quality = cJSON_Duplicate(d, 1);
         if (strcmp(msg_str(d, "codec", "auto"), "auto") && strcmp(msg_str(d, "codec", ""), S.codec))
             error(m, "unsupported", "the codec changes on the next connection");
-        apply_max_kbps();
+        /* a new manual bitrate, or a change of mode, starts the estimate over */
+        apply_limits(manual() != was_manual || (manual() && (int)msg_num(d, "kbps", 0) != old_kbps));
         if (manual())
             video_bitrate(RD_MIN((int)msg_num(d, "kbps", 4000), (int)desk_conf_int("video", "max_bitrate_kbps", 20000)));
         if (strcmp(preset(), op) || (int)msg_num(d, "fps", old_fps) != old_fps)

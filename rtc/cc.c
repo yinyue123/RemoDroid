@@ -63,6 +63,12 @@ void cc_set_limits(cc_t *c, int min_kbps, int max_kbps)
     c->max_bps = max_kbps * 1000.;
 }
 
+void cc_set_start(cc_t *c, int kbps)
+{
+    c->start_bps = c->delay_bps = c->loss_bps = kbps * 1000.;
+    c->last_decrease_bps = c->last_congestion = 0;
+}
+
 void cc_on_sent(cc_t *c, uint16_t seq, size_t bytes, double now)
 {
     pkt_t *p = &c->hist[seq % HIST];

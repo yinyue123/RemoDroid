@@ -16,6 +16,9 @@
 #include "sdp.h"
 #include "srtp.h"
 
+#define DEF_MIN_KBPS 300    /* the bandwidth estimate's floor */
+#define DEF_START_KBPS 2500 /* where it starts, and where an idle sender keeps it */
+
 typedef struct session {
     struct rtc *r;
     char sid[64];
@@ -477,8 +480,8 @@ rtc_t *rtc_new(struct ev_loop *loop, const rtc_opts_t *o, rtc_cb_t cb, void *ud)
     rtc_t *r = calloc(1, sizeof *r);
     r->loop = loop;
     r->o = *o;
-    if (!r->o.min_kbps) r->o.min_kbps = 300;
-    if (!r->o.start_kbps) r->o.start_kbps = 2500;
+    if (!r->o.min_kbps) r->o.min_kbps = DEF_MIN_KBPS;
+    if (!r->o.start_kbps) r->o.start_kbps = DEF_START_KBPS;
     if (!r->o.max_kbps) r->o.max_kbps = 20000;
     r->cb = cb;
     r->ud = ud;
@@ -610,6 +613,20 @@ void rtc_set_max_kbps(rtc_t *r, int max_kbps)
     r->o.max_kbps = max_kbps;
     if (r->s && r->s->cc)
         cc_set_limits(r->s->cc, r->o.min_kbps, max_kbps);
+}
+
+void rtc_set_min_kbps(rtc_t *r, int min_kbps)
+{
+    r->o.min_kbps = min_kbps > 0 ? min_kbps : DEF_MIN_KBPS;
+    if (r->s && r->s->cc)
+        cc_set_limits(r->s->cc, r->o.min_kbps, r->o.max_kbps);
+}
+
+void rtc_set_estimate(rtc_t *r, int kbps)
+{
+    r->o.start_kbps = kbps > 0 ? kbps : DEF_START_KBPS;
+    if (r->s && r->s->cc)
+        cc_set_start(r->s->cc, r->o.start_kbps);
 }
 
 void rtc_set_direct(rtc_t *r, int direct) { net_set_direct(r->net, direct); }
