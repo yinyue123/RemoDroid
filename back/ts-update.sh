@@ -227,7 +227,7 @@ rm -f "$F"
 cat > /tmp/rd-win.ps1 <<PS
 \$ErrorActionPreference = 'Stop'
 Stop-ScheduledTask RemoDroid -ErrorAction SilentlyContinue
-Get-Process RemoDroid, remodroid-desktopd, remodroid-input -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process RemoDroid, remodroid-desktopd -ErrorAction SilentlyContinue | Stop-Process -Force  # not remodroid-input: the RemoDroidInput service
 Start-Sleep 1
 Expand-Archive -Force -Path '$D.zip' -DestinationPath '$D'
 Remove-Item '$D.zip'
