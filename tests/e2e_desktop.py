@@ -288,6 +288,62 @@ async def trackpad(browser, http_port, probe, logs):
     out["pointer_px"].append(await page.evaluate(off_yellow))
     ok["pointer_hidden"] = out["pointer_px"][0] == 0 and out["pointer_px"][1] > 5
     ok["direct_off"] = await page.locator("#tpad").is_hidden() and await page.locator("#tpCursor").is_hidden()
+    # the menu's Trackpad switch: on (lit), and off again
+    await page.locator("#ball").tap()
+    await page.locator("#menuTrackpad").tap()
+    await page.wait_for_timeout(500)
+    lit = await page.evaluate("() => document.querySelector('#menuTrackpad').classList.contains('on')")
+    on = await page.locator("#tpad").is_visible() and lit
+    await page.locator("#ball").tap()
+    await page.locator("#menuTrackpad").tap()
+    await page.wait_for_timeout(500)
+    ok["menu_switch"] = on and await page.locator("#tpad").is_hidden()
+    await ctx.close()
+
+    # a desktop browser with a mouse: Auto leaves it off, the switch turns it on, and the mouse is a finger
+    await asyncio.sleep(1.5)
+    ctx = await browser.new_context(viewport={"width": 1000, "height": 700})
+    page = await ctx.new_page()
+    page.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
+    await page.goto(f"http://127.0.0.1:{http_port}/")
+    await page.fill("#user", "me")
+    await page.fill("#password", "pw")
+    await page.click("#go")
+    await page.wait_for_url(f"http://127.0.0.1:{http_port}/")
+    await page.wait_for_function(ready, timeout=30000)
+    await page.wait_for_timeout(800)
+    off = await page.locator("#tpad").is_hidden()
+    await page.locator("#ball").click()
+    await page.locator("#menuTrackpad").click()
+    await page.wait_for_selector("#tpad:not([hidden])")
+    await page.wait_for_timeout(800)
+    ok["mouse_switch_on"] = off and await page.locator("#tpCursor").is_visible()
+    b = await page.locator("#tpadSurface").bounding_box()
+    x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2 + 15
+
+    async def mclick(x, y, button="left", b=1):
+        probe.drain()
+        await page.mouse.click(x, y, button=button)
+        ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == b and e["down"] == 1)
+        return ev and (ev["x"], ev["y"])
+    m0 = await mclick(x, y)
+    ok["mouse_click_at_pointer"] = bool(m0 and abs(m0[0] - 640) <= 2 and abs(m0[1] - 360) <= 2)
+    await asyncio.sleep(0.4)  # not a tap-then-drag
+    await page.mouse.move(x - 30, y)
+    await page.mouse.down()
+    for k in range(1, 31):
+        await page.mouse.move(x - 30 + 2 * k, y)
+        await asyncio.sleep(0.08)  # 25 px/s, under the acceleration's 50; mouse events come in bursts
+    await page.mouse.up()
+    m1 = await mclick(x + 100, y - 20)
+    out["mouse"] = [m0, m1]
+    ok["mouse_move_60"] = bool(m0 and m1 and abs(m1[0] - m0[0] - 60) <= 3 and abs(m1[1] - m0[1]) <= 3)
+    await asyncio.sleep(0.4)
+    ok["mouse_right_click"] = await mclick(x - 100, y, button="right", b=3) == m1
+    probe.drain()
+    await page.mouse.wheel(0, 300)
+    ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == 5)
+    ok["mouse_wheel"] = bool(ev and abs(ev["x"] - m1[0]) <= 2 and abs(ev["y"] - m1[1]) <= 2)
     out["ok"] = ok
     await ctx.close()
     return out

@@ -309,8 +309,10 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   readable, and the picture slides under it. Tap to click, tap twice to double-click, tap then drag to drag,
   two-finger tap to right-click, scroll with two fingers, spread them to zoom; **⤢** shows the whole screen,
   **⌨** switches to a docked keyboard (its **▭** switches back), **⌄** folds it to a button, the grip on top
-  resizes it and **⚙** sets the speed ([`trackpad.md`](trackpad.md)). Settings → Stream → **Touch control: Direct**
-  taps where you touch instead (long-press to right-click), the default on an iPad. There, **Keyboard** opens a
+  resizes it and **⚙** sets the speed ([`trackpad.md`](trackpad.md)). The menu's **Trackpad** item switches it on
+  or off on any device, a desktop browser too (there the mouse is a finger on the pad: click to click at the
+  pointer, press and move to move it, the wheel scrolls, Ctrl + wheel zooms). Off, **Direct** taps where you
+  touch (long-press to right-click), the default on an iPad and with a mouse. There, **Keyboard** opens a
   floating on-screen keyboard (drag it by its grip; tap **ctrl** then **c** for Ctrl+C), its **⋯** sends text
   and shortcuts, and **Next screen** switches monitors.
 - **Games on a computer** (Linux, e.g. a Steam Deck in Desktop Mode): **Gamepad** puts touch controls over the

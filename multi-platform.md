@@ -482,7 +482,8 @@ On a desktop, 0x01 touch with pointer 0 maps to left-button down/move/up, which 
 
 `web/app.js` selects an input mode from `device.platform`. Phones are unchanged.
 
-**Desktop mode, mouse or trackpad viewer** (`pointerType === 'mouse'` or `'pen'`):
+**Desktop mode, mouse or trackpad viewer** (`pointerType === 'mouse'` or `'pen'`; with the menu's Trackpad
+switch on, a mouse drives [`trackpad.md`](trackpad.md)'s pad instead, as a finger):
 
 - `pointermove` sends 0x03 move, including hover with no button held, and is throttled to one per
   animation frame. `pointerdown`/`up` send 0x03 down/up with `e.button`. `contextmenu` is suppressed so
@@ -499,7 +500,7 @@ A viewer setting **"Mac ⌘ ↔ Ctrl"** (on by default when a Mac browser contro
 two modifiers' usages.
 
 **Touch viewer** (iPhone controlling a desktop): a phone gets the trackpad ([`trackpad.md`](trackpad.md)); with
-Settings → Stream → Touch control: Direct (an iPad's default): tap → left click, long press → right click, one-finger drag
+the menu's Trackpad switch off, or Settings → Stream → Touch control: Direct (an iPad's default): tap → left click, long press → right click, one-finger drag
 → left drag, two-finger drag → scroll. The existing keyboard sheet (`#kbText`) types through ctrl `text`. A
 new **Keys** sheet has Esc, Tab, Win/⌘, Ctrl+Alt+Del-style combos, F1–F12 and arrows, sent as 0x04
 sequences. Local pinch-zoom and pan of the picture come in M5.

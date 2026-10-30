@@ -1,7 +1,8 @@
 # RemoDroid Trackpad: design
 
 A Magic Trackpad for the web viewer, for a phone (an iPhone first) that controls a Windows, macOS or
-Linux computer. Status: **implemented** (tested end to end on Linux by `tests/e2e_desktop.py`; the
+Linux computer. It works the same in any browser, with a finger or a mouse, and a switch in the menu turns
+it on and off. Status: **implemented** (tested end to end on Linux by `tests/e2e_desktop.py`; the
 Windows and macOS capture changes are built by CI). Companion documents: [`multi-platform.md`](multi-platform.md) §9 (how
 the viewer drives a computer today), [`arch.md`](arch.md).
 
@@ -76,6 +77,11 @@ Keyboard open (the same panel, switched):
 
 Collapsed: the panel is gone and a small round button with a keyboard icon floats at the bottom
 corner. The picture uses the whole screen and the cursor moves to the middle of the whole screen.
+
+**The switch.** The menu (the ball) has a **Trackpad** item whenever the viewer shows a computer. It is
+lit while the trackpad is on; tapping it switches between the trackpad and Direct (tap where you touch,
+§8) at once, on any device, and the choice is remembered. It is the same item on a phone, an iPad and a
+desktop browser.
 
 ## 3. The cursor stays in the middle
 
@@ -167,7 +173,8 @@ Details that make it feel like an Apple trackpad rather than a touch screen:
 
 - **Movement is relative and accelerated.** A slow finger moves the cursor a little for precise work,
   a fast flick crosses the screen. The cursor's motion is `gain(v) · Δfinger`, with `v` the finger's
-  speed and `gain` a curve like macOS's: flat about 1.0 below 50 pt/s, rising to about 4 above
+  speed (from the events' own timestamps, so moves that queue up behind a busy page and arrive in a
+  burst don't count as a flick) and `gain` a curve like macOS's: flat about 1.0 below 50 pt/s, rising to about 4 above
   800 pt/s. It is in CSS pixels of the visible picture, so at any zoom the cursor moves over what you see
   at the speed your finger does; the **Move speed** setting (⚙, §8) scales it.
 - **Click without delay.** A tap is a tap if the finger lifts within 250 ms and moves less than 8 pt.
@@ -200,6 +207,16 @@ Details that make it feel like an Apple trackpad rather than a touch screen:
 
 The wheel message is unchanged (0x02, `sendScroll()`), sent at `(cx, cy)` so it scrolls whatever is under
 the cursor, as a real trackpad does.
+
+**With a mouse it is the same trackpad.** In a desktop browser, or with a mouse or pen attached to a
+phone or iPad, the pad and the picture take the pointer as a finger: pressing the left button is a
+finger touching down, moving with it held moves the cursor by how far the mouse moves, and releasing it
+lifts the finger. So a click is a tap (a click at the cursor, not where the mouse is), two clicks are a
+double click, and click-then-press-and-move drags. The right button is a two-finger tap (right click at
+the cursor) and the middle button a three-finger tap. Moving the mouse with no button down does nothing,
+as hovering over a trackpad does. The wheel scrolls at the cursor (with the wheel's own direction, so the
+natural-scrolling setting doesn't turn it round), and Ctrl + wheel, which is also what a Mac's
+trackpad pinch gives a browser, zooms the view (§4). A physical keyboard keeps typing through `onKey()`.
 
 ## 6. The bottom panel: trackpad, keyboard, collapsed
 
@@ -289,17 +306,17 @@ as far, at every finger speed, so the acceleration still feels the same, just fa
 the viewer's own, not the computer's: Windows' and macOS's own pointer speed don't apply, because the
 viewer sends absolute positions (§3).
 
-Settings → Stream, in the computers' part (`renderTab()`), gets one more row, because this one isn't
-reachable from the trackpad when it is off:
+The menu's **Trackpad** switch (§2) sets Touch control to Trackpad or Direct. Settings → Stream, in the
+computers' part (`renderTab()`), has the same choice with Auto as well:
 
 | Setting | Values | Default |
 |---|---|---|
 | Touch control | **Auto** / **Trackpad** / **Direct** (the touch-screen behaviour: tap where you touch) | Auto: Trackpad on a phone (a touch screen whose short side is under 500 pt), Direct on an iPad |
 
-A computer with a touch screen of its own (`caps.touch`, the remote browser's) keeps taking fingers as
-they are, and the trackpad steps aside while the on-screen gamepad is up. Only touch is affected. A mouse, a pen or a real trackpad attached to the phone or iPad (`pointerType`
-`mouse` / `pen`) keeps going through `deskPointer()` as it does now, and a physical keyboard keeps
-typing directly through `onKey()`.
+On Auto, a computer with a touch screen of its own (`caps.touch`, the remote browser's) keeps taking
+fingers as they are; Trackpad chosen by hand wins over that. The trackpad steps aside while the on-screen
+gamepad is up, and turning it on with the switch closes the gamepad. While it is on, a mouse or pen is a
+finger on it (§5); in Direct, a mouse is a mouse (`deskPointer()`) and a finger taps where it touches.
 
 Stored in the viewer's settings object `S` (`localStorage`, `save()`), like the other viewer settings:
 
@@ -342,7 +359,7 @@ too while a trackpad viewer is connected.
 |---|---|
 | `web/index.html` | `#tpad` (the docked panel: header with the grip, `#tpadSurface`, `#tpadKeys`), `#tpCursor` (the arrow), `#tpBall` (the collapsed button) |
 | `web/app.css` | the panel, its states and the 200 ms height transition, the grip, the cursor arrow with a white outline and shadow so it reads on any background, the round button; padding by `env(safe-area-inset-bottom)` |
-| `web/app.js` | the state `tp` next to `layout()`, which hands over to `tpRelayout()` while it is on; a section `computers: the trackpad` after the floating keyboard: `tpSync()` (on and off), `tpLayout()`, the gesture recogniser `tpTouch(type, e)` on `#stage` and `#tpadSurface` (the picture's own handlers let touches bubble to the stage), acceleration, momentum, `tpZoomTo()`, `tpWhole()` (⤢), `tpShow(state)`, the resize grip and the keyboard's side edges, the collapsed button, the ⚙ card (`tpSettings()`, with the `slider()` the gamepad's ⚙ now shares); `renderFkb()` draws the docked keyboard too, with ⋯ ▭ ⌄ and alt and ⌘ / Win; the menu's Keyboard item opens the docked keyboard; Settings → Stream gets Touch control |
+| `web/app.js` | the state `tp` next to `layout()`, which hands over to `tpRelayout()` while it is on; a section `computers: the trackpad` after the floating keyboard: `tpSync()` (on and off), `tpLayout()`, the gesture recogniser `tpTouch(type, e)` on `#stage` and `#tpadSurface` (the picture's own handlers let touches bubble to the stage), acceleration, momentum, `tpZoomTo()`, `tpWhole()` (⤢), `tpShow(state)`, the resize grip and the keyboard's side edges, the collapsed button, the ⚙ card (`tpSettings()`, with the `slider()` the gamepad's ⚙ now shares); `renderFkb()` draws the docked keyboard too, with ⋯ ▭ ⌄ and alt and ⌘ / Win; the menu's Keyboard item opens the docked keyboard and its Trackpad item (`#menuTrackpad`) is the switch; a mouse or pen goes through `tpTouch()` as a finger (`tpMouse()` for the right and middle buttons) and the wheel through `tpWheel()`; Settings → Stream gets Touch control |
 | `desktop/core/session.c`, `desktop/core/desk.h` | ctrl `cursor.show`, `caps.cursor_hide`, `dsk_capture_pointer()` |
 | `desktop/mac/capture.m`, `desktop/win/capture.c`, `desktop/linux/capture_x11.c` | `dsk_capture_pointer()` (§9) |
 | `multi-platform.md` §8, §9, `arch.md`, `README.md` | `cursor.show`; the touch viewer points here |
@@ -370,6 +387,10 @@ checks before it run with Touch control set to Direct.
 - a reload keeps the panel's height and the zoom
 - the X pointer is left out of the picture (no pixel around it off the quadrant's colour), and
   switching to Direct in Settings puts it back and hides the panel and the arrow
+- the menu's Trackpad switch turns it back on, lit, and off again
+- in a desktop context with a mouse (no touch screen, so Auto leaves it off), the switch turns it on; a
+  mouse click on the pad clicks at the pointer, a press-drag of 60 px moves it 60 px, the right button
+  right-clicks at the pointer, and the wheel scrolls
 
 **By hand** on a real iPhone (Safari and the Home Screen app, portrait and landscape) against the Windows
 11 VM and a Mac: reading small text, selecting a word by tap-and-drag, moving a window, scrolling a long
@@ -377,7 +398,7 @@ page with momentum, typing with the docked keyboard, and on the Mac, checking th
 
 ## 12. Milestones
 
-All four are done; the hand test on a real iPhone is still to do.
+All four are done, and the menu switch with mouse input after them; the hand test on a real iPhone is still to do.
 
 | | What | Done when |
 |---|---|---|
@@ -403,5 +424,5 @@ All four are done; the hand test on a real iPhone is still to do.
 - **Latency.** The cursor and the picture move locally, so pointing is instant; but what is under the
   cursor is a frame or two old, so a click right after a fast flick might land a few pixels off from
   what you saw. A click is sent with the position at the moment of the tap, which is what you aimed at.
-- **The iPad.** The same code works there, but with a big screen Direct is usually better, so it is
-  the default there; the setting lets you choose.
+- **The iPad and desktop browsers.** The same code works there, but with a big screen Direct is
+  usually better, so Auto picks it there; the menu's switch turns the trackpad on with one tap.

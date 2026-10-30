@@ -568,6 +568,7 @@ function sendScroll(x, y, dx, dy) {
   const c = st.ch.input; if (c && c.readyState === 'open') c.send(new Uint8Array(b));
 }
 stage.addEventListener('wheel', e => {
+  if (tp.on) { tpWheel(e); return; }
   e.preventDefault();
   const [x, y] = norm(e);
   sendScroll(x, y, wheelPx(e.deltaX, e.deltaMode), wheelPx(e.deltaY, e.deltaMode));
@@ -978,6 +979,8 @@ function syncMenuStates() {
   if (!dk && !fkb.el.hidden) hideFkb(); /* the floating keyboard and the gamepad are for computers */
   if (!dk && !gpad.hidden) hideGpad();
   menu.querySelector('[data-act="keys"]').classList.toggle('on', dk && (!fkb.el.hidden || (tp.on && tpPrefs().state === 'keyboard')));
+  $('#menuTrackpad').hidden = !dk;
+  $('#menuTrackpad').classList.toggle('on', dk && tp.on);
   $('#menuPad').hidden = !dk;
   $('#menuPad').classList.toggle('on', !gpad.hidden);
   const snd = $('#menuSound'), audible = S.sound && !video.muted;
@@ -1052,6 +1055,7 @@ menu.addEventListener('click', e => {
   if (a === 'keys' && desk() && tp.on) { closeMenu(); tpShow(tpPrefs().state === 'keyboard' ? 'trackpad' : 'keyboard'); }
   else if (a === 'keys' && desk()) { closeMenu(); fkb.el.hidden ? showFkb() : hideFkb(); }
   else if (a === 'gamepad') { closeMenu(); gpad.hidden ? showGpad() : hideGpad(); }
+  else if (a === 'trackpad') { closeMenu(); tpSwitch(); }
   else if (['photo', 'clip', 'settings', 'keys', 'turn'].includes(a)) { closeMenu(); openSheet(a); }
   else if (['back', 'home', 'recents'].includes(a)) { sendCtrl('nav', { button: a }).catch(() => toast('Not connected')); closeMenu(); }
   else if (a === 'screen') {
@@ -1413,12 +1417,21 @@ window.addEventListener('resize', () => { if (!fkb.el.hidden) placeFkb(fkb.pos.x
  * gestures as the pad. */
 const tpad = $('#tpad'), tpSurface = $('#tpadSurface'), tpKeys = $('#tpadKeys'), tpCur = $('#tpCursor'), tpBall = $('#tpBall');
 const TP_MAX = 4, TP_SLOP = 8, TP_TAP_MS = 250, TP_AGAIN_MS = 300, TP_GRIP = 16;
-const tpTake = e => tp.on && e.pointerType === 'touch';
+const tpTake = e => tp.on; /* a mouse or pen is a finger on it too (§5) */
 const phoneSized = () => (navigator.maxTouchPoints || 0) > 0 && Math.min(screen.width, screen.height) < 500;
 function tpWanted() {
   if (!desk() || !gpad.hidden) return false;
+  if (S.touchCtl !== 'auto') return S.touchCtl === 'trackpad';
   if (st.ready && st.ready.caps && st.ready.caps.touch > 0) return false; /* a touch screen there takes fingers as they are */
-  return S.touchCtl === 'trackpad' || (S.touchCtl !== 'direct' && phoneSized());
+  return phoneSized();
+}
+/* the menu's Trackpad item: on or off, whatever the device */
+function tpSwitch() {
+  const on = !tp.on;
+  S.touchCtl = on ? 'trackpad' : 'direct'; save();
+  if (on && !gpad.hidden) hideGpad(); /* which syncs too */
+  tpSync();
+  toast(on ? 'Trackpad' : 'Direct: tap where you touch');
 }
 /* the panel: its state, and its sizes per orientation (the trackpad's height as a fraction of the
  * screen, the keyboard's key height and, sideways, its width) */
@@ -1618,7 +1631,7 @@ function tpTouch(type, e) {
   if (type === 'down') {
     closeMenu(); tpMomStop();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
-    tp.pts.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t });
+    tp.pts.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t, ts: e.timeStamp });
     const g = tp.g, n = tp.pts.size;
     if (n === 1 || !g) {
       tp.g = { n: 1, t0: t, mode: null, lead: e.pointerId, far: 0, v: 0, cx0: tp.cx, cy0: tp.cy, el: e.currentTarget, again: t - tp.lastTap < TP_AGAIN_MS };
@@ -1631,8 +1644,10 @@ function tpTouch(type, e) {
   const p = tp.pts.get(e.pointerId), g = tp.g;
   if (!p || !g) return;
   if (type === 'move') {
-    const dx = e.clientX - p.x, dy = e.clientY - p.y, dt = Math.max(1, t - p.t);
-    p.x = e.clientX; p.y = e.clientY; p.t = t;
+    /* the speed by when the moves happened, not when they're handled: events that queue up behind a
+     * busy page come in a burst, and that mustn't look like a flick (8 ms: about a frame) */
+    const dx = e.clientX - p.x, dy = e.clientY - p.y, dt = Math.max(8, e.timeStamp - p.ts);
+    p.x = e.clientX; p.y = e.clientY; p.t = t; p.ts = e.timeStamp;
     if (g.n === 1) {
       if (e.pointerId !== g.lead) return;
       g.far = Math.max(g.far, Math.hypot(p.x - p.sx, p.y - p.sy));
@@ -1681,12 +1696,30 @@ function tpTouch(type, e) {
   if (g.mode === 'zoom') { const s = clamp(tp.scale, tpFit(), tpHi()); if (s !== tp.scale) tpZoomTo(s); }
   tpSaveSoon();
 }
+/* a mouse's right and middle buttons are a two- and a three-finger tap: a click at the pointer */
+function tpMouse(e) {
+  e.preventDefault(); closeMenu(); tpMomStop();
+  tpClick(e.button === 2 ? 2 : 1);
+}
+/* the wheel scrolls at the pointer, in its own direction; Ctrl + wheel (a Mac trackpad's pinch, too) zooms */
+function tpWheel(e) {
+  e.preventDefault(); tpMomStop();
+  const dx = wheelPx(e.deltaX, e.deltaMode), dy = wheelPx(e.deltaY, e.deltaMode);
+  if (!e.ctrlKey) { sendScroll(tp.cx, tp.cy, dx * S.tpScroll, dy * S.tpScroll); return; }
+  cancelAnimationFrame(tp.zoomRaf);
+  tp.scale = clamp(tp.scale * Math.exp(-dy / 200), tpFit(), tpHi()); tpLayout(); tpSaveSoon();
+}
 for (const el of [stage, tpSurface]) {
-  el.addEventListener('pointerdown', e => { if (tpTake(e) && !e.target.closest('button')) tpTouch('down', e); });
+  el.addEventListener('pointerdown', e => {
+    if (!tpTake(e) || e.target.closest('button')) return;
+    if (e.pointerType !== 'touch' && e.button > 0) tpMouse(e); else tpTouch('down', e);
+  });
+  el.addEventListener('contextmenu', e => { if (tp.on) e.preventDefault(); });
   el.addEventListener('pointermove', e => { if (tpTake(e)) tpTouch('move', e); });
   el.addEventListener('pointerup', e => { if (tpTake(e)) { tpTouch('up', e); unmute(); } });
   el.addEventListener('pointercancel', e => { if (tpTake(e)) tpTouch('cancel', e); });
 }
+tpSurface.addEventListener('wheel', e => { if (tp.on) tpWheel(e); }, { passive: false });
 
 /* ---- the panel: trackpad, keyboard, collapsed (§6) ---- */
 function tpShow(state, animate = true) {
