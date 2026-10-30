@@ -95,18 +95,23 @@ body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, 
   background:var(--surface);border-top:1px solid var(--line);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none;
   transition:height .2s ease}
 .tpad.held{transition:none}
-.tpad .grip{flex:none;height:16px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;touch-action:none}
-.tpad .grip i{width:44px;height:5px;border-radius:3px;background:var(--line)}
-.tpad .grip.on i{background:var(--accent)}
-.tpad .surface{position:relative;flex:1;min-height:0;margin:0 10px 10px;border-radius:14px;background:var(--surface-2);
-  box-shadow:inset 0 0 0 1px var(--line);touch-action:none}
-.tpad .bar{position:absolute;left:4px;right:4px;top:4px;display:flex;gap:2px;pointer-events:none}
-.tpad .bar .sp{flex:1}
-.tpad .bar button{pointer-events:auto;width:40px;height:34px;border:0;border-radius:9px;background:transparent;color:var(--muted);font-size:18px;
+/* the header, the same in both states: ⠿⠿ ⚙ ⤢ … ⋯ and the switch and ⌄ in the right corner; dragged, it resizes
+ * the docked panel or moves the floating one */
+.tpad>header{flex:none;height:36px;box-sizing:border-box;display:flex;align-items:center;gap:2px;padding:0 4px 0 10px;background:var(--surface-2);
+  border-bottom:1px solid var(--line);cursor:ns-resize;touch-action:none;user-select:none;-webkit-user-select:none}
+.tpad.float>header{cursor:grab}
+.tpad>header.on{background:var(--surface-3)}
+.tpad>header .grip{font-size:12px;letter-spacing:2px;color:var(--muted);margin-right:4px}
+.tpad>header .ttl{flex:1;text-align:center;font-size:12px;color:var(--muted)}
+.tpad>header button{flex:none;width:38px;height:32px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:17px;
   display:flex;align-items:center;justify-content:center;touch-action:manipulation}
-.tpad .bar button:active,.tpad .bar button.on{color:var(--accent)}
+.tpad>header button:active,.tpad>header button.on{color:var(--accent)}
+.tpad #tpKb .to-pad,.tpad.kb #tpKb .to-kb{display:none}
+.tpad.kb #tpKb .to-pad{display:block}
+.tpad .surface{position:relative;flex:1;min-height:0;margin:8px 10px 10px;border-radius:14px;background:var(--surface-2);
+  box-shadow:inset 0 0 0 1px var(--line);touch-action:none}
 .tpad svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.tpad .keys{position:relative;flex:1;min-height:0;width:100%;max-width:var(--kw,none);margin:0 auto;display:flex;flex-direction:column;gap:5px;padding:0 6px 6px}
+.tpad .keys{position:relative;flex:1;min-height:0;width:100%;max-width:var(--kw,none);margin:0 auto;display:flex;flex-direction:column;gap:5px;padding:6px 6px 6px}
 .tpad .keys .kr{display:flex;gap:5px}
 .tpad .keys .kr.inset{padding:0 4.5%}
 .tpad .keys .k{flex:1 1 0;min-width:0;height:var(--kh,46px);padding:0;border:1px solid var(--line);border-radius:7px;background:var(--surface-3);color:var(--text);
@@ -119,6 +124,9 @@ body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, 
 .tpad .edge.r{right:0}
 .tpad:not(.land) .edge{display:none}
 .tpad.land .keys{padding-left:18px;padding-right:18px}
+/* an iPad or a desktop: a card floating over the picture, like the floating keyboard */
+.tpad.float{top:0;right:auto;bottom:auto;width:min(560px,96vw);border:1px solid var(--line);border-radius:14px;overflow:hidden;padding-bottom:0;
+  box-shadow:0 10px 34px rgba(0,0,0,.35)}
 #tpCursor{position:fixed;z-index:26;left:0;top:0;width:24px;height:24px;pointer-events:none;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.55))}
 #tpCursor svg{display:block;width:24px;height:24px}
 #tpBall{position:fixed;z-index:27;width:46px;height:46px;border-radius:50%;border:1px solid var(--line);padding:0;background:var(--glass);color:var(--text);

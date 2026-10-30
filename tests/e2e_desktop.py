@@ -227,9 +227,14 @@ async def trackpad(browser, http_port, probe, logs):
     await page.locator("#tpFit").tap()
     await page.wait_for_timeout(500)
     ok["whole_and_back"] = abs(await scale() - 4) < 0.01
-    # ⌨ types; ▭ brings the trackpad back
+    # ⌨ types; the same key, in the same spot (now ▭), brings the trackpad back; the panel keeps its size
+    sw, ph = await box("#tpKb"), (await box("#tpad"))["height"]
     await page.locator("#tpKb").tap()
     await page.wait_for_selector("#tpadKeys:not([hidden])")
+    await page.wait_for_timeout(300)
+    sw2, ph2 = await box("#tpKb"), (await box("#tpad"))["height"]
+    ok["switch_same_spot"] = sw == sw2 and sw["x"] > 390 - 3 * 40  # in the right corner
+    ok["same_size"] = abs(ph - ph2) <= 1
     probe.drain()
     for label in ("a", "b"):
         await page.locator("#tpadKeys .k", has_text=re.compile("^" + label + "$")).first.tap()
@@ -240,7 +245,7 @@ async def trackpad(browser, http_port, probe, logs):
         if ev:
             got.append(ev["keysym"])
     ok["keyboard_types"] = got == ["a", "b"]
-    await page.locator("#tpadKeys .k", has_text=re.compile("^▭$")).tap()
+    await page.locator("#tpKb").tap()
     await page.wait_for_selector("#tpadSurface:not([hidden])")
     # ⌄: the panel folds to a button, the pointer moves to the middle of the screen with the picture
     await page.locator("#tpHide").tap()
@@ -254,24 +259,25 @@ async def trackpad(browser, http_port, probe, logs):
     await page.wait_for_selector("#tpad:not([hidden])")
     await page.wait_for_timeout(400)  # it grows back from nothing
     ok["ball_restores"] = await page.locator("#tpadSurface").is_visible()
-    # the grip: up as far as it goes stops at 55% of the screen; down, at 120 px
+    # the header resizes both (the keys' height): up as far as it goes stops at 58 px keys, down at 34 px
+    # (the header, 5 rows, the gaps and margins: 36 + 5 × key + 32)
     await page.wait_for_timeout(400)
     g = await box("#tpGrip")
-    await drag(g["x"] + g["width"] / 2, g["y"] + 8, 0, -450, steps=20, ms=20)
+    await drag(g["x"] + g["width"] / 2, g["y"] + 18, 0, -450, steps=20, ms=20)
     await page.wait_for_timeout(400)
     hi = (await box("#tpad"))["height"]
-    await drag(g["x"] + g["width"] / 2, 844 - hi + 8, 0, 400, steps=20, ms=20)
+    await drag(g["x"] + g["width"] / 2, 844 - hi + 18, 0, 400, steps=20, ms=20)
     await page.wait_for_timeout(400)
     lo = (await box("#tpad"))["height"]
     out["grip"] = [round(hi), round(lo)]
-    ok["grip_limits"] = abs(hi - 844 * .55) <= 2 and abs(lo - 120) <= 2
+    ok["grip_limits"] = abs(hi - (68 + 5 * 58)) <= 2 and abs(lo - (68 + 5 * 34)) <= 2
     # a reload brings back the panel's size and the zoom
     await page.wait_for_timeout(800)
     await page.reload()
     await page.wait_for_function(ready, timeout=30000)
     await page.wait_for_selector("#tpad:not([hidden])")
     await page.wait_for_timeout(800)
-    ok["reload_kept"] = abs((await box("#tpad"))["height"] - 120) <= 2 and abs(await scale() - 4) < 0.01
+    ok["reload_kept"] = abs((await box("#tpad"))["height"] - (68 + 5 * 34)) <= 2 and abs(await scale() - 4) < 0.01
     # the computer's own pointer is left out of the picture (cursor.show), and comes back in Direct mode:
     # count the pixels around it (in the yellow quadrant) that aren't yellow
     off_yellow = """() => { const v = document.querySelector('#video'), c = document.createElement('canvas');
@@ -318,6 +324,17 @@ async def trackpad(browser, http_port, probe, logs):
     await page.wait_for_selector("#tpad:not([hidden])")
     await page.wait_for_timeout(800)
     ok["mouse_switch_on"] = off and await page.locator("#tpCursor").is_visible()
+    # a desktop: a 560 px card floating at the bottom centre, keyboard-sized, the switch in its right corner
+    tb, sw = await page.locator("#tpad").bounding_box(), await page.locator("#tpKb").bounding_box()
+    out["card"] = [round(tb["x"]), round(tb["y"]), round(tb["width"]), round(tb["height"])]
+    ok["mouse_card"] = (abs(tb["width"] - 560) <= 2 and abs(tb["x"] + tb["width"] / 2 - 500) <= 2
+                        and abs(tb["height"] - (68 + 5 * 38)) <= 2 and sw["x"] > tb["x"] + tb["width"] - 3 * 40)
+    await page.locator("#tpKb").click()
+    await page.wait_for_selector("#tpadKeys:not([hidden])")
+    tb2 = await page.locator("#tpad").bounding_box()
+    ok["mouse_same_size"] = tb2 == tb and await page.locator("#tpKb").bounding_box() == sw
+    await page.locator("#tpKb").click()
+    await page.wait_for_selector("#tpadSurface:not([hidden])")
     b = await page.locator("#tpadSurface").bounding_box()
     x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2 + 15
 

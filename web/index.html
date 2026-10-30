@@ -40,16 +40,8 @@
   <div class="rows" id="fkbRows"></div>
 </div>
 <div class="tpad" id="tpad" role="group" aria-label="Trackpad" hidden>
-  <div class="grip" id="tpGrip" role="separator" aria-orientation="horizontal" aria-label="Drag to resize, double-tap for the default size"><i></i></div>
-  <div class="surface" id="tpadSurface">
-    <div class="bar">
-      <button type="button" id="tpKb" aria-label="Keyboard"><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/></svg></button>
-      <button type="button" id="tpSet" aria-label="Trackpad settings">⚙</button>
-      <span class="sp"></span>
-      <button type="button" id="tpFit" aria-label="Whole screen or the last zoom"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-      <button type="button" id="tpHide" aria-label="Collapse">⌄</button>
-    </div>
-  </div>
+  <header id="tpGrip"><span class="grip" aria-hidden="true">⠿⠿</span><button type="button" id="tpSet" aria-label="Trackpad settings">⚙</button><button type="button" id="tpFit" aria-label="Whole screen or the last zoom"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button><span class="ttl" id="tpTtl">trackpad</span><button type="button" id="tpMore" aria-label="Shortcuts and text">⋯</button><button type="button" id="tpKb" aria-label="Keyboard"><svg class="to-kb" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9"/></svg><svg class="to-pad" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.8"/><path d="M3 15.5h18M12 15.5v4"/></svg></button><button type="button" id="tpHide" aria-label="Collapse">⌄</button></header>
+  <div class="surface" id="tpadSurface"></div>
   <div class="keys" id="tpadKeys" hidden><span class="edge l" aria-hidden="true"></span><span class="edge r" aria-hidden="true"></span><div class="rows" id="tpadRows" style="display:contents"></div></div>
 </div>
 <div id="tpCursor" hidden><svg viewBox="0 0 24 24"><path d="M1.5 1.5v17.2l4.6-4.4 3 6.9 3.1-1.3-3-6.8h6.5z" fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/></svg></div>

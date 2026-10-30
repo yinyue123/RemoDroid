@@ -1348,8 +1348,8 @@ function fkbBtn(label, act, o = {}) {
   b.addEventListener('click', e => { if (e.detail === 0) act(); }); /* Enter / Space on a focused key */
   return b;
 }
-/* the floating keyboard, or the trackpad's docked one (which adds ⋯, ▭ back to the trackpad, ⌄ collapse,
- * and alt and ⌘ / Win, since a computer needs them) */
+/* the floating keyboard, or the trackpad's own (whose header has ⋯, the switch and ⌄, and which adds alt
+ * and ⌘ / Win, since a computer needs them) */
 function renderFkb() {
   const docked = tp.on && tpPrefs().state === 'keyboard';
   const rows = FKB[fkb.layer], abc = fkb.layer === 'abc', caps = s => fkb.shift && abc ? s.toUpperCase() : s;
@@ -1361,9 +1361,7 @@ function renderFkb() {
     kr('', fkbBtn('esc', () => fkbKey(AK.esc)), fkbBtn('tab', () => fkbKey(AK.tab)), fkbBtn('.', () => fkbChar('.')),
       fkbBtn('←', () => fkbKey(AK.left), { repeat: 1, title: 'Left' }), fkbBtn('↓', () => fkbKey(AK.down), { repeat: 1, title: 'Down' }),
       fkbBtn('↑', () => fkbKey(AK.up), { repeat: 1, title: 'Up' }), fkbBtn('→', () => fkbKey(AK.right), { repeat: 1, title: 'Right' }),
-      ...(docked ? [fkbBtn('⋯', () => openSheet('keys'), { title: 'Shortcuts and text' }),
-        fkbBtn('▭', () => tpShow('trackpad'), { title: 'Trackpad' }), fkbBtn('⌄', () => tpShow('collapsed'), { title: 'Collapse' })]
-        : [fkbBtn('⌄', hideFkb, { title: 'Hide keyboard' })])),
+      ...(docked ? [] : [fkbBtn('⌄', hideFkb, { title: 'Hide keyboard' })])),
     kr('', ...chars(rows[0])),
     kr(abc ? 'inset' : '', ...chars(rows[1])),
     kr('', abc ? fkbBtn('⇧', () => { fkb.shift = !fkb.shift; renderFkb(); }, { grow: 1.4, on: fkb.shift, title: 'Shift' })
@@ -1372,7 +1370,7 @@ function renderFkb() {
     kr('', fkbBtn(abc ? '?123' : 'abc', () => { fkb.layer = abc ? 'sym1' : 'abc'; renderFkb(); }, { grow: 1.4 }),
       latch('ctrl', 'ctrl', 'Ctrl, for the next key'),
       ...(docked ? [latch('alt', mac ? '⌥' : 'alt', mac ? 'Option, for the next key' : 'Alt, for the next key'),
-        latch('meta', mac ? '⌘' : win ? 'win' : 'super', mac ? 'Command, for the next key' : win ? 'Windows key, for the next key' : 'Super, for the next key')] : []),
+        latch('meta', mac ? '⌘' : win ? 'win' : '❖', mac ? 'Command, for the next key' : win ? 'Windows key, for the next key' : 'Super, for the next key')] : []),
       fkbBtn('␣', () => fkbChar(' '), { grow: docked ? 3 : 4, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
       fkbBtn('↵', () => fkbKey(AK.enter), { grow: 1.4, title: 'Enter' })));
 }
@@ -1416,7 +1414,7 @@ window.addEventListener('resize', () => { if (!fkb.el.hidden) placeFkb(fkb.pos.x
  * moves and the scroll as 0x02, like a mouse's; the zoom stays here. The picture takes the same
  * gestures as the pad. */
 const tpad = $('#tpad'), tpSurface = $('#tpadSurface'), tpKeys = $('#tpadKeys'), tpCur = $('#tpCursor'), tpBall = $('#tpBall');
-const TP_MAX = 4, TP_SLOP = 8, TP_TAP_MS = 250, TP_AGAIN_MS = 300, TP_GRIP = 16;
+const TP_MAX = 4, TP_SLOP = 8, TP_TAP_MS = 250, TP_AGAIN_MS = 300, TP_HEAD = 36;
 const tpTake = e => tp.on; /* a mouse or pen is a finger on it too (§5) */
 const phoneSized = () => (navigator.maxTouchPoints || 0) > 0 && Math.min(screen.width, screen.height) < 500;
 function tpWanted() {
@@ -1433,28 +1431,29 @@ function tpSwitch() {
   tpSync();
   toast(on ? 'Trackpad' : 'Direct: tap where you touch');
 }
-/* the panel: its state, and its sizes per orientation (the trackpad's height as a fraction of the
- * screen, the keyboard's key height and, sideways, its width) */
+/* the panel: its state, and its sizes per orientation (the keyboard's key height, which the trackpad's
+ * height follows, and sideways its width) */
 const tpPrefs = () => (S.tpPanel = Object.assign({ state: 'trackpad', portrait: {}, landscape: {} }, S.tpPanel));
 const tpOrient = () => innerWidth > innerHeight ? 'landscape' : 'portrait';
 const tpSizes = () => { const p = tpPrefs(), o = tpOrient(); return (p[o] = p[o] || {}); };
 /* the largest panel: 55% of the screen, and the picture always keeps 35% */
 const tpMaxH = () => Math.max(0, Math.min(innerHeight * .55, innerHeight * .65 - B.t - B.b));
-const tpKbH = kh => TP_GRIP + 5 * kh + 4 * 5 + 6; /* the grip, five rows of keys, the gaps, the bottom margin */
+const tpKbH = kh => TP_HEAD + 5 * kh + 4 * 5 + 12; /* the header, five rows of keys, the gaps, the margins */
+/* a phone docks the panel at the bottom; an iPad or a desktop floats it as a card, like the floating keyboard */
+const tpFloats = () => !phoneSized();
 function tpKeyH() {
+  if (tpFloats()) return 38;
   const def = tpOrient() === 'landscape' ? 34 : 46, room = (tpMaxH() - tpKbH(0)) / 5;
   return Math.max(24, Math.min(clamp(tpSizes().key || def, 34, 58), room));
 }
-function tpPanelH(state) {
-  if (state === 'collapsed') return 0;
-  if (state === 'keyboard') return tpKbH(tpKeyH());
-  const max = tpMaxH();
-  return clamp((tpSizes().pad || .38) * innerHeight, Math.min(120, max), max);
-}
+/* the trackpad is as tall as the keyboard, so switching keeps the panel's size */
+const tpPanelH = state => state === 'collapsed' ? 0 : tpKbH(tpKeyH());
 const tpSize = h => { tpad.style.height = `calc(${Math.round(h)}px + env(safe-area-inset-bottom, 0px))`; };
 function tpKbWidth() {
-  const land = tpOrient() === 'landscape';
+  const fl = tpFloats(), land = !fl && tpOrient() === 'landscape';
+  tpad.classList.toggle('float', fl);
   tpad.classList.toggle('land', land);
+  if (!fl) tpad.style.transform = '';
   tpKeys.style.setProperty('--kw', land ? clamp(tpSizes().kbw || 720, Math.min(480, innerWidth), innerWidth) + 'px' : 'none');
   tpad.style.setProperty('--kh', tpKeyH() + 'px');
 }
@@ -1502,7 +1501,7 @@ function tpScreen() {
 function tpMeasure() {
   B = bounds();
   const ins = standalone() ? { t: 0, r: 0, b: 0, l: 0 } : B, W = stage.clientWidth, H = stage.clientHeight;
-  const top = tpad.hidden ? H : tpad.getBoundingClientRect().top;
+  const top = tpad.hidden || tpFloats() ? H : tpad.getBoundingClientRect().top; /* a floating card is over the picture */
   tp.area = { l: ins.l, t: ins.t, r: W - ins.r, b: Math.max(ins.t + 1, Math.min(H - ins.b, top)) };
 }
 const tpFit = () => { const a = tp.area, [w, h] = tpScreen(); return Math.min((a.r - a.l) / w, (a.b - a.t) / h); };
@@ -1520,7 +1519,7 @@ function tpLayout() {
 }
 /* from layout(): the window changed, or the picture did */
 function tpRelayout() {
-  if (!tp.drag && tpPrefs().state !== 'collapsed') { tpKbWidth(); tpSize(tpPanelH(tpPrefs().state)); }
+  if (!tp.drag && tpPrefs().state !== 'collapsed') { tpKbWidth(); tpSize(tpPanelH(tpPrefs().state)); tpPlaceFloat(); }
   tpMeasure(); tpLayout();
   if (tpBall.hidden === false) placeTpBall();
 }
@@ -1730,6 +1729,9 @@ function tpShow(state, animate = true) {
   const kb = state === 'keyboard';
   if (!kb) fkbUnlatch();
   tpSurface.hidden = kb; tpKeys.hidden = !kb;
+  tpad.classList.toggle('kb', kb);
+  $('#tpTtl').textContent = kb ? 'keyboard' : 'trackpad';
+  $('#tpKb').setAttribute('aria-label', kb ? 'Trackpad' : 'Keyboard');
   if (kb) renderFkb();
   tpKbWidth();
   tpad.classList.toggle('held', !animate);
@@ -1740,45 +1742,62 @@ function tpShow(state, animate = true) {
     if (animate) tp.hideT = setTimeout(fold, 200); else fold();
   } else {
     tpBall.hidden = true;
-    if (tpad.hidden) { tpSize(0); tpad.hidden = false; void tpad.offsetHeight; }
+    if (tpad.hidden) { tpSize(tpFloats() ? tpPanelH(state) : 0); tpad.hidden = false; void tpad.offsetHeight; }
     tpSize(tpPanelH(state));
+    tpPlaceFloat();
   }
   tpFollow(animate ? 260 : 0);
   syncMenuStates();
 }
-$('#tpKb').addEventListener('click', () => tpShow('keyboard'));
+$('#tpKb').addEventListener('click', () => tpShow(tpPrefs().state === 'keyboard' ? 'trackpad' : 'keyboard'));
+$('#tpMore').addEventListener('click', () => openSheet('keys'));
 $('#tpHide').addEventListener('click', () => tpShow('collapsed'));
 $('#tpFit').addEventListener('click', tpWhole);
 $('#tpSet').addEventListener('click', () => { tp.set ? tpSetClose() : tpSettings(); });
 
-/* the grip: drag to resize (the trackpad's height, or the keyboard's keys), double-tap for the default */
+/* the floating card: where it is (remembered), kept on the screen */
+let tpFloatPos = null;
+try { tpFloatPos = JSON.parse(localStorage.getItem(KEY + '-tpfloat') || 'null'); } catch (e) {}
+function tpPlaceFloat(x, y) {
+  if (!tpFloats() || tpad.hidden) return;
+  const w = tpad.offsetWidth, h = tpPanelH(tpPrefs().state), m = 8;
+  if (x === undefined) {
+    x = tpFloatPos ? tpFloatPos.fx * innerWidth : (innerWidth - w) / 2;
+    y = tpFloatPos ? tpFloatPos.fy * innerHeight : innerHeight - B.b - h - 12; /* bottom centre */
+  }
+  x = clamp(x, B.l + m, Math.max(B.l + m, innerWidth - B.r - m - w)); y = clamp(y, B.t + m, Math.max(B.t + m, innerHeight - B.b - m - h));
+  tpad.style.transform = `translate(${Math.round(x)}px,${Math.round(y)}px)`;
+  return { x, y };
+}
+/* the header: dragged, it resizes the docked panel (the keys' height, which the trackpad follows) or moves
+ * the floating one; double-tapped, the default size or spot */
 const tpGrip = $('#tpGrip');
 let tpGripTap = 0;
 tpGrip.addEventListener('pointerdown', e => {
+  if (e.target.closest('button')) return;
   e.preventDefault();
-  const t = now(), st0 = tpPrefs().state;
+  const t = now(), st0 = tpPrefs().state, fl = tpFloats();
   if (t - tpGripTap < 300) { /* double tap */
     tpGripTap = 0;
-    delete tpSizes()[st0 === 'keyboard' ? 'key' : 'pad']; save();
-    tpShow(st0);
+    if (fl) { tpFloatPos = null; try { localStorage.removeItem(KEY + '-tpfloat'); } catch (_) {} tpPlaceFloat(); }
+    else { delete tpSizes().key; save(); tpShow(st0); }
     return;
   }
   tpGripTap = t;
   try { tpGrip.setPointerCapture(e.pointerId); } catch (_) {}
-  tp.drag = { id: e.pointerId, y: e.clientY, h: tpPanelH(st0), state: st0 };
+  const r = tpad.getBoundingClientRect();
+  tp.drag = { id: e.pointerId, y: e.clientY, h: tpPanelH(st0), state: st0, fl, dx: e.clientX - r.left, dy: e.clientY - r.top };
   tpad.classList.add('held'); tpGrip.classList.add('on');
 });
 tpGrip.addEventListener('pointermove', e => {
   const d = tp.drag;
   if (!d || e.pointerId !== d.id) return;
+  if (d.fl) { d.pos = tpPlaceFloat(e.clientX - d.dx, e.clientY - d.dy); return; }
   const want = d.h + d.y - e.clientY, max = tpMaxH();
-  let lo, hi;
-  if (d.state === 'keyboard') {
-    const room = Math.max(24, Math.min(58, (max - tpKbH(0)) / 5));
-    d.key = clamp((want - tpKbH(0)) / 5, Math.min(34, room), room);
-    tpad.style.setProperty('--kh', d.key + 'px');
-    lo = hi = tpKbH(d.key);
-  } else { lo = Math.min(120, max); hi = max; d.pad = clamp(want, lo, hi) / innerHeight; }
+  const room = Math.max(24, Math.min(58, (max - tpKbH(0)) / 5));
+  d.key = clamp((want - tpKbH(0)) / 5, Math.min(34, room), room);
+  tpad.style.setProperty('--kh', d.key + 'px');
+  const lo = tpKbH(d.key), hi = lo;
   /* past a limit the panel stops with a little give */
   tpSize(want > hi ? hi + (want - hi) * .2 : want < lo ? lo - (lo - want) * .2 : want);
   tpMeasure(); tpLayout(); tpSetPlace();
@@ -1788,9 +1807,12 @@ for (const t of ['pointerup', 'pointercancel']) tpGrip.addEventListener(t, e => 
   if (!d || e.pointerId !== d.id) return;
   tp.drag = null;
   tpad.classList.remove('held'); tpGrip.classList.remove('on');
-  if (d.key !== undefined) tpSizes().key = Math.round(d.key);
-  if (d.pad !== undefined) tpSizes().pad = Math.round(d.pad * 1000) / 1000;
-  save();
+  if (d.pos) {
+    tpFloatPos = { fx: d.pos.x / innerWidth, fy: d.pos.y / innerHeight };
+    try { localStorage.setItem(KEY + '-tpfloat', JSON.stringify(tpFloatPos)); } catch (_) {}
+    return;
+  }
+  if (d.key !== undefined) { tpSizes().key = Math.round(d.key); save(); }
   tpSize(tpPanelH(d.state));
   tpFollow(260);
 });
@@ -1847,7 +1869,9 @@ tpBall.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '
 
 /* ⚙: the trackpad's settings, just above the panel, so the pad stays free to try them on */
 function tpSetPlace() {
-  if (tp.set && tp.area) tp.set.style.setProperty('--tpb', Math.round(innerHeight - tp.area.b + 8) + 'px');
+  if (!tp.set || !tp.area) return;
+  const top = tpad.hidden ? tp.area.b : Math.min(tp.area.b, tpad.getBoundingClientRect().top);
+  tp.set.style.setProperty('--tpb', Math.round(innerHeight - top + 8) + 'px');
 }
 function tpSetClose() {
   if (!tp.set) return;

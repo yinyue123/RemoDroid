@@ -54,8 +54,8 @@ Portrait iPhone, trackpad open:
 │              ↖               │  ← the cursor, always in the middle of this area
 │                              │
 │                              │
-├───────────── ═══ ────────────┤  ← top of the panel: a grip to resize it
-│ ⌨  ⚙                   ⤢  ⌄  │  ← keyboard, trackpad settings; whole screen, collapse
+├──────────────────────────────┤
+│ ⚙  ⤢        ═══     ⋯  ⌨  ⌄  │  ← the header: settings, whole screen; the grip; Keys sheet, keyboard, collapse
 │                              │
 │          trackpad            │      the trackpad surface
 │                              │
@@ -63,17 +63,27 @@ Portrait iPhone, trackpad open:
 └──────────────────────────────┘  ← home indicator (the panel pads itself above it)
 ```
 
-Keyboard open (the same panel, switched):
+Keyboard open (the same panel, switched; the same size and the same header, with ▭ where ⌨ was):
 
 ```
-├───────────── ═══ ────────────┤
-│ esc tab  ←  ↓  ↑  →   ▭   ⌄  │  ← ▭ = back to the trackpad, ⌄ = collapse
+├──────────────────────────────┤
+│ ⚙  ⤢        ═══     ⋯  ▭  ⌄  │  ← ▭ = back to the trackpad, in the same spot as ⌨
+│ esc tab  .  ←  ↓  ↑  →       │
 │ q w e r t y u i o p          │
 │  a s d f g h j k l           │
 │ ⇧ z x c v b n m ⌫            │
 │ 123 ctrl alt ⌘  ␣   ↵        │
 └──────────────────────────────┘
 ```
+
+**The switch (⌨ / ▭) and the collapse key (⌄) are in the right corner of the header, in the same
+place in both states**, so going back and forth between the trackpad and the keyboard is one tap in
+one spot. **The trackpad and the keyboard are the same size**: one panel whose contents switch, as the
+iPhone's keyboard becomes a trackpad in place. On a phone the panel is docked at the bottom, full width.
+On a bigger screen (an iPad, a desktop browser) it floats instead, like the on-screen keyboard of the
+code repo's terminal (`web/components/FloatingKeyboard.tsx`) and the viewer's own floating keyboard: a
+560 pt card (at most 96% of the screen) over the picture, dragged anywhere by its header, its spot
+remembered; ⠿⠿ on the header's left shows where to hold it.
 
 Collapsed: the panel is gone and a small round button with a keyboard icon floats at the bottom
 corner. The picture uses the whole screen and the cursor moves to the middle of the whole screen.
@@ -220,7 +230,9 @@ trackpad pinch gives a browser, zooms the view (§4). A physical keyboard keeps 
 
 ## 6. The bottom panel: trackpad, keyboard, collapsed
 
-The panel is docked at the bottom, full width, above the home indicator. It has three states:
+The panel is docked at the bottom above the home indicator on a phone, and floats as a card on a
+bigger screen (§2). It has three states, and a header row that stays the same in all of
+them (the grip in the middle; ⚙ and ⤢ on the left; ⋯, the switch and ⌄ in the right corner):
 
 ```
               ⌨ key                      ⌄ key
@@ -231,13 +243,12 @@ The panel is docked at the bottom, full width, above the home indicator. It has 
        collapsed ── tap the ⌨ button ──▶ the state it was in before
 ```
 
-- **Trackpad**: the surface of §5. Its top row has the **⌨** key (open the keyboard) and the **⚙** key
-  (the trackpad's settings, §8) on the left, and the **⤢** key (whole screen ↔ last zoom, §4) and the **⌄** key (collapse) on the right, small, so most
-  of the panel is pad.
-- **Keyboard**: the on-screen keyboard. The top row of keys is the existing one (`esc tab . ← ↓ ↑ →`)
-  with three keys added: **⋯** (the Keys sheet), **▭ trackpad** (switch back) and **⌄ collapse**. The switch key is in the same
-  place in both states, so switching back and forth is one tap with the same thumb. Typing does not
-  move the cursor, and the picture and the cursor stay where they were.
+- **Trackpad**: the surface of §5, under the header. The header's switch key shows **⌨** (open the
+  keyboard).
+- **Keyboard**: the on-screen keyboard, the existing keys (`esc tab . ← ↓ ↑ →` and four rows) under the
+  same header, whose switch key now shows **▭** (back to the trackpad). The header also has **⋯** (the
+  Keys sheet), **⚙** (§8) and **⤢** (§4) in both states. Typing does not move the cursor, and the
+  picture and the cursor stay where they were.
 - **Collapsed**: the panel is hidden and becomes a small round button (44 pt, the keyboard icon) at the
   bottom right, above the home indicator. Tapping it brings the panel back in the state it was
   collapsed from (trackpad or keyboard). The button can be dragged to another spot, which is remembered,
@@ -264,27 +275,26 @@ it has no Ctrl, Esc or arrows. The **Text** sheet (`#kbText`) stays for pasting 
 
 ## 7. Resizing, and the limits
 
-The panel's top edge has a grip (**═══**). Dragging it up or down resizes the panel live. The trackpad
-and the keyboard each have their own size, because a good trackpad and a good keyboard are not the same
-height:
+On a phone, dragging the header (anywhere but its keys) up or down resizes the docked panel live. The
+trackpad and the keyboard are one size: the drag changes the keyboard's key height, and the trackpad is
+always as tall as the keyboard, so switching never moves the picture.
 
-| | smallest | largest | default (portrait) |
+| | smallest | largest | default |
 |---|---|---|---|
-| Trackpad height | 120 pt | 55% of the screen height | 38% of the screen height |
-| Keyboard key height | 34 pt | 58 pt | 46 pt (the keyboard's height follows: 5 rows of keys) |
-| Keyboard width (landscape, iPad) | 480 pt | the screen width | 720 pt, centred |
+| Key height (the panel's height follows: the header and 5 rows of keys) | 34 pt | 58 pt | 46 pt portrait, 34 pt landscape |
+| Keyboard width (a phone in landscape) | 480 pt | the screen width | 720 pt, centred |
 | The visible area left above the panel | at least 35% of the screen height, always | | |
 
-- The keyboard is resized by its height: dragging the grip changes the key height, and the font size of
-  the labels follows it. In landscape, where a full-width keyboard is too wide to reach, it is centred
-  and its width can be dragged by its side edges, within the limits above.
+- In landscape, where a full-width keyboard is too wide to reach, the keyboard is centred and its side
+  edges drag its width.
 - When a drag hits a limit, the panel stops with a short rubber band, so the limit is felt.
 - The last rule wins over the others: on a short landscape phone the panel's largest size shrinks so
   that the picture still has 35% of the height.
-- **Double-tap the grip** to go back to the default size of the current state.
-- Sizes are remembered per state **and per orientation** (portrait and landscape need different
-  heights), as a fraction of the screen height, so they survive a phone with a different screen size
-  reading the same settings.
+- **Double-tap the header** to go back to the default size.
+- Sizes are remembered per orientation (portrait and landscape need different heights).
+- The floating card (iPad, desktop) has a fixed size, 560 × the keyboard's height with 38 pt keys; its
+  header moves it instead of resizing it. It floats over the picture, so the pointer stays in the
+  middle of the whole screen.
 
 ## 8. Settings and what is remembered
 
@@ -321,10 +331,10 @@ finger on it (§5); in Direct, a mouse is a mouse (`deskPointer()`) and a finger
 Stored in the viewer's settings object `S` (`localStorage`, `save()`), like the other viewer settings:
 
 - `S.touchCtl` (`'auto'` / `'trackpad'` / `'direct'`), `S.tpMove`, `S.tpScroll`, `S.tpNatural`
-- `S.tpPanel = { state: 'trackpad'|'keyboard'|'collapsed', from, portrait: { pad, key }, landscape: { pad, key, kbw } }`
-  (`from`: the state to come back to from collapsed; `pad` as a fraction of the screen height, `key` and
-  `kbw` in CSS px)
-- the collapsed button's spot, under `KEY + '-tpball'`, like the menu ball's
+- `S.tpPanel = { state: 'trackpad'|'keyboard'|'collapsed', from, portrait: { key }, landscape: { key, kbw } }`
+  (`from`: the state to come back to from collapsed; `key` and `kbw` in CSS px)
+- the collapsed button's spot, under `KEY + '-tpball'`, like the menu ball's, and the floating card's, under
+  `KEY + '-tpfloat'`
 - per device, in `S.view`: `scale` (§4), `lastScale` (for ⤢) and the cursor position `cx, cy`, so
   reconnecting puts the cursor and the view back where you left them
 

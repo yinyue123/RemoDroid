@@ -308,8 +308,9 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   **trackpad**, like a Mac's: the pointer stays in the middle of a magnified picture, so the computer's text is
   readable, and the picture slides under it. Tap to click, tap twice to double-click, tap then drag to drag,
   two-finger tap to right-click, scroll with two fingers, spread them to zoom; **⤢** shows the whole screen,
-  **⌨** switches to a docked keyboard (its **▭** switches back), **⌄** folds it to a button, the grip on top
-  resizes it and **⚙** sets the speed ([`trackpad.md`](trackpad.md)). The menu's **Trackpad** item switches it on
+  the trackpad and the keyboard are one panel of one size: **⌨** in its header's right corner turns it into the
+  keyboard and, in the same spot, **▭** back; **⌄** folds it to a button, dragging the header resizes it and **⚙**
+  sets the speed. On an iPad or a desktop the panel floats as a card you drag by its header ([`trackpad.md`](trackpad.md)). The menu's **Trackpad** item switches it on
   or off on any device, a desktop browser too (there the mouse is a finger on the pad: click to click at the
   pointer, press and move to move it, the wheel scrolls, Ctrl + wheel zooms). Off, **Direct** taps where you
   touch (long-press to right-click), the default on an iPad and with a mouse. There, **Keyboard** opens a
