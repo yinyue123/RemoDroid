@@ -454,6 +454,9 @@ function setView(v) {
 /* The trackpad (trackpad.md): on, the pointer (cx, cy: 0..1 of the screen), the zoom (CSS px per screen
  * pixel; 0 = not chosen yet), the visible area above the panel, and the fingers of the gesture going on. */
 const tp = { on: false, dev: null, cx: .5, cy: .5, scale: 0, lastScale: 0, area: null, pts: new Map(), g: null, lastTap: -1e9 };
+/* the stats overlay's "pad" line: what the last touch was taken as, and how many downs, lifts and cancels the
+ * page got, so a tap that does nothing on some phone says why (or that the page never saw it) */
+const tpDiag = { downs: 0, ups: 0, cancels: 0, last: '—' };
 function layout() {
   const safe = bounds();
   fitStage(safe);
@@ -876,6 +879,7 @@ async function tickStats() {
       (l.route ? `<span class="dim">from</span> ${l.route.from}<br>` + (l.route.relay ? `<span class="dim">relay</span> ${l.route.relay}<br>` : '') +
         `<span class="dim">to</span> ${l.route.to}<br>` : '') +
       `<span class="dim">decoder</span> ${dec} ${l.decMs ? l.decMs + ' ms' : ''}${desk() ? '' : ` · <span class="dim">usb</span> ${p.path || '—'}`}${st.hasAudio ? ` · <span class="dim">sound</span> ${p.audio ? (video.muted ? 'muted' : 'on') : 'off'}` : ''}<br>` +
+      (tp.on ? `<span class="dim">pad</span> ${tpDiag.last} <span class="dim">· ${tpDiag.downs}↓ ${tpDiag.ups}↑ ${tpDiag.cancels}✕</span><br>` : '') +
       `<span class="dim">panel</span> ${st.panel} · <span class="dim">input</span> ${st.inputs}<span class="hex">${st.lastHex}</span>`;
   }
   $('#chipText').textContent = st.device ? `${st.device.name}${l.rtt != null ? ' · ' + l.rtt + ' ms' : ''}` : (DEMO ? 'demo' : 'no device');
@@ -1687,6 +1691,7 @@ function tpTouch(type, e) {
   e.preventDefault();
   const t = now();
   if (type === 'down') {
+    tpDiag.downs++;
     closeMenu(); tpMomStop();
     /* the first finger of a new touch: anything the pad still has down was lifted without the page hearing
      * of it, and would make every tap a second finger (no click until a reload) */
@@ -1740,20 +1745,28 @@ function tpTouch(type, e) {
     return;
   }
   tp.pts.delete(e.pointerId);
+  if (type === 'up') tpDiag.ups++; else tpDiag.cancels++;
   if (e.pointerId === g.lead) tp.edge = null;
   if (tp.pts.size) return;
   tp.g = null; tp.edge = null;
-  if (g.mode === 'drag') { flushMove(); sendMouse(2, 0, 0, tp.cx, tp.cy); }
-  else if (type !== 'up') { /* cancelled: no click */ }
+  const ms = Math.round(t - g.t0), px = Math.round(g.far);
+  if (g.mode === 'drag') { flushMove(); sendMouse(2, 0, 0, tp.cx, tp.cy); tpDiag.last = 'drag'; }
+  else if (type !== 'up') tpDiag.last = `cancelled by the browser after ${ms} ms → no click`;
   else if (g.n === 1 && g.far <= TP_SLOP && t - g.t0 < TP_TAP_MS) {
     /* a tap: a finger that wobbled still clicks where the pointer was, so a double click's two clicks land on one pixel */
     tp.cx = g.cx0; tp.cy = g.cy0; tpLayout();
     tpClick(0);
     tp.lastTap = t;
+    tpDiag.last = `tap ${ms} ms ${px} px → click`;
   } else if (g.mode === 'two' && t - g.t0 < TP_TAP_MS) {
     if (g.far <= TP_SLOP) { tp.cx = g.cx0; tp.cy = g.cy0; tpLayout(); }
     tpClick(g.n >= 3 ? 1 : 2); /* two fingers: right click; three: middle */
-  } else if (g.mode === 'scroll' && t - g.ct < 80) tpMomentum(g.vx, g.vy);
+    tpDiag.last = `${g.n} fingers → ${g.n >= 3 ? 'middle' : 'right'} click`;
+  } else {
+    if (g.mode === 'scroll' && t - g.ct < 80) tpMomentum(g.vx, g.vy);
+    tpDiag.last = g.n > 1 ? `${g.n} fingers ${g.mode || ''} ${ms} ms → no click` :
+      g.far > TP_SLOP ? `moved ${px} px → pointer move, no click` : `held ${ms} ms → no click`;
+  }
   if (g.mode === 'zoom') { const s = clamp(tp.scale, tpFit(), tpHi()); if (s !== tp.scale) tpZoomTo(s); }
   tpSaveSoon();
 }

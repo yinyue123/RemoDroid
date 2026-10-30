@@ -219,6 +219,11 @@ async def trackpad(browser, http_port, probe, logs):
     out["taps"] = {"held_400": await tap_v(ms=400), "moved_10": await tap_v(ms=60, wob=10),
                    "held_600": await tap_v(ms=600), "after_lost_lift": await tap_v(ms=60, stale=True)}
     ok["taps_forgiving"] = out["taps"] == {"held_400": 1, "moved_10": 1, "held_600": None, "after_lost_lift": 1}
+    # the stats overlay says what the last touch was taken as, and counts downs, lifts and cancels
+    await page.wait_for_timeout(1100)
+    hud = await page.evaluate("() => document.querySelector('#hud').innerText")
+    out["hud_pad"] = next((l for l in hud.split("\n") if l.startswith("pad ")), None)
+    ok["hud_pad"] = bool(out["hud_pad"] and re.match(r"^pad tap \d+ ms \d+ px → click · \d+↓ \d+↑ \d+✕$", out["hud_pad"]))
     # ⚙: Move speed 2× doubles the same move
     await page.wait_for_timeout(1200)  # the scroll's momentum
     await page.locator("#tpSet").tap()
