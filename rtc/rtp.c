@@ -9,6 +9,7 @@
 #define MAX_PAYLOAD 1100   /* leaves room for SRTP, TURN ChannelData and IPv6 */
 #define HIST 1024          /* sent packets kept for NACK */
 #define MAX_PKT 1300
+#define MAX_NALS 1024      /* per frame: an encoder that cuts frames into small slices makes hundreds */
 
 typedef struct {
     uint16_t seq;
@@ -32,6 +33,9 @@ struct rtp {
     double sr_sent_at;
     uint32_t rr_seq;     /* the extended highest sequence number of the last receiver report */
     int rr_have;
+    const uint8_t *nal[MAX_NALS]; /* a frame's NAL units, while it is sent */
+    size_t nal_len[MAX_NALS];
+    int nal_said;
 };
 
 /* ---------------- helpers ---------------- */
@@ -227,9 +231,13 @@ static void send_h265_nal(rtp_t *r, const uint8_t *nal, size_t n, uint32_t ts, i
 
 int rtp_send_frame(rtp_t *r, const uint8_t *d, size_t n, uint32_t ts, int keyframe, double now)
 {
-    const uint8_t *nal[64];
-    size_t len[64];
-    int count = annexb_split(d, n, nal, len, 64);
+    const uint8_t **nal = r->nal;
+    size_t *len = r->nal_len;
+    /* the NAL units past the limit used to go unsent with no gap in the sequence numbers, so the
+     * receiver decoded frames with slices missing */
+    int count = annexb_split(d, n, nal, len, MAX_NALS);
+    if (count == MAX_NALS && !r->nal_said++)
+        LOGW("rtp: a frame of %d NAL units or more; the rest of it is not sent", MAX_NALS);
     int playout = keyframe; /* playout-delay on keyframes is enough for the receiver to latch it */
     for (int i = 0; i < count; i++) {
         if (!len[i])

@@ -47,6 +47,7 @@ struct dsk_hwvideo {
     int real_time;                /* each frame stands for the time since the last one */
     LONGLONG last_t;              /* the last input's time, 100 ns */
     unsigned n_in, n_out, n_busy; /* for the log */
+    int debug_lines, lines_said;  /* [video] debug_lines: log captured frames with a bright line */
     uint64_t log_ms;
     uint64_t last_in_ms;
     int outputs;
@@ -158,6 +159,7 @@ static int configure(dsk_hwvideo_t *v, IMFActivate *act, char *err, size_t cap)
     if (cap_fps > 0)
         v->rate_fps = RD_MIN(v->rate_fps, (int)cap_fps);
     v->real_time = !strcmp(desk_conf("video", "mf_timing", v->software ? "real" : "fixed"), "real");
+    v->debug_lines = (int)desk_conf_int("video", "debug_lines", 0);
     LOGI("video: %s budgets for %d fps, %s frame times", v->name, v->rate_fps, v->real_time ? "real" : "fixed");
     if (SUCCEEDED(IMFTransform_QueryInterface(v->mft, &RD_IID_ICodecAPI, (void **)&v->api))) {
         set_bool(v->api, &RD_AVLowLatencyMode, 1);
@@ -442,6 +444,33 @@ static int feed(dsk_hwvideo_t *v)
     return 1;
 }
 
+/* A thin bright line across a captured frame (a row much brighter than two above and two below over
+ * most of the width): to tell whether one the viewer shows was already in the capture. */
+static void debug_lines(dsk_hwvideo_t *v, const dsk_frame_t *f)
+{
+    if (v->lines_said >= 40)
+        return;
+    for (int y = 2; y < f->h - 2; y++) {
+        const uint8_t *row = f->bgra + (size_t)y * f->stride;
+        int n = 0, a = -1, z = -1;
+        for (int x = 0; x < f->w; x++) {
+            const uint8_t *p = row + x * 4, *u = p - 2 * (size_t)f->stride, *d = p + 2 * (size_t)f->stride;
+            int l = (77 * p[2] + 150 * p[1] + 29 * p[0]) >> 8, lu = (77 * u[2] + 150 * u[1] + 29 * u[0]) >> 8,
+                ld = (77 * d[2] + 150 * d[1] + 29 * d[0]) >> 8;
+            if (l > 200 && l - lu > 40 && l - ld > 40) {
+                n++;
+                if (a < 0)
+                    a = x;
+                z = x;
+            }
+        }
+        if (n * 10 > f->w * 6) {
+            LOGI("video: debug: a line in the captured frame at row %d (x %d-%d)", y, a, z);
+            v->lines_said++;
+        }
+    }
+}
+
 int dsk_hwvideo_step(dsk_hwvideo_t *v, int timeout_ms)
 {
     const dsk_video_cfg_t *c = &v->cfg;
@@ -457,6 +486,8 @@ int dsk_hwvideo_step(dsk_hwvideo_t *v, int timeout_ms)
         return v->cap ? 0 : -1;
     }
     if (r > 0) {
+        if (v->debug_lines)
+            debug_lines(v, &f);
         size_t ysz = (size_t)c->width * c->height;
         yuv_from_bgra(f.bgra, f.w, f.h, f.stride, v->i420, v->i420 + ysz, v->i420 + ysz * 5 / 4, c->width, c->height);
         memcpy(v->nv12, v->i420, ysz);
