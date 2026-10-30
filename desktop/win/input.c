@@ -8,6 +8,7 @@
 
 #include <aclapi.h>
 #include <stdio.h>
+#include <wtsapi32.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -111,6 +112,22 @@ static void local_text(const char *utf8)
         SendInput(2, in, sizeof in[0]);
     }
     free(w);
+}
+
+#ifndef WTS_SESSIONSTATE_LOCK
+#define WTS_SESSIONSTATE_LOCK 0
+#endif
+
+int ri_session_locked(void)
+{
+    DWORD sid = 0, n = 0;
+    WTSINFOEXW *info = NULL;
+    ProcessIdToSessionId(GetCurrentProcessId(), &sid);
+    if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, sid, WTSSessionInfoEx, (LPWSTR *)&info, &n) || !info)
+        return 0;
+    int locked = info->Level == 1 && info->Data.WTSInfoExLevel1.SessionFlags == WTS_SESSIONSTATE_LOCK;
+    WTSFreeMemory(info);
+    return locked;
 }
 
 #ifdef RD_INPUT_HELPER

@@ -30,7 +30,7 @@ $(APP): $(APP_DIR)/win/main.c $(APP_DIR)/icon.c $(DESK_OUT)/app.res $(DESK_LIB)
 APP_EXTRA := $(DESK_OUT)/remodroid-input.exe
 $(APP_EXTRA): $(APP_DIR)/win/inputsvc.c desktop/win/input.c desktop/win/inputpipe.h desktop/core/keymap.c $(DESK_OUT)/app.res
 	$(CC) $(DESK_CFLAGS) -DRD_INPUT_HELPER -municode $(DESK_WARN) -o $@ $(APP_DIR)/win/inputsvc.c desktop/win/input.c \
-	    desktop/core/keymap.c $(DESK_OUT)/app.res -static -lwtsapi32 -ladvapi32 -luser32 -lshell32
+	    desktop/core/keymap.c $(DESK_OUT)/app.res -static -lwtsapi32 -ladvapi32 -luser32 -lgdi32 -lshell32
 endif
 
 ifeq ($(DESK_OS),macos)

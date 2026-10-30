@@ -8,8 +8,11 @@
  *
  * The service starts a helper, as SYSTEM, in every active session and again after it ends or the
  * session changes. The helper takes the agent's events on \\.\pipe\RemoDroidInput-<session> and
- * injects them; only programs in its own session can connect. It injects on the normal desktop
- * only: the UAC prompt's secure desktop stays out of reach, so nothing can answer UAC through it. */
+ * injects them; only programs in its own session can connect. It injects on the normal desktop, or,
+ * while the session is locked, on the secure desktop of the lock screen, which it also shows the agent
+ * on \\.\pipe\RemoDroidScreen-<session> (inputpipe.h): so a locked computer can be unlocked from the
+ * viewer, with its password. An unlocked session's secure desktop, a UAC prompt, stays out of reach:
+ * nothing can answer UAC through it. */
 #ifndef UNICODE
 #define UNICODE
 #endif
@@ -69,13 +72,43 @@ static void say(const wchar_t *fmt, ...)
 
 /* ---------------- the helper (SYSTEM, in a user's session) ---------------- */
 
+/* This thread onto the desktop that takes the input: the lock screen's while the session is locked, else
+ * the normal one. Looked at again every 250 ms. */
+typedef struct {
+    HDESK cur;
+    int locked;
+    ULONGLONG at;
+} follow_t;
+
+static void follow(follow_t *f)
+{
+    ULONGLONG now = GetTickCount64();
+    if (f->cur && now - f->at < 250)
+        return;
+    f->at = now;
+    int locked = ri_session_locked();
+    if (f->cur && locked == f->locked && !locked)
+        return;
+    HDESK d = locked ? OpenInputDesktop(0, FALSE, GENERIC_ALL) : OpenDesktopW(L"Default", 0, FALSE, GENERIC_ALL);
+    if (d && SetThreadDesktop(d)) {
+        if (f->cur)
+            CloseDesktop(f->cur);
+        f->cur = d;
+        f->locked = locked;
+    } else if (d) {
+        CloseDesktop(d);
+    }
+}
+
 static DWORD WINAPI serve(LPVOID arg)
 {
     HANDLE p = arg;
     ri_msg_t m;
     DWORD n;
     char *text = NULL;
+    follow_t fw = { 0 };
     while (ReadFile(p, &m, sizeof m, &n, NULL) && n == sizeof m) {
+        follow(&fw);
         if (m.op == RI_TEXT) {
             if (m.a <= 0 || m.a >= RI_TEXT_MAX)
                 break;
@@ -92,18 +125,88 @@ static DWORD WINAPI serve(LPVOID arg)
         }
     }
     free(text);
+    if (fw.cur)
+        CloseDesktop(fw.cur);
     DisconnectNamedPipe(p);
     CloseHandle(p);
     return 0;
 }
 
-static int helper(void)
+/* The lock screen's picture: for each request, while the session is locked, the pixels of the input
+ * desktop (GDI: the secure desktop has no duplication for us); else "not locked". */
+static int put_all(HANDLE p, const void *b, DWORD n)
 {
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); /* pixels as the agent counts them */
+    DWORD w;
+    for (const char *q = b; n; q += w, n -= w)
+        if (!WriteFile(p, q, n, &w, NULL) || !w)
+            return -1;
+    return 0;
+}
+
+static DWORD WINAPI serve_screen(LPVOID arg)
+{
+    HANDLE p = arg;
+    rs_req_t q;
+    DWORD n;
+    uint8_t *bits = NULL;
+    int bw = 0, bh = 0;
+    HBITMAP bmp = NULL;
+    HDC mdc = CreateCompatibleDC(NULL);
+    follow_t fw = { 0 };
+    while (ReadFile(p, &q, sizeof q, &n, NULL) && n == sizeof q) {
+        rs_reply_t r = { 0 };
+        fw.at = 0;
+        follow(&fw);
+        if (fw.locked && q.w > 0 && q.h > 0 && (int64_t)q.w * q.h <= RS_MAX_PIXELS) {
+            if (q.w != bw || q.h != bh) {
+                if (bmp)
+                    DeleteObject(bmp);
+                BITMAPINFO bi = { .bmiHeader = { .biSize = sizeof bi.bmiHeader, .biWidth = q.w, .biHeight = -q.h,
+                                                 .biPlanes = 1, .biBitCount = 32, .biCompression = BI_RGB } };
+                bmp = CreateDIBSection(NULL, &bi, DIB_RGB_COLORS, (void **)&bits, NULL, 0);
+                bw = bmp ? q.w : 0;
+                bh = bmp ? q.h : 0;
+            }
+            HDC sdc = bmp ? GetDC(NULL) : NULL; /* the desktop this thread is on now */
+            if (sdc) {
+                HGDIOBJ old = SelectObject(mdc, bmp);
+                if (BitBlt(mdc, 0, 0, q.w, q.h, sdc, q.x, q.y, SRCCOPY | CAPTUREBLT)) {
+                    GdiFlush();
+                    r.locked = 1;
+                    r.w = q.w;
+                    r.h = q.h;
+                }
+                SelectObject(mdc, old);
+                ReleaseDC(NULL, sdc);
+            }
+        }
+        if (put_all(p, &r, sizeof r) < 0 || (r.locked && put_all(p, bits, (DWORD)r.w * r.h * 4) < 0))
+            break;
+    }
+    if (bmp)
+        DeleteObject(bmp);
+    DeleteDC(mdc);
+    if (fw.cur)
+        CloseDesktop(fw.cur);
+    DisconnectNamedPipe(p);
+    CloseHandle(p);
+    return 0;
+}
+
+/* A pipe server: name, its security, and the thread each client of this session gets. */
+typedef struct {
+    const wchar_t *fmt;
+    DWORD access;
+    LPTHREAD_START_ROUTINE fn;
+} pipe_srv_t;
+
+static DWORD WINAPI listen_pipe(LPVOID arg)
+{
+    const pipe_srv_t *ps = arg;
     DWORD sid = 0;
     ProcessIdToSessionId(GetCurrentProcessId(), &sid);
     wchar_t name[64];
-    swprintf(name, 64, RI_PIPE_FMT, (unsigned long)sid);
+    swprintf(name, 64, ps->fmt, (unsigned long)sid);
     /* owned by SYSTEM (the agent checks), for SYSTEM and the interactive users; no low integrity */
     SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, FALSE };
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"O:SYD:P(A;;GA;;;SY)(A;;GRGW;;;IU)S:(ML;;NW;;;ME)",
@@ -112,9 +215,9 @@ static int helper(void)
         return 1;
     }
     for (int first = 1;; first = 0) {
-        HANDLE p = CreateNamedPipeW(name, PIPE_ACCESS_INBOUND | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0),
+        HANDLE p = CreateNamedPipeW(name, ps->access | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0),
                                     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                                    PIPE_UNLIMITED_INSTANCES, 0, 65536, 0, &sa);
+                                    PIPE_UNLIMITED_INSTANCES, 1 << 20, 65536, 0, &sa);
         if (p == INVALID_HANDLE_VALUE) {
             say(L"helper %lu: cannot create %ls (error %lu)", sid, name, GetLastError());
             return 1;
@@ -131,12 +234,23 @@ static int helper(void)
             CloseHandle(p);
             continue;
         }
-        HANDLE t = CreateThread(NULL, 0, serve, p, 0, NULL);
+        HANDLE t = CreateThread(NULL, 0, ps->fn, p, 0, NULL);
         if (t)
             CloseHandle(t);
         else
             CloseHandle(p);
     }
+}
+
+static int helper(void)
+{
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); /* pixels as the agent counts them */
+    static const pipe_srv_t input = { RI_PIPE_FMT, PIPE_ACCESS_INBOUND, serve },
+                            screen = { RS_PIPE_FMT, PIPE_ACCESS_DUPLEX, serve_screen };
+    HANDLE t = CreateThread(NULL, 0, listen_pipe, (LPVOID)&screen, 0, NULL);
+    if (t)
+        CloseHandle(t);
+    return (int)listen_pipe((LPVOID)&input);
 }
 
 /* ---------------- the service ---------------- */
@@ -336,7 +450,8 @@ static int install(void)
         CloseServiceHandle(scm);
         return r;
     }
-    SERVICE_DESCRIPTIONW d = { L"Lets the RemoDroid agent control windows of programs that run as administrator." };
+    SERVICE_DESCRIPTIONW d = { L"Lets the RemoDroid agent control windows of programs that run as administrator, "
+                               L"and show and unlock the lock screen." };
     ChangeServiceConfig2W(s, SERVICE_CONFIG_DESCRIPTION, &d);
     SC_ACTION acts[3] = { { SC_ACTION_RESTART, 5000 }, { SC_ACTION_RESTART, 5000 }, { SC_ACTION_RESTART, 30000 } };
     SERVICE_FAILURE_ACTIONSW fa = { .dwResetPeriod = 86400, .cActions = 3, .lpsaActions = acts };
@@ -346,7 +461,7 @@ static int install(void)
     CloseServiceHandle(scm);
     if (!r)
         wprintf(L"RemoDroid Input is installed: the agent can control windows of programs that run as "
-                L"administrator.\n");
+                L"administrator, and the lock screen.\n");
     return r;
 }
 

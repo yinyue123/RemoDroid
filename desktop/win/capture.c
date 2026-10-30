@@ -1,7 +1,10 @@
 /* Windows screen capture: DXGI Desktop Duplication (Windows 8+; the GPU says
  * what changed, and the pointer comes separately so it's drawn in here), with
  * GDI BitBlt as the fallback where duplication isn't available (Remote Desktop
- * sessions, some virtual machines). Frames are copied to the CPU as BGRA. */
+ * sessions, some virtual machines). Frames are copied to the CPU as BGRA.
+ * A locked session's lock screen is on the secure desktop, out of this
+ * process's reach: while locked, the pictures come from the RemoDroidInput
+ * helper, if it is installed (inputpipe.h). */
 #define COBJMACROS
 #include "plat.h"
 
@@ -12,7 +15,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <aclapi.h>
+
 #include "desk.h"
+#include "inputpipe.h"
 
 struct dsk_capture {
     int x, y, w, h;
@@ -32,6 +38,9 @@ struct dsk_capture {
     HDC sdc, mdc;
     HBITMAP bmp, old;
     uint8_t *bits;
+    /* the lock screen, through the helper */
+    HANDLE lock;
+    ULONGLONG lock_check, lock_retry;
 };
 
 /* ---------------- pointer ---------------- */
@@ -305,6 +314,86 @@ static int gdi_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
     return 1;
 }
 
+/* ---------------- the lock screen ---------------- */
+
+/* The helper's screen pipe, if SYSTEM made it (another program could pose as it to feed the viewer). */
+static HANDLE lock_open(void)
+{
+    DWORD sid = 0;
+    wchar_t name[64];
+    ProcessIdToSessionId(GetCurrentProcessId(), &sid);
+    swprintf(name, 64, RS_PIPE_FMT, (unsigned long)sid);
+    HANDLE h = CreateFileW(name, GENERIC_READ | GENERIC_WRITE | READ_CONTROL, 0, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return NULL;
+    PSID owner = NULL;
+    PSECURITY_DESCRIPTOR sd = NULL;
+    int ok = GetSecurityInfo(h, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION, &owner, NULL, NULL, NULL, &sd) ==
+                 ERROR_SUCCESS && owner && IsWellKnownSid(owner, WinLocalSystemSid);
+    LocalFree(sd);
+    if (!ok) {
+        CloseHandle(h);
+        return NULL;
+    }
+    return h;
+}
+
+static int get_all(HANDLE h, void *b, DWORD n)
+{
+    DWORD r;
+    for (char *q = b; n; q += r, n -= r)
+        if (!ReadFile(h, q, n, &r, NULL) || !r)
+            return -1;
+    return 0;
+}
+
+/* A picture of the lock screen, about 10 a second, reported only when it changed; -1 once the session
+ * is unlocked (the caller opens the normal capture again) or the helper is gone. */
+static int lock_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
+{
+    if (c->have)
+        Sleep((DWORD)RD_MIN(RD_MAX(timeout_ms, 0), 100));
+    rs_req_t q = { c->x, c->y, c->w, c->h };
+    rs_reply_t r = { 0 };
+    DWORD n;
+    int talked = WriteFile(c->lock, &q, sizeof q, &n, NULL) && n == sizeof q && get_all(c->lock, &r, sizeof r) == 0;
+    if (!talked || !r.locked || r.w != c->w || r.h != c->h || get_all(c->lock, c->clean, (DWORD)c->w * c->h * 4) < 0) {
+        LOGI("capture: %s", talked && !r.locked ? "unlocked" : "the lock screen helper went away");
+        CloseHandle(c->lock);
+        c->lock = NULL;
+        return -1;
+    }
+    size_t sz = (size_t)c->w * c->h * 4;
+    if (c->have && !memcmp(c->out, c->clean, sz))
+        return 0;
+    memcpy(c->out, c->clean, sz);
+    c->have = 1;
+    f->bgra = c->out;
+    f->w = c->w;
+    f->h = c->h;
+    f->stride = c->w * 4;
+    return 1;
+}
+
+/* Twice a second: is the session locked, and is there a helper to show it? */
+static int lock_begin(dsk_capture_t *c)
+{
+    ULONGLONG now = GetTickCount64();
+    if (now - c->lock_check < 500)
+        return 0;
+    c->lock_check = now;
+    if (!ri_session_locked() || now < c->lock_retry)
+        return 0;
+    c->lock = lock_open();
+    if (!c->lock) {
+        c->lock_retry = now + 5000;
+        return 0;
+    }
+    LOGI("capture: the session is locked: the lock screen, through the RemoDroidInput helper");
+    c->have = 0;
+    return 1;
+}
+
 /* ---------------- API ---------------- */
 
 dsk_capture_t *dsk_capture_open(const dsk_screen_t *s, char *err, size_t cap)
@@ -333,6 +422,8 @@ dsk_capture_t *dsk_capture_open(const dsk_screen_t *s, char *err, size_t cap)
 
 int dsk_capture_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
 {
+    if (c->lock || lock_begin(c))
+        return lock_next(c, f, timeout_ms);
     return c->dup ? dxgi_next(c, f, timeout_ms) : gdi_next(c, f, timeout_ms);
 }
 
@@ -342,6 +433,8 @@ void dsk_capture_close(dsk_capture_t *c)
         return;
     dxgi_close(c);
     gdi_close(c);
+    if (c->lock)
+        CloseHandle(c->lock);
     free(c->shape);
     free(c->clean);
     free(c->out);

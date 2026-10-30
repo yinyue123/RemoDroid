@@ -39,7 +39,7 @@ DESK_DEFS  += -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE -DNOMIN
               -DEV_COMPAT3=0 -D'EV_FD_TO_WIN32_HANDLE(fd)=(fd)' -D'EV_WIN32_HANDLE_TO_FD(h)=(h)' \
               -D'EV_WIN32_CLOSE_FD(fd)=closesocket(fd)' -DFD_SETSIZE=1024
 DESK_LIBS  := -lws2_32 -liphlpapi -lbcrypt -lcrypt32 -ld3d11 -ldxgi -lmfplat -lmf -lmfuuid -lole32 -loleaut32 \
-              -luser32 -lgdi32 -lshell32 -lshlwapi -luuid -lwinmm -lpowrprof
+              -luser32 -lgdi32 -lshell32 -lshlwapi -luuid -lwinmm -lpowrprof -lwtsapi32
 DESK_SHARED := -shared -static-libgcc -Wl,--out-implib,$(DESK_OUT)/libremodroid.dll.a
 DESK_TEST_LIBS = $(DESK_LIBS) -static-libgcc
 DESK_PIC   :=

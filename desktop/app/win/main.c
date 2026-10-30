@@ -187,8 +187,8 @@ static void set_admin(int on)
         return; /* declined, or the program is missing */
     WaitForSingleObject(sei.hProcess, 30000);
     CloseHandle(sei.hProcess);
-    toast(admin_enabled() ? L"RemoDroid can now control windows of programs that run as administrator."
-                          : L"RemoDroid no longer controls windows of programs that run as administrator.");
+    toast(admin_enabled() ? L"RemoDroid can now control windows of programs that run as administrator, and the lock screen."
+                          : L"RemoDroid no longer controls windows of programs that run as administrator, or the lock screen.");
 }
 
 /* ---------------- tray ---------------- */
@@ -261,7 +261,7 @@ static void tray_menu(int x, int y)
     AppendMenuW(m, MF_STRING, ID_LOG, L"Show log");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (login_enabled() ? MF_CHECKED : 0), ID_LOGIN, L"Start at login");
-    AppendMenuW(m, MF_STRING | (admin_enabled() ? MF_CHECKED : 0), ID_ADMIN, L"Control administrator windows…");
+    AppendMenuW(m, MF_STRING | (admin_enabled() ? MF_CHECKED : 0), ID_ADMIN, L"Control administrator windows and the lock screen…");
     AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit RemoDroid");
     SetForegroundWindow(g_tray); /* so the menu closes when clicking elsewhere */
     int cmd = TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, x, y, g_tray, NULL);

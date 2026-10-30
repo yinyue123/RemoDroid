@@ -27,4 +27,22 @@ typedef struct {
     double x, y;
 } ri_msg_t; /* 32 bytes, the same on both sides of the pipe (one machine) */
 
+/* The lock screen. A locked session shows it on the secure desktop, which the agent can neither capture
+ * nor type into; the helper can. While the session is locked, and only then, it injects there, and on
+ * this second pipe answers each request with a picture of it (else "not locked": the agent's own capture
+ * is the one to use). An unlocked session's secure desktop (a UAC prompt) stays out of reach. */
+#define RS_PIPE_FMT L"\\\\.\\pipe\\RemoDroidScreen-%lu" /* + the session id */
+#define RS_MAX_PIXELS (8192 * 8192)
+
+typedef struct {
+    int32_t x, y, w, h; /* this part of the virtual desktop, in pixels */
+} rs_req_t;
+
+typedef struct {
+    int32_t locked, w, h, pad; /* locked: w × h BGRA pixels follow */
+} rs_reply_t;
+
+/* Whether Windows reports this process's session as locked (input.c). */
+int ri_session_locked(void);
+
 #endif

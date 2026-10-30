@@ -46,7 +46,8 @@ Contents
 
 - Wayland capture and input on Linux. v1 needs an X11 session.
 - Unattended access to the login screen, the Windows UAC secure desktop, or a Mac before login. That needs a
-  Windows service or a macOS LaunchDaemon.
+  Windows service or a macOS LaunchDaemon. (Since then, Windows' lock screen: with the RemoDroidInput service
+  installed, a locked computer can be seen and unlocked from the viewer, below.)
 - Sound, a remote cursor shape, and viewing several monitors at once. (Hardware encoding on Linux came
   later: VA-API, §5.5.)
 - An installer with code signing or notarization (§13.4 says what is needed).
@@ -597,9 +598,17 @@ conservative:
   in each signed-in session, and the agent sends it its input over `\\.\pipe\RemoDroidInput-<session>`. The
   pipe is owned by SYSTEM (the agent checks, so nothing else can pose as it and read keystrokes) and takes
   only clients from its own session. Trade-off: with it installed, any program of the signed-in user can drive
-  elevated windows, as UAC itself does not separate an admin's own programs. The helper stays on the normal
-  desktop, so the UAC prompt's secure desktop remains out of reach; that, and seeing it, are still the service
-  mode in M6.
+  elevated windows, as UAC itself does not separate an admin's own programs.
+- **The lock screen** (with the service): a locked Windows session shows the lock and sign-in screen on the
+  secure desktop (`Winlogon`), which a program running as the user can neither capture nor type into, so the
+  viewer used to freeze on the last picture. While Windows reports the session locked
+  (`WTSSessionInfoEx` → `WTS_SESSIONSTATE_LOCK`), and only then, the helper attaches to the input desktop to
+  inject, and serves the agent pictures of it on `\\.\pipe\RemoDroidScreen-<session>` (same ownership and
+  session checks; it answers "not locked" otherwise). The agent checks the lock state twice a second and,
+  while locked, encodes the helper's pictures (GDI, about 10 a second, sent only when they change) instead of
+  its own capture. So the viewer sees the lock screen and types the Windows password into it; the password
+  is still needed, and an unlocked session's secure desktop (a UAC prompt) stays out of reach and out of
+  sight.
 - **Input safety**: held keys and buttons are released when a session ends or the input channel resets.
   `view_only` is enforced in the library, not in the viewer.
 - The WebRTC media is end-to-end DTLS-SRTP between the browser and the computer, as with phones. The
