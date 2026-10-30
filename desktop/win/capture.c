@@ -43,6 +43,7 @@ struct dsk_capture {
     HDC sdc, mdc;
     HBITMAP bmp, old;
     uint8_t *bits;
+    int gdi_same; /* the last grab found nothing new */
     /* the lock screen, through the helper */
     HANDLE lock;
     ULONGLONG lock_check, lock_retry;
@@ -291,8 +292,9 @@ static void gdi_close(dsk_capture_t *c)
 
 static int gdi_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
 {
-    /* no change notifications: grab, and report a change only if the picture differs */
-    if (c->have)
+    /* no change notifications: grab, and report a change only if the picture differs; wait a little
+     * first only after a grab that found nothing new (a playing video goes as fast as BitBlt does) */
+    if (c->have && c->gdi_same)
         Sleep((DWORD)RD_MIN(timeout_ms, 33));
     if (!BitBlt(c->mdc, 0, 0, c->w, c->h, c->sdc, c->x, c->y, SRCCOPY | CAPTUREBLT))
         return -1;
@@ -310,7 +312,8 @@ static int gdi_next(dsk_capture_t *c, dsk_frame_t *f, int timeout_ms)
     }
     GdiFlush();
     size_t n = (size_t)c->w * c->h * 4;
-    if (c->have && !memcmp(c->out, c->bits, n))
+    c->gdi_same = c->have && !memcmp(c->out, c->bits, n);
+    if (c->gdi_same)
         return 0;
     memcpy(c->out, c->bits, n); /* alpha stays as GDI left it: the encoder reads B, G, R only */
     c->have = 1;
