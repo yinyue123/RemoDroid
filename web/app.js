@@ -794,20 +794,40 @@ function drawTouches(c, W, H, u, t) {
 }
 
 /* ================= HUD ================= */
-/* How the WebRTC media gets here, from the selected ICE candidate pair:
- * relay = through a TURN server, srflx/prflx = straight through NAT (STUN found the address),
- * host = straight on the same network. */
+/* The path the media takes, from the selected ICE candidate pair, as addresses:
+ *   from   this device's own address:port, and (NAT …) the public one the internet sees it as
+ *   relay  a TURN server's address:port forwarding the packets, when one does
+ *   to     the far end's address:port (the computer's, or the relay's that stands for it)
+ * Candidate types: host = an address on the device itself, srflx/prflx = the public address a NAT
+ * maps it to (found through STUN, or from the first packets), relay = an address on a TURN server. */
+const hostPort = (a, p) => { /* addresses come from the far end's offer: nothing but an address */
+  if (!a) return '?';
+  a = String(a).replace(/[^0-9A-Za-z.:_-]/g, '');
+  return (a.includes(':') ? `[${a}]` : a) + (p ? ':' + (p | 0) : '');
+};
 function rtcRoute(rep) {
   let pair = null;
   rep.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = rep.get(r.selectedCandidatePairId); });
   if (!pair) rep.forEach(r => { if (!pair && r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r; });
   if (!pair) return null;
   const l = rep.get(pair.localCandidateId) || {}, r = rep.get(pair.remoteCandidateId) || {};
-  const types = [l.candidateType, r.candidateType];
-  const mode = types.includes('relay') ? 'TURN relay' : types.some(t => t === 'srflx' || t === 'prflx') ? 'P2P (STUN)' : 'direct (LAN)';
+  const relayed = l.candidateType === 'relay' || r.candidateType === 'relay';
+  const nat = [l.candidateType, r.candidateType].some(t => t === 'srflx' || t === 'prflx');
+  const mode = relayed ? 'relayed (TURN)' : nat ? 'direct, through NAT' : 'direct, same network';
   const proto = (l.candidateType === 'relay' && l.relayProtocol) || l.protocol || '';
-  const via = types.includes('relay') ? (l.candidateType === 'relay' ? (l.url || l.address || '') : (r.address || '')) : (r.address || '');
-  return { mode, proto, via: String(via).replace(/^turns?:/, '').replace(/\?.*$/, ''), local: l.candidateType, remote: r.candidateType };
+  /* the browser hides this device's own addresses (mDNS): then only the port is known */
+  const known = a => a && a !== '0.0.0.0' && a !== '::';
+  const own = known(l.relatedAddress) ? hostPort(l.relatedAddress, l.relatedPort) : `this device${l.relatedPort ? ', port ' + (l.relatedPort | 0) : ''}`;
+  const mine = known(l.address) ? hostPort(l.address, l.port) : `this device${l.port ? ', port ' + (l.port | 0) : ''}`;
+  let from, relay = '', to = hostPort(r.address, r.port);
+  if (l.candidateType === 'relay') { /* we send to our TURN server, which sends on from its address */
+    from = own;
+    relay = mine + ' (ours)';
+  } else {
+    from = l.candidateType === 'host' ? mine : `${own} (NAT ${mine})`;
+  }
+  if (r.candidateType === 'relay') { relay = relay ? relay + ', ' + to + ' (theirs)' : to + ' (theirs)'; to = `the ${noun()}, behind it`; }
+  return { mode, proto, from, relay, to };
 }
 let prevBytes = 0, prevT = 0;
 async function tickStats() {
@@ -841,7 +861,9 @@ async function tickStats() {
       `<b>${Math.round(l.fps || 0)}</b> fps <span class="dim">/ ${p.fps || '—'}</span> · <b>${((l.kbps || 0) / 1000).toFixed(1)}</b> Mbps<br>` +
       `rtt <b>${l.rtt ?? p.rtt_ms ?? '—'}</b> ms · jb <b>${l.jbMs ?? '—'}</b> ms · lost <b>${l.lost ?? 0}</b><br>` +
       `${codecLabel()} · ${l.size || '—'} · ${S.mode} <span class="dim">${p.target_kbps ? '→ ' + (p.target_kbps / 1000).toFixed(1) + ' Mbps' : ''}</span><br>` +
-      `<span class="dim">webrtc</span> <span class="rtc">${l.route ? l.route.mode : '—'}</span>${l.route ? ` ${l.route.proto} <span class="dim">${l.route.local}→${l.route.remote}</span>` : ''}<br>` +
+      `<span class="dim">path</span> <span class="rtc">${l.route ? l.route.mode : '—'}</span>${l.route ? ` · ${l.route.proto}` : ''}<br>` +
+      (l.route ? `<span class="dim">from</span> ${l.route.from}<br>` + (l.route.relay ? `<span class="dim">relay</span> ${l.route.relay}<br>` : '') +
+        `<span class="dim">to</span> ${l.route.to}<br>` : '') +
       `<span class="dim">decoder</span> ${dec} ${l.decMs ? l.decMs + ' ms' : ''}${desk() ? '' : ` · <span class="dim">usb</span> ${p.path || '—'}`}${st.hasAudio ? ` · <span class="dim">sound</span> ${p.audio ? (video.muted ? 'muted' : 'on') : 'off'}` : ''}<br>` +
       `<span class="dim">panel</span> ${st.panel} · <span class="dim">input</span> ${st.inputs}<span class="hex">${st.lastHex}</span>`;
   }

@@ -399,6 +399,12 @@ async def trackpad(browser, http_port, probe, logs):
     await page.locator("#menuFull").click()
     await page.wait_for_timeout(600)
     ok["fullscreen_toggles"] = went and not await page.evaluate(fs)
+    # the stats overlay names the path and shows its addresses: from this browser's ip:port to the agent's
+    await page.wait_for_timeout(1200)
+    hud = await page.evaluate("() => document.querySelector('#hud').innerText")
+    out["hud_path"] = [l for l in hud.split("\n") if l.split(" ")[0] in ("path", "from", "relay", "to")]
+    ok["hud_path"] = (bool(re.search(r"^path direct, same network · udp$", hud, re.M))
+                      and bool(re.search(r"^from (\S+:\d+|this device, port \d+)$", hud, re.M)) and bool(re.search(r"^to \S+:\d+$", hud, re.M)))
     # a new codec applies at once: a fresh stream, with video again
     pcs = await page.evaluate("() => window.__pcs.length")
     await page.locator("#ball").click()
