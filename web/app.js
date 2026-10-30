@@ -1086,7 +1086,7 @@ function openSheet(id) {
   openId = id;
   $('#backdrop').hidden = false;
   $('#sheet-' + id).hidden = false;
-  if (id === 'clip') refreshClip();
+  if (id === 'clip') { clipEdited = false; refreshClip(); }
   if (id === 'settings') renderTab(currentTab);
   if (id === 'turn') { renderTurn(); testTurns(); }
   if (id === 'photo') $('#ph-dest').textContent = desk() ? `to ${uploadDir()}` : `to ${S.destDir}${S.mediaScan ? ' · added to Gallery' : ''}`;
@@ -1173,6 +1173,7 @@ $('#turnTest').addEventListener('click', () => testTurns());
 
 /* ================= clipboard (§4.8) ================= */
 let androidClip = '';
+let clipEdited = false; /* text typed into the sheet: a copy on the device doesn't replace it */
 const clipHist = [];
 function pushHist(dir, text) {
   if (!text) return;
@@ -1180,30 +1181,31 @@ function pushHist(dir, text) {
   clipHist.unshift({ dir, text }); if (clipHist.length > 8) clipHist.pop();
 }
 function refreshClip() {
-  $('#clipAndroid').value = androidClip;
+  if (!clipEdited) $('#clipAndroid').value = androidClip;
   $('#clipSyncState').textContent = S.clipSync ? 'Sync on · text both ways' : 'Sync off · manual only';
   const ul = $('#clipHist'); ul.textContent = '';
   if (!clipHist.length) ul.append(el('li', { class: 'note', text: 'Nothing copied yet.' }));
   for (const h of clipHist) {
     const b = el('button', { type: 'button' }, el('span', { class: 'pill ' + (h.dir === 'android' ? 'ok' : ''), text: h.dir === 'android' ? 'Android' : 'iPhone' }),
       el('span', { class: 't', text: h.text }));
-    b.addEventListener('click', () => { $('#clipAndroid').value = h.text; $('#clipAndroid').focus(); });
+    b.addEventListener('click', () => { $('#clipAndroid').value = h.text; clipEdited = true; $('#clipAndroid').focus(); });
     ul.append(el('li', {}, b));
   }
 }
 function sendClip(text, paste) {
   if (!text.trim()) { toast('Nothing to send — the text is empty'); return; }
   sendCtrl('clip.set', { text, paste: !!paste }, true).then(() => {
-    androidClip = text; pushHist('iphone', text); refreshClip();
+    androidClip = text; pushHist('iphone', text); clipEdited = false; refreshClip();
     toast(paste ? 'Sent and pasted on Android' : 'Android clipboard updated');
   }).catch(e => toast('Not sent: ' + e.message));
 }
+$('#clipAndroid').addEventListener('input', () => { clipEdited = true; });
 $('#clipSend').addEventListener('click', () => sendClip($('#clipAndroid').value, S.autoPaste));
 $('#clipSendPaste').addEventListener('click', () => sendClip($('#clipAndroid').value, true));
 $('#clipCopy').addEventListener('click', () => copyText($('#clipAndroid').value).then(ok => toast(ok ? 'Copied to iPhone clipboard' : 'Copy blocked — select the text and copy it')));
 $('#clipPaste').addEventListener('paste', () => setTimeout(() => toast('Pasted — tap Send to Android'), 0));
 $('#clipPasteSend').addEventListener('click', () => { sendClip($('#clipPaste').value, S.autoPaste); $('#clipPaste').value = ''; });
-$('#clipPasteEdit').addEventListener('click', () => { $('#clipAndroid').value = $('#clipPaste').value; $('#clipPaste').value = ''; });
+$('#clipPasteEdit').addEventListener('click', () => { $('#clipAndroid').value = $('#clipPaste').value; $('#clipPaste').value = ''; clipEdited = true; });
 let clipbarTimer = 0;
 function androidCopied(text) {
   androidClip = text; pushHist('android', text);
