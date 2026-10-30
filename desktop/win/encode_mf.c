@@ -44,7 +44,10 @@ struct dsk_hwvideo {
     int have_frame, want_key;
     int software;                 /* Microsoft's own encoder, on the CPU */
     int rate_fps;                 /* the frame rate the encoder budgets for */
+    int real_time;                /* each frame stands for the time since the last one */
     LONGLONG last_t;              /* the last input's time, 100 ns */
+    unsigned n_in, n_out, n_busy; /* for the log */
+    uint64_t log_ms;
     uint64_t last_in_ms;
     int outputs;
     uint8_t *seqhdr;              /* SPS/PPS (VPS) from the output type */
@@ -145,12 +148,15 @@ static int configure(dsk_hwvideo_t *v, IMFActivate *act, char *err, size_t cap)
         snprintf(err, cap, "%s: no event generator", v->name);
         return -1;
     }
-    /* A constant bitrate is shared out per frame by the frame rate. The CPU encoder can't keep up with
-     * 60 fps anyway, and a screen sends a frame only when it changes, so budgeting for 60 left each frame
-     * of a scroll a sliver of the bitrate (and most of it unsent): it budgets for 30 at most. */
+    /* A constant bitrate is shared out per frame by the frame rate, but a screen sends a frame only when
+     * it changes, so a scroll's frames can each get a sliver of it (and most of it go unsent). Being
+     * measured on the CPU encoder ([video] mf_max_fps, mf_timing = real): off by default for now. */
     v->rate_fps = c->fps > 0 ? c->fps : 30;
-    if (v->software)
-        v->rate_fps = RD_MIN(v->rate_fps, 30);
+    long cap_fps = desk_conf_int("video", "mf_max_fps", 0);
+    if (cap_fps > 0)
+        v->rate_fps = RD_MIN(v->rate_fps, (int)cap_fps);
+    v->real_time = !strcmp(desk_conf("video", "mf_timing", "fixed"), "real");
+    LOGI("video: %s budgets for %d fps, %s frame times", v->name, v->rate_fps, v->real_time ? "real" : "fixed");
     if (SUCCEEDED(IMFTransform_QueryInterface(v->mft, &RD_IID_ICodecAPI, (void **)&v->api))) {
         set_bool(v->api, &RD_AVLowLatencyMode, 1);
         set_u32(v->api, &RD_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
@@ -309,6 +315,7 @@ static void emit(dsk_hwvideo_t *v, IMFSample *s)
             v->cb(v->ud, d, n, t / 10, key);
         }
         v->outputs++;
+        v->n_out++;
         IMFMediaBuffer_Unlock(mb);
     }
     IMFMediaBuffer_Release(mb);
@@ -397,12 +404,14 @@ static int feed(dsk_hwvideo_t *v)
     MFCreateSample(&s);
     IMFSample_AddBuffer(s, mb);
     IMFMediaBuffer_Release(mb);
-    /* how long this frame stands for: the time since the last one (a screen sends frames only as it
-     * changes), between a 60th of a second and 100 ms, so its share of the bitrate follows */
     LONGLONG t = (LONGLONG)rd_mono_ms() * 10000, dur = 10000000 / v->rate_fps;
-    if (v->last_t && t > v->last_t)
-        dur = RD_MIN(RD_MAX(t - v->last_t, 10000000 / 60), 1000000);
-    v->last_t = t;
+    if (v->real_time && v->last_t && t > v->last_t) {
+        /* the frame stands for the time since the last one, up to 100 ms, and the samples stay
+         * back to back: it starts where the last one ended */
+        dur = RD_MIN(t - v->last_t, 1000000);
+        t -= dur;
+    }
+    v->last_t = (LONGLONG)rd_mono_ms() * 10000;
     IMFSample_SetSampleTime(s, t);
     IMFSample_SetSampleDuration(s, dur);
     if (v->want_key && v->api) {
@@ -411,8 +420,19 @@ static int feed(dsk_hwvideo_t *v)
     }
     HRESULT hr = IMFTransform_ProcessInput(v->mft, 0, s, 0);
     IMFSample_Release(s);
-    if (hr == MF_E_NOTACCEPTING)
+    uint64_t now = rd_mono_ms();
+    if (now - v->log_ms >= 10000) { /* what goes in and comes out, every 10 s */
+        if (v->log_ms)
+            LOGI("video: %s: %u frames in, %u out, %u refused in 10 s", v->name, v->n_in, v->n_out, v->n_busy);
+        v->n_in = v->n_out = v->n_busy = 0;
+        v->log_ms = now;
+    }
+    if (hr == MF_E_NOTACCEPTING) {
+        v->n_busy++;
         return 0;
+    }
+    if (SUCCEEDED(hr))
+        v->n_in++;
     if (FAILED(hr)) {
         LOGW("video: %s: ProcessInput 0x%08lx", v->name, (unsigned long)hr);
         return -1;
