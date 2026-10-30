@@ -1452,7 +1452,9 @@ window.addEventListener('resize', () => { if (!fkb.el.hidden) placeFkb(fkb.pos.x
  * moves and the scroll as 0x02, like a mouse's; the zoom stays here. The picture takes the same
  * gestures as the pad. */
 const tpad = $('#tpad'), tpSurface = $('#tpadSurface'), tpKeys = $('#tpadKeys'), tpCur = $('#tpCursor'), tpBall = $('#tpBall');
-const TP_MAX = 4, TP_SLOP = 8, TP_TAP_MS = 250, TP_AGAIN_MS = 300, TP_HEAD = 36;
+/* a tap: lifted within TP_TAP_MS, moved under TP_SLOP px, as forgiving as iOS's own (250 ms and 8 px missed
+ * unhurried taps and wobbly thumbs) */
+const TP_MAX = 4, TP_SLOP = 12, TP_TAP_MS = 450, TP_AGAIN_MS = 300, TP_HEAD = 36;
 const tpTake = e => tp.on; /* a mouse or pen is a finger on it too (§5) */
 const phoneSized = () => (navigator.maxTouchPoints || 0) > 0 && Math.min(screen.width, screen.height) < 500;
 function tpWanted() {
@@ -1686,6 +1688,9 @@ function tpTouch(type, e) {
   const t = now();
   if (type === 'down') {
     closeMenu(); tpMomStop();
+    /* the first finger of a new touch: anything the pad still has down was lifted without the page hearing
+     * of it, and would make every tap a second finger (no click until a reload) */
+    if (e.isPrimary && tp.pts.size && !tp.pts.has(e.pointerId)) tpGestureEnd();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
     tp.pts.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t, ts: e.timeStamp });
     const g = tp.g, n = tp.pts.size;
@@ -1745,7 +1750,7 @@ function tpTouch(type, e) {
     tp.cx = g.cx0; tp.cy = g.cy0; tpLayout();
     tpClick(0);
     tp.lastTap = t;
-  } else if (g.mode === 'two' && t - g.t0 < 300) {
+  } else if (g.mode === 'two' && t - g.t0 < TP_TAP_MS) {
     if (g.far <= TP_SLOP) { tp.cx = g.cx0; tp.cy = g.cy0; tpLayout(); }
     tpClick(g.n >= 3 ? 1 : 2); /* two fingers: right click; three: middle */
   } else if (g.mode === 'scroll' && t - g.ct < 80) tpMomentum(g.vx, g.vy);

@@ -196,16 +196,18 @@ Details that make it feel like an Apple trackpad rather than a touch screen:
   burst don't count as a flick) and `gain` a curve like macOS's: flat about 1.0 below 50 pt/s, rising to about 4 above
   800 pt/s. It is in CSS pixels of the visible picture, so at any zoom the cursor moves over what you see
   at the speed your finger does; the **Move speed** setting (⚙, §8) scales it.
-- **Click without delay.** A tap is a tap if the finger lifts within 250 ms and moves less than 8 pt.
+- **Click without delay.** A tap is a tap if the finger lifts within 450 ms and moves less than 12 pt,
+  as forgiving as iOS's own taps (no time limit short of the half-second long press, 10 pt of movement):
+  250 ms and 8 pt, as first set, missed unhurried taps and wobbly thumbs.
   The click is sent at lift, not after waiting to see if a second tap follows, so a single click is not
   slowed down. Double-clicking to open a file is two taps: each is a click, and the computer turns the
   pair into a double click itself, by its own double-click time (500 ms by default on Windows and macOS),
   as it would for a mouse. Nothing in the viewer waits for, or reinterprets, a second tap.
 - **Both clicks of a double click land on the same pixel.** The cursor does not move while a finger is
-  still within its 8 pt tap distance, so a wobble during a tap moves nothing, and touching down again
+  still within its 12 pt tap distance, so a wobble during a tap moves nothing, and touching down again
   somewhere else on the pad doesn't move the cursor either, because the pad is relative. Windows only
   counts two clicks as a double click when they are within 4 px of each other, so this matters.
-- **Tap then drag**: if, within 300 ms of a tap, the finger comes down again and moves more than 8 pt, the first tap's
+- **Tap then drag**: if, within 300 ms of a tap, the finger comes down again and moves more than 12 pt, the first tap's
   click is not a click any more but the start of a drag: the button goes down at the second touch and up
   when that finger lifts. To make this possible without delaying every click, the first tap sends
   down/up at once, and the drag's down is a new press; for selecting text and moving windows this is the
@@ -223,6 +225,10 @@ Details that make it feel like an Apple trackpad rather than a touch screen:
   computer sees an ordinary smooth wheel.
 - **A palm or a third finger resting** while one finger moves is ignored: only the first finger down
   moves the cursor until it lifts.
+- **A lift the page never heard of doesn't stick.** If the browser drops a finger's lift (iOS can, when
+  something interrupts the touch), that finger would count as still down, and every later tap as a
+  second finger: no click again until a reload. A touch the browser marks as the first of a new
+  gesture (`isPrimary`) ends whatever the pad still had down.
 
 The wheel message is unchanged (0x02, `sendScroll()`), sent at `(cx, cy)` so it scrolls whatever is under
 the cursor, as a real trackpad does.

@@ -199,6 +199,26 @@ async def trackpad(browser, http_port, probe, logs):
     await drag(x - 20, y + 40, 0, -80, steps=10, ms=30, fingers=2)
     ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] in (4, 5))
     ok["scroll_down"] = bool(ev and ev["b"] == 5)
+    # taps as forgiving as iOS's: up to 450 ms and 12 px; a longer hold isn't a click; and a finger whose
+    # lift the page never got (iOS can drop one) doesn't turn every later tap into a second finger
+    await page.wait_for_timeout(1500)  # the scroll's momentum
+
+    async def tap_v(ms=0, wob=0, stale=False):
+        if stale:
+            await page.evaluate("() => document.querySelector('#tpadSurface').dispatchEvent(new PointerEvent('pointerdown',"
+                                " { pointerId: 77, pointerType: 'touch', isPrimary: true, bubbles: true, clientX: 100, clientY: 700 }))")
+        probe.drain()
+        await touch("touchStart", [{"x": x, "y": y, "id": 0}])
+        if wob:
+            await touch("touchMove", [{"x": x + wob, "y": y, "id": 0}])
+        await asyncio.sleep(ms / 1000)
+        await touch("touchEnd", [])
+        ev = await probe.wait(lambda e: e["ev"] == "button" and e["down"] == 1, 1.5)
+        await asyncio.sleep(0.5)  # not the second tap of a double tap
+        return ev and ev["b"]
+    out["taps"] = {"held_400": await tap_v(ms=400), "moved_10": await tap_v(ms=60, wob=10),
+                   "held_600": await tap_v(ms=600), "after_lost_lift": await tap_v(ms=60, stale=True)}
+    ok["taps_forgiving"] = out["taps"] == {"held_400": 1, "moved_10": 1, "held_600": None, "after_lost_lift": 1}
     # ⚙: Move speed 2× doubles the same move
     await page.wait_for_timeout(1200)  # the scroll's momentum
     await page.locator("#tpSet").tap()
