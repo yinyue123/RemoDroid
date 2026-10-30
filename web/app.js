@@ -1407,8 +1407,8 @@ window.addEventListener('resize', () => { if (!fkb.el.hidden) placeFkb(fkb.pos.x
 
 /* ---- computers: the trackpad, for a phone (trackpad.md) ----
  * The bottom of the screen is a trackpad (or the docked keyboard, or folded away to a button). The
- * pointer is drawn here, in the middle of the picture above the panel, and the picture slides under it,
- * magnified so the computer's text is readable. A finger moves the pointer by how far it moves, not by
+ * pointer is drawn here, over the picture above the panel, magnified so the computer's text is readable;
+ * the picture scrolls when the pointer comes within 10% of the area's edge. A finger moves the pointer by how far it moves, not by
  * where it touches: tap = click, two taps = double click, tap then drag = drag, two-finger tap = right
  * click, two fingers scroll (with momentum) or pinch to zoom. The pointer goes out as absolute 0x03
  * moves and the scroll as 0x02, like a mouse's; the zoom stays here. The picture takes the same
@@ -1466,7 +1466,7 @@ function tpSync() {
   if (on !== tp.on) {
     tp.on = on;
     tpGestureEnd();
-    if (on) { hideFkb(); tpShow(tpPrefs().state, false); }
+    if (on) { hideFkb(); tp.left = null; tpShow(tpPrefs().state, false); }
     else { tpad.hidden = tpBall.hidden = true; tpSetClose(); tpSaveView(); }
     tpPointer();
   }
@@ -1481,6 +1481,7 @@ function tpLoadView() {
   const v = viewOf();
   tp.scale = v.scale || 0; tp.lastScale = v.lastScale || 0;
   tp.cx = v.cx === undefined ? .5 : v.cx; tp.cy = v.cy === undefined ? .5 : v.cy;
+  tp.left = null; /* placed around the cursor again */
 }
 function tpSaveView() {
   clearTimeout(tp.saveT); tp.saveT = 0;
@@ -1506,16 +1507,34 @@ function tpMeasure() {
 }
 const tpFit = () => { const a = tp.area, [w, h] = tpScreen(); return Math.min((a.r - a.l) / w, (a.b - a.t) / h); };
 const tpHi = () => Math.max(TP_MAX, tpFit());
+/* the picture stays where it is (tp.left, tp.top) while the cursor moves over it, until the cursor comes
+ * within 10% of the visible area's edge: then it scrolls to keep the cursor there, until its own edge
+ * meets the area's and the cursor goes on to the screen's edge (§3). A zoom keeps the cursor where it is
+ * on the screen; at the start it is in the middle. */
+const TP_MARGIN = .1;
+function tpPlaceAxis(pos, c, lo, hi, size) { /* one axis: the picture's edge, the cursor in it, the area */
+  if (size <= hi - lo) return lo + (hi - lo - size) / 2; /* smaller than the area: centred, still */
+  const m = (hi - lo) * TP_MARGIN, q = pos + c;
+  if (q < lo + m) pos += lo + m - q;
+  else if (q > hi - m) pos -= q - (hi - m);
+  return clamp(pos, hi - size, lo);
+}
 function tpLayout() {
   if (!tp.area) tpMeasure();
   if (!tp.scale) tp.scale = Math.max(1, tpFit()); /* a screen pixel to a CSS pixel: text as big as on the computer */
-  const a = tp.area, [w, h] = tpScreen(), s = tp.scale, ax = (a.l + a.r) / 2, ay = (a.t + a.b) / 2;
-  const x = ax - tp.cx * w * s, y = ay - tp.cy * h * s;
+  const a = tp.area, [w, h] = tpScreen(), s = tp.scale, pw = w * s, ph = h * s;
+  if (tp.dim !== w + 'x' + h) { tp.dim = w + 'x' + h; tp.left = null; } /* another screen size: placed again */
+  if (tp.left == null) { tp.left = (a.l + a.r) / 2 - tp.cx * pw; tp.top = (a.t + a.b) / 2 - tp.cy * ph; }
+  else if (tp.ls !== s) { tp.left = tp.qx - tp.cx * pw; tp.top = tp.qy - tp.cy * ph; } /* a zoom, about the cursor */
+  tp.ls = s;
+  tp.left = tpPlaceAxis(tp.left, tp.cx * pw, a.l, a.r, pw);
+  tp.top = tpPlaceAxis(tp.top, tp.cy * ph, a.t, a.b, ph);
+  tp.qx = tp.left + tp.cx * pw; tp.qy = tp.top + tp.cy * ph;
   for (const e of [video, cv]) {
     e.style.left = e.style.top = '0px'; e.style.width = w + 'px'; e.style.height = h + 'px';
-    e.style.transformOrigin = '0 0'; e.style.transform = `translate(${x}px,${y}px) scale(${s})`;
+    e.style.transformOrigin = '0 0'; e.style.transform = `translate(${tp.left}px,${tp.top}px) scale(${s})`;
   }
-  tpCur.style.transform = `translate(${ax - 1.5}px,${ay - 1.5}px)`; /* the arrow's tip on the anchor */
+  tpCur.style.transform = `translate(${tp.qx - 1.5}px,${tp.qy - 1.5}px)`; /* the arrow's tip on the cursor */
 }
 /* from layout(): the window changed, or the picture did */
 function tpRelayout() {

@@ -305,8 +305,8 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   full screen, sound, photo upload, clipboard and settings.
 - **On a computer** the mouse and keyboard go straight through (keys are physical, so the computer's own layout
   applies; ⌘ and Ctrl swap when only one side is a Mac). From an iPhone, the bottom of the screen is a
-  **trackpad**, like a Mac's: the pointer stays in the middle of a magnified picture, so the computer's text is
-  readable, and the picture slides under it. Tap to click, tap twice to double-click, tap then drag to drag,
+  **trackpad**, like a Mac's: the pointer moves over a magnified picture, so the computer's text is readable,
+  and the picture scrolls when the pointer comes within 10% of the edge, until the screen's own edge. Tap to click, tap twice to double-click, tap then drag to drag,
   two-finger tap to right-click, scroll with two fingers, spread them to zoom; **⤢** shows the whole screen,
   the trackpad and the keyboard are one panel of one size: **⌨** in its header's right corner turns it into the
   keyboard and, in the same spot, **▭** back; **⌄** folds it to a button, dragging the header resizes it and **⚙**

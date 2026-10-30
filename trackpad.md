@@ -10,7 +10,7 @@ Contents
 
 1. [The problem](#1-the-problem)
 2. [What it looks like](#2-what-it-looks-like)
-3. [The cursor stays in the middle](#3-the-cursor-stays-in-the-middle)
+3. [The cursor and the picture: a 10% margin](#3-the-cursor-and-the-picture-a-10-margin)
 4. [Zoom](#4-zoom)
 5. [Gestures](#5-gestures)
 6. [The bottom panel: trackpad, keyboard, collapsed](#6-the-bottom-panel-trackpad-keyboard-collapsed)
@@ -37,8 +37,9 @@ A trackpad fixes both:
 - **The picture is magnified** so the text is readable, and only a part of the screen is shown at a time.
 - **The finger no longer points at the target.** It moves a cursor, the way a finger on a MacBook's
   trackpad does, so precision comes from the cursor's tip, not from the fingertip.
-- **The view follows the cursor.** The cursor sits still in the middle of the visible area and the
-  picture slides under it, so wherever the cursor goes, it is in view and the text around it is readable.
+- **The view follows the cursor.** The cursor moves over a still picture; when it comes within 10% of
+  the visible area's edge, the picture scrolls to keep it there, so wherever the cursor goes it is in
+  view, with the text around it readable.
 
 ## 2. What it looks like
 
@@ -51,7 +52,7 @@ Portrait iPhone, trackpad open:
 │   Edit  Format  View  Help   │      the picture, magnified;
 │                              │      it slides under the cursor
 │   Hello wor▌                 │
-│              ↖               │  ← the cursor, always in the middle of this area
+│              ↖               │  ← the cursor; near an edge of this area the picture scrolls
 │                              │
 │                              │
 ├──────────────────────────────┤
@@ -86,44 +87,52 @@ code repo's terminal (`web/components/FloatingKeyboard.tsx`) and the viewer's ow
 remembered; ⠿⠿ on the header's left shows where to hold it.
 
 Collapsed: the panel is gone and a small round button with a keyboard icon floats at the bottom
-corner. The picture uses the whole screen and the cursor moves to the middle of the whole screen.
+corner. The picture uses the whole screen.
 
 **The switch.** The menu (the ball) has a **Trackpad** item whenever the viewer shows a computer. It is
 lit while the trackpad is on; tapping it switches between the trackpad and Direct (tap where you touch,
 §8) at once, on any device, and the choice is remembered. It is the same item on a phone, an iPad and a
 desktop browser.
 
-## 3. The cursor stays in the middle
+## 3. The cursor and the picture: a 10% margin
 
 **The visible area** is the rectangle between the top of the screen (the top safe-area inset in Safari,
-the very top in the Home Screen app, as `layout()` does today) and the top of the panel. The cursor's
-home, **the anchor**, is the centre of that rectangle. When the panel is resized, switched or collapsed,
-the visible area changes and the anchor moves with it; the picture moves the same amount at the same
-time, so the cursor never jumps off the thing it points at.
+the very top in the Home Screen app, as `layout()` does today) and the top of the panel (on a phone;
+the floating card of an iPad or a desktop is over the picture, so there it is the whole screen).
 
-**The cursor is drawn here, not on the computer.** It is a DOM element (an SVG arrow, with its tip at the
-anchor) above the video. It never moves, so it never lags behind the finger: what moves is the picture,
-and that move is also local and instant. Only the click lands a frame or two later on the computer.
+**The cursor is drawn here, not on the computer.** It is a DOM element (an SVG arrow) above the video, so
+it never lags behind the finger. Only the click lands a frame or two later on the computer.
 
 **The cursor's position on the computer** is kept in the viewer as `tp.cx, tp.cy`, normalised to 0..1 of
 the shared screen, the same coordinates that 0x03 mouse messages already carry (multi-platform.md §8.2).
-The picture is placed so that the point `(cx, cy)` of the screen is drawn exactly at the anchor:
+It is drawn at `left + cx · screenW · scale`, `top + cy · screenH · scale`, where `left, top` is where the
+picture is (`scale` is the zoom, §4).
 
-```
-scale  = CSS px per screen pixel (the zoom, §4)
-left   = anchorX − cx · screenW · scale
-top    = anchorY − cy · screenH · scale
-```
+**The cursor moves; the picture stays.** A finger moves the cursor over the picture, and the picture
+stays where it is, as long as the cursor is more than **10% of the visible area's width (or height) from
+its edge**. That 10% is the margin:
 
-`(cx, cy)` is clamped to 0..1, so the cursor can reach every corner of the screen. When it is near an
-edge, the picture's edge comes into the visible area and the space beyond it is the stage's black
-background. That is the price of "the cursor is always in the middle", and it is what macOS's own
-zoom does with "Keep the pointer centred".
+- **The cursor comes into the margin**: the picture scrolls the other way just as much, so the cursor
+  stays at the margin's line and what's beyond it comes into view, like a magnifier that follows the
+  pointer when it nears an edge.
+- **The picture's edge reaches the visible area's edge** (there's no more screen that way): the picture
+  stops, and the cursor goes on into the margin up to the screen's edge. In a corner both apply, and the
+  cursor reaches the corner.
+- A picture smaller than the visible area that way (zoomed out) doesn't move that way at all: it's
+  centred, and the cursor crosses it.
+
+So the picture never shows black beyond the computer's screen, except around a picture smaller than
+the visible area.
+
+**At the start** the cursor is in the middle of the visible area (the picture placed around it, then
+kept inside the area). **Zooming** (§4) keeps the cursor where it is on the phone's screen and scales the
+picture about it; the margin rule then applies to the new scale. **When the panel is resized,
+switched or collapsed**, the visible area changes and the same rule keeps the cursor in it.
 
 The picture is positioned with a CSS `transform: translate(…) scale(…)` on `#video`, not by setting
 `left`/`top`/`width`/`height` the way `layout()` does for phones, so a drag repaints at 60 fps without
 a relayout. `layout()` keeps its job for phones and for the Direct mode (§8); in trackpad mode it hands
-over to `tpLayout()`.
+over to `tpLayout()`, which keeps where the picture is in `tp.left, tp.top` and applies the margin rule.
 
 **Every change of `(cx, cy)` sends one 0x03 move** (absolute, at most one per animation frame, through
 the existing `queueMove()`), so the real pointer on the computer follows: hover effects, tooltips and
@@ -147,8 +156,8 @@ comfortable to read. That is the default.
 | largest | 4.0 | enough for small print and pixel-exact work; beyond it the video is only blur |
 
 **Spread two fingers to magnify, pinch to shrink**, like a photo on the iPhone. The zoom is about the
-cursor: the point under the cursor stays under it, and since the cursor stays at the anchor, only the
-scale changes. Past the limits the picture follows the fingers a little with resistance (rubber band)
+cursor: the point under the cursor stays under it, and the cursor stays where it is on the screen (then
+the margin rule of §3 applies). Past the limits the picture follows the fingers a little with resistance (rubber band)
 and springs back on release, so the limit is felt rather than being a hard stop.
 
 The zoom is **local**: nothing is sent to the computer, and the computer's own resolution does not
@@ -254,7 +263,7 @@ them (the grip in the middle; ⚙ and ⤢ on the left; ⋯, the switch and ⌄ i
   collapsed from (trackpad or keyboard). The button can be dragged to another spot, which is remembered,
   like the menu ball (`placeBall()`). With the panel collapsed, the whole picture is the trackpad (§5).
 
-Switching animates the panel's height over 200 ms, and the visible area, the anchor and the picture
+Switching animates the panel's height over 200 ms, and the visible area and the picture
 move with it in the same frames (§3), so the cursor stays on its target.
 
 **The keyboard reuses the floating keyboard's keys** (`renderFkb()`, `fkbKey()`, `fkbChar()`): the
@@ -293,8 +302,8 @@ always as tall as the keyboard, so switching never moves the picture.
 - **Double-tap the header** to go back to the default size.
 - Sizes are remembered per orientation (portrait and landscape need different heights).
 - The floating card (iPad, desktop) has a fixed size, 560 × the keyboard's height with 38 pt keys; its
-  header moves it instead of resizing it. It floats over the picture, so the pointer stays in the
-  middle of the whole screen.
+  header moves it instead of resizing it. It floats over the picture, so the visible area (§3) is the
+  whole screen.
 
 ## 8. Settings and what is remembered
 
@@ -382,16 +391,16 @@ No server, Worker or panel changes.
 touch events, against the Linux agent on Xvfb, checking what the X server receives). The touch-screen
 checks before it run with Touch control set to Direct.
 
-- `#tpCursor` sits at the centre of the area above `#tpad`, and the picture starts at 1 CSS px per pixel
+- `#tpCursor` starts at the centre of the area above `#tpad`, and the picture starts at 1 CSS px per pixel
 - a tap clicks at the pointer (the middle of the screen at first), not where the finger is
-- a slow 60 px drag on the pad moves the pointer 60 px, and the arrow on the phone doesn't move
+- a slow 60 px drag on the pad moves the pointer 60 px, the arrow moves 60 px and the picture doesn't
 - two taps, the second elsewhere on the pad and wobbling 5 px: two clicks on the same pixel
 - a two-finger tap right-clicks at the pointer; two fingers dragged up scroll down (button 5)
 - ⚙ opens above the panel; at Move speed 2× a 30 px drag moves the pointer 60 px
 - spreading two fingers zooms in and stops at 4×, and the next tap still clicks at the same pixel;
   ⤢ shows the whole screen and a second ⤢ goes back to 4×
 - ⌨ shows the keyboard and "a", "b" arrive as a, b; ▭ brings the trackpad back
-- ⌄ folds the panel to `#tpBall`, the arrow moves to the middle of the screen, and a tap on the picture
+- ⌄ folds the panel to `#tpBall`, the arrow stays where it was, and a tap on the picture
   clicks at the same pixel as before; tapping `#tpBall` brings the trackpad back
 - the grip stops at 55% of the screen going up and at 120 px going down
 - a reload keeps the panel's height and the zoom
@@ -401,6 +410,9 @@ checks before it run with Touch control set to Direct.
 - in a desktop context with a mouse (no touch screen, so Auto leaves it off), the switch turns it on; a
   mouse click on the pad clicks at the pointer, a press-drag of 60 px moves it 60 px, the right button
   right-clicks at the pointer, and the wheel scrolls
+- the 10% margin, there (a 1280×720 screen at 1× in a 1000×700 window): moving 400 px right moves only
+  the arrow, to x 900; 200 px more and the picture scrolls until its right edge meets the window's, the
+  arrow held at 900 and then going on; at the screen's right edge the arrow is at x 1000
 
 **By hand** on a real iPhone (Safari and the Home Screen app, portrait and landscape) against the Windows
 11 VM and a Mac: reading small text, selecting a word by tap-and-drag, moving a window, scrolling a long
@@ -412,7 +424,7 @@ All four are done, and the menu switch with mouse input after them; the hand tes
 
 | | What | Done when |
 |---|---|---|
-| **T1** | The anchored cursor, relative movement with acceleration, tap / double tap / two-finger right click, the trackpad panel with ⌨, ⚙ (move speed) and ⌄, the collapsed button, the Touch control setting | an iPhone can read and click around Windows 11 comfortably |
+| **T1** | The cursor over the picture with a 10% margin, relative movement with acceleration, tap / double tap / two-finger right click, the trackpad panel with ⌨, ⚙ (move speed) and ⌄, the collapsed button, the Touch control setting | an iPhone can read and click around Windows 11 comfortably |
 | **T2** | Pinch zoom with limits, two-finger scroll with momentum, tap-then-drag, three-finger middle click | the gestures in §5 all work and the e2e checks pass |
 | **T3** | The docked keyboard with ▭ / ⌄ and alt / ⌘, resizing both with limits, sizes per orientation | one-thumb switching between typing and pointing |
 | **T4** | `cursor.show` on macOS; docs | a Mac shows one pointer |

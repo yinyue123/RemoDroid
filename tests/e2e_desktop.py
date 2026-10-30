@@ -170,12 +170,14 @@ async def trackpad(browser, http_port, probe, logs):
     p0 = await click_at(x, y)  # the computer's pointer starts in the middle
     out["start"] = p0
     ok["tap_at_pointer"] = bool(p0 and abs(p0[0] - 640) <= 2 and abs(p0[1] - 360) <= 2)
-    # 60 px to the right moves the pointer 60 px; the tap after it lands there, wherever it is on the pad
+    # 60 px to the right moves the pointer 60 px, and the arrow, not the picture; the tap after it lands
+    # there, wherever it is on the pad
+    v0 = await box("#video")
     await drag(x - 30, y, 60, 0)
     p1 = await click_at(x - 80, y + 20)
     out["moved"] = p1
     ok["move_60"] = bool(p0 and p1 and abs(p1[0] - p0[0] - 60) <= 3 and abs(p1[1] - p0[1]) <= 3)
-    ok["cursor_still"] = (await box("#tpCursor"))["x"] == cur["x"]
+    ok["arrow_moves_picture_stays"] = abs((await box("#tpCursor"))["x"] - cur["x"] - 60) <= 3 and await box("#video") == v0
     # two taps: two clicks on one pixel, though the second lands elsewhere and wobbles
     probe.drain()
     await tap(x, y)
@@ -247,12 +249,12 @@ async def trackpad(browser, http_port, probe, logs):
     ok["keyboard_types"] = got == ["a", "b"]
     await page.locator("#tpKb").tap()
     await page.wait_for_selector("#tpadSurface:not([hidden])")
-    # ⌄: the panel folds to a button, the pointer moves to the middle of the screen with the picture
+    # ⌄: the panel folds to a button; the pointer and the picture stay where they are
+    cur = await box("#tpCursor")
     await page.locator("#tpHide").tap()
     await page.wait_for_selector("#tpBall:not([hidden])")
     await page.wait_for_timeout(400)
-    cur = await box("#tpCursor")
-    ok["collapsed_centre"] = await page.locator("#tpad").is_hidden() and abs(cur["y"] + 1.5 - 422) <= 2
+    ok["collapsed_stays"] = await page.locator("#tpad").is_hidden() and await box("#tpCursor") == cur
     p4 = await click_at(195, 200)  # the picture is a trackpad too
     ok["collapsed_same_point"] = p4 == p2
     await page.locator("#tpBall").tap()
@@ -361,6 +363,29 @@ async def trackpad(browser, http_port, probe, logs):
     await page.mouse.wheel(0, 300)
     ev = await probe.wait(lambda e: e["ev"] == "button" and e["b"] == 5)
     ok["mouse_wheel"] = bool(ev and abs(ev["x"] - m1[0]) <= 2 and abs(ev["y"] - m1[1]) <= 2)
+
+    # the 10% margin: the 1280×720 screen at 1× in the 1000×700 window. The arrow moves freely up to
+    # x 900; past it the picture scrolls until its right edge meets the window's; then the arrow goes on
+    # to the screen's right edge
+    async def mdrag(dx):
+        await asyncio.sleep(0.4)  # not a tap-then-drag
+        await page.mouse.move(x - dx / 2, y)
+        await page.mouse.down()
+        for k in range(1, int(dx / 2) + 1):
+            await page.mouse.move(x - dx / 2 + 2 * k, y)
+            await asyncio.sleep(0.08)
+        await page.mouse.up()
+        await asyncio.sleep(0.2)
+        c, v = await page.locator("#tpCursor").bounding_box(), await page.locator("#video").bounding_box()
+        return c["x"] + 1.5, v["x"]
+    c0, v0 = await mdrag(2)
+    c1, v1 = await mdrag(round((880 - c0) / 2) * 2)
+    c2, v2 = await mdrag(200)
+    c3, v3 = await mdrag(200)
+    out["margin"] = [[round(c0), round(v0)], [round(c1), round(v1)], [round(c2), round(v2)], [round(c3), round(v3)]]
+    ok["margin_free"] = abs(c1 - 880) <= 4 and v1 == v0
+    ok["margin_scrolls"] = v2 < v0 and abs(v2 + 1280 - 1000) <= 2 and 900 < c2 < 1000
+    ok["margin_corner"] = abs(c3 - 1000) <= 2 and v3 == v2
     out["ok"] = ok
     await ctx.close()
     return out
