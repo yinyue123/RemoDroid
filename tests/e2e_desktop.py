@@ -311,6 +311,8 @@ async def trackpad(browser, http_port, probe, logs):
     # a desktop browser with a mouse: Auto leaves it off, the switch turns it on, and the mouse is a finger
     await asyncio.sleep(1.5)
     ctx = await browser.new_context(viewport={"width": 1000, "height": 700})
+    await ctx.add_init_script("""(() => { const O = window.RTCPeerConnection; window.__pcs = [];
+        window.RTCPeerConnection = class extends O { constructor(...a) { super(...a); window.__pcs.push(this); } }; })()""")
     page = await ctx.new_page()
     page.on("pageerror", lambda e: logs.append("PAGEERROR " + str(e)))
     await page.goto(f"http://127.0.0.1:{http_port}/")
@@ -386,6 +388,30 @@ async def trackpad(browser, http_port, probe, logs):
     ok["margin_free"] = abs(c1 - 880) <= 4 and v1 == v0
     ok["margin_scrolls"] = v2 < v0 and abs(v2 + 1280 - 1000) <= 2 and 900 < c2 < 1000
     ok["margin_corner"] = abs(c3 - 1000) <= 2 and v3 == v2
+    # the menu's Full screen goes full screen, and the same button leaves it (it used to take the page
+    # for a Home Screen app, since Chrome reports display-mode fullscreen, and stay)
+    fs = "() => !!document.fullscreenElement"
+    await page.locator("#ball").click()
+    await page.locator("#menuFull").click()
+    await page.wait_for_timeout(600)
+    went = await page.evaluate(fs)
+    await page.locator("#ball").click()
+    await page.locator("#menuFull").click()
+    await page.wait_for_timeout(600)
+    ok["fullscreen_toggles"] = went and not await page.evaluate(fs)
+    # a new codec applies at once: a fresh stream, with video again
+    pcs = await page.evaluate("() => window.__pcs.length")
+    await page.locator("#ball").click()
+    await page.locator('#menu button[data-act="settings"]').click()
+    await page.get_by_role("button", name="H.264", exact=True).click()
+    await page.locator("#sheet-settings button[data-close]").click()
+    try:
+        await page.wait_for_function("n => window.__pcs.length > n && document.querySelector('#disc').hidden"
+                                     " && window.__pcs[window.__pcs.length - 1].connectionState === 'connected'", arg=pcs, timeout=20000)
+        await page.wait_for_function("() => document.querySelector('#video').videoWidth > 0", timeout=10000)
+        ok["codec_applies_now"] = True
+    except Exception:
+        ok["codec_applies_now"] = False
     out["ok"] = ok
     await ctx.close()
     return out

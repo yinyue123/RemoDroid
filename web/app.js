@@ -993,7 +993,11 @@ function syncMenuStates() {
   bark.querySelector('span').textContent = barkOn ? 'Bark on' : 'Bark off';
   $('#menuFull').classList.toggle('on', standalone() || !!(document.fullscreenElement || document.webkitFullscreenElement));
 }
-const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
+/* a Home Screen app (or an installed one), not a page that went full screen: Chrome reports display-mode
+ * fullscreen for those too, and the Full screen button then never left it */
+const fsNow = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches ||
+  (matchMedia('(display-mode: fullscreen)').matches && !fsNow());
 
 /* Sound: Safari only starts audio from a tap, so the first touch on the phone's picture unmutes it.
  * Switching Sound off also stops the capture on the phone, so its own speaker plays again. */
@@ -1029,10 +1033,9 @@ async function toggleBark() {
 }
 function toggleFullscreen() {
   const d = document, root = d.documentElement;
-  if (standalone()) { toast('Already full screen (Home Screen app)'); return; }
-  const fsEl = d.fullscreenElement || d.webkitFullscreenElement;
   const req = root.requestFullscreen || root.webkitRequestFullscreen;
-  if (fsEl) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+  if (fsNow()) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+  if (standalone()) { toast('Already full screen (Home Screen app)'); return; }
   if (req && (d.fullscreenEnabled || d.webkitFullscreenEnabled)) {
     Promise.resolve(req.call(root)).catch(() => openSheet('full'));
     return;
@@ -2400,9 +2403,11 @@ function quality() {
 const AGENT_KEYS = ['screenOff', 'lockOnDisc', 'grace', 'clipSync', 'autoPaste', 'overheat', 'rotation', 'route', 'relay', 'destDir', 'mediaScan', 'overwrite', 'maxMb', 'audio'];
 function changed(key) {
   save();
-  if (['mode', 'preset', 'deskPreset', 'fps', 'kbps', 'codec'].includes(key)) {
+  if (key === 'codec' && st.ready && !DEMO) { /* agreed when the stream starts: a fresh one, now */
+    toast(`Switching to ${S.codec === 'h265' ? 'H.265' : S.codec === 'h264' ? 'H.264' : 'the best codec'}…`);
+    reconnectStream();
+  } else if (['mode', 'preset', 'deskPreset', 'fps', 'kbps', 'codec'].includes(key)) {
     sendCtrl('quality.set', quality(), true).then(() => toast('Quality updated')).catch(e => { if (!DEMO) toast(e.msg || e.message); });
-    if (key === 'codec') toast('The codec changes on the next connection');
   }
   if (key === 'rotation') sendCtrl('rotate', { to: S.rotation }).catch(() => {});
   if (AGENT_KEYS.includes(key)) cmd('agent.config', { [key]: S[key] }, 'Saved to the router');
