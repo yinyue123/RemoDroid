@@ -567,6 +567,9 @@ mf_timing = real            ; Windows: real (each frame stands for the time sinc
                              ; CPU encoder's default) | fixed (the frame rate's; a GPU encoder's default)
 mf_max_fps = 30              ; Windows: the frame rate the encoder budgets the bitrate for, at most
                              ; (30 for the CPU encoder by default, none for a GPU's)
+capture = auto               ; Windows: auto (desktop duplication; GDI on Microsoft's software display
+                             ; adapter, whose duplication shows passing lines across a playing video) | dxgi | gdi
+debug_lines = 0              ; Windows: 1 logs captured frames that hold a thin bright line
 
 [files]
 upload_dir = ~/Downloads/RemoDroid

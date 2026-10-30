@@ -2,6 +2,10 @@
  * what changed, and the pointer comes separately so it's drawn in here), with
  * GDI BitBlt as the fallback where duplication isn't available (Remote Desktop
  * sessions, some virtual machines). Frames are copied to the CPU as BGRA.
+ * On Microsoft's software display adapter (a virtual machine without a GPU)
+ * duplication now and then hands over a frame caught mid-composition: thin
+ * bright lines across a playing video that the screen never shows. GDI copies
+ * the finished picture, so it is used there ([video] capture = auto | dxgi | gdi).
  * A locked session's lock screen is on the secure desktop, out of this
  * process's reach: while locked, the pictures come from the RemoDroidInput
  * helper, if it is installed (inputpipe.h). */
@@ -31,6 +35,7 @@ struct dsk_capture {
     ID3D11Texture2D *staging;
     int ptr_visible, ptr_x, ptr_y;
     int ptr_gen; /* ptr_gen when the frame was last composed */
+    int soft_adapter; /* Microsoft's software display adapter */
     uint8_t *shape;
     UINT shape_cap;
     DXGI_OUTDUPL_POINTER_SHAPE_INFO shape_info;
@@ -119,6 +124,8 @@ static int dxgi_open(dsk_capture_t *c, char *err, size_t cap)
     IDXGIAdapter1 *ad = NULL;
     IDXGIOutput *out = NULL;
     for (UINT i = 0; !out && IDXGIFactory1_EnumAdapters1(fac, i, &ad) == S_OK; i++) {
+        DXGI_ADAPTER_DESC1 ad_desc;
+        c->soft_adapter = SUCCEEDED(IDXGIAdapter1_GetDesc1(ad, &ad_desc)) && ad_desc.VendorId == 0x1414;
         IDXGIOutput *o;
         for (UINT j = 0; !out && IDXGIAdapter1_EnumOutputs(ad, j, &o) == S_OK; j++) {
             DXGI_OUTPUT_DESC d;
@@ -406,9 +413,15 @@ dsk_capture_t *dsk_capture_open(const dsk_screen_t *s, char *err, size_t cap)
     c->clean = malloc((size_t)c->w * c->h * 4);
     c->out = malloc((size_t)c->w * c->h * 4);
     char why[160] = "";
-    if (dxgi_open(c, why, sizeof why) == 0) {
-        LOGI("capture: desktop duplication %dx%d at %d,%d", c->w, c->h, c->x, c->y);
-        return c;
+    const char *how = desk_conf("video", "capture", "auto");
+    if (!strcmp(how, "gdi")) {
+        snprintf(why, sizeof why, "[video] capture = gdi");
+    } else if (dxgi_open(c, why, sizeof why) == 0) {
+        if (strcmp(how, "auto") || !c->soft_adapter) {
+            LOGI("capture: desktop duplication %dx%d at %d,%d", c->w, c->h, c->x, c->y);
+            return c;
+        }
+        snprintf(why, sizeof why, "Microsoft's software display adapter, whose duplication shows passing lines");
     }
     dxgi_close(c);
     if (gdi_open(c) == 0) {
