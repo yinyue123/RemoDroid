@@ -1,0 +1,132 @@
+PulseAudio RAOP: answer a HomePod's timing requests from ANNOUNCE on, and take timing_port=0.
+
+A HomePod (AirTunes 980) sends NTP timing requests to the sender's timing port as soon as it gets SETUP,
+and replies to SETUP only once they are answered: after 30 s without, it fails SETUP with 500. Stock
+PulseAudio opens the port at ANNOUNCE but its sink thread polls it only after the SETUP reply, when the
+socket is connected. Until then the main loop now answers, with recvfrom/sendto.
+
+The reply then says timing_port=0 (the receiver takes no timing requests), which stock PulseAudio fails
+on; the timing socket is connected to the port the receiver asked from instead.
+
+--- a/src/modules/raop/raop-client.c
++++ b/src/modules/raop/raop-client.c
+@@ -112,6 +112,8 @@
+     int udp_sfd;
+     int udp_cfd;
+     int udp_tfd;
++    pa_io_event *early_timing; /* answers timing between ANNOUNCE and the SETUP reply */
++    uint16_t timing_peer_port; /* where the receiver's timing requests came from */
+ 
+     pa_raop_packet_buffer *pbuf;
+ 
+@@ -697,6 +699,45 @@
+     send_udp_timing_packet(c, data, initial_time);
+ }
+ 
++/* A receiver may ask the timing port before it answers SETUP, and wait for the reply: a HomePod holds
++ * SETUP for 30 s, then fails it with 500. The sink thread polls the port only once SETUP is done and the
++ * socket is connected, so until then the main loop answers here, to whoever asked. */
++static void early_timing_cb(pa_mainloop_api *a, pa_io_event *e, int fd, pa_io_event_flags_t f, void *userdata) {
++    pa_raop_client *c = userdata;
++    uint8_t packet[64];
++    struct sockaddr_storage from;
++    socklen_t fromlen = sizeof(from);
++    uint32_t *reply = NULL;
++    struct timeval tv;
++    uint64_t rci;
++    size_t size;
++    ssize_t n;
++
++    n = recvfrom(fd, packet, sizeof(packet), 0, (struct sockaddr *) &from, &fromlen);
++    if (n != 32 || packet[0] != 0x80 || (packet[1] ^ 0x80) != PAYLOAD_TIMING_REQUEST)
++        return;
++    if (from.ss_family == AF_INET)
++        c->timing_peer_port = ntohs(((struct sockaddr_in *) &from)->sin_port);
++#ifdef HAVE_IPV6
++    else if (from.ss_family == AF_INET6)
++        c->timing_peer_port = ntohs(((struct sockaddr_in6 *) &from)->sin6_port);
++#endif
++    rci = timeval_to_ntp(pa_rtclock_get(&tv));
++    size = build_udp_timing_packet(c, (const uint32_t *) (packet + sizeof(udp_timing_header)), rci, &reply);
++    if (reply && size > 0) {
++        if (sendto(fd, reply, size, 0, (struct sockaddr *) &from, fromlen) < 0)
++            pa_log_debug("early timing reply: %s", pa_cstrerror(errno));
++        pa_xfree(reply);
++    }
++}
++
++static void early_timing_stop(pa_raop_client *c) {
++    if (c->early_timing) {
++        c->core->mainloop->io_free(c->early_timing);
++        c->early_timing = NULL;
++    }
++}
++
+ static int connect_udp_socket(pa_raop_client *c, int fd, uint16_t port) {
+     struct sockaddr_in sa4;
+ #ifdef HAVE_IPV6
+@@ -981,6 +1022,10 @@
+                 c->udp_tfd  = open_bind_udp_socket(c, &tport);
+                 if (c->udp_cfd < 0 || c->udp_tfd < 0)
+                     goto annonce_error;
++                early_timing_stop(c);
++                c->timing_peer_port = 0;
++                c->early_timing = c->core->mainloop->io_new(c->core->mainloop, c->udp_tfd, PA_IO_EVENT_INPUT,
++                                                            early_timing_cb, c);
+ 
+                 trs = pa_sprintf_malloc(
+                     "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;"
+@@ -994,6 +1039,7 @@
+             break;
+ 
+         annonce_error:
++            early_timing_stop(c);
+             if (c->udp_cfd >= 0)
+                 pa_close(c->udp_cfd);
+             c->udp_cfd = -1;
+@@ -1019,6 +1065,7 @@
+             char delimiters[] = ";";
+ 
+             pa_log_debug("RAOP: SETUP");
++            early_timing_stop(c); /* the sink thread takes the port over from here */
+ 
+             ajs = pa_xstrdup(pa_headerlist_gets(headers, "Audio-Jack-Status"));
+ 
+@@ -1081,6 +1128,13 @@
+                     pa_log_warn("\"Transport\" missing in RTSP setup response");
+                 }
+ 
++                /* A HomePod answers timing_port=0: it takes no requests, it only asks ours. The socket is
++                 * connected to the port it asks from, so the sink thread's replies reach it. */
++                if (tport == 0 && c->timing_peer_port) {
++                    pa_log_debug("timing_port=0 in the SETUP reply: the receiver's own, %u", c->timing_peer_port);
++                    tport = c->timing_peer_port;
++                }
++
+                 if (cport <= 0 || tport <= 0)
+                     goto setup_error;
+ 
+@@ -1204,6 +1258,7 @@
+ 
+         case STATE_DISCONNECTED: {
+             pa_log_debug("RAOP: DISCONNECTED");
++            early_timing_stop(c);
+ 
+             c->is_recording = false;
+ 
+@@ -1405,6 +1460,7 @@
+ 
+ 
+ void pa_raop_client_disconnect(pa_raop_client *c) {
++    early_timing_stop(c);
+     c->is_recording = false;
+ 
+     if (c->tcp_sfd >= 0)
+@@ -1496,6 +1552,7 @@
+ 
+ void pa_raop_client_free(pa_raop_client *c) {
+     pa_assert(c);
++    early_timing_stop(c);
+ 
+     pa_raop_packet_buffer_free(c->pbuf);
+ 

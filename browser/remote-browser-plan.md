@@ -926,3 +926,41 @@ What the OECT needed on the way:
 
 Still to do from the build order: the iPhone (steps 6–7: touch, keyboard), measuring `light` against
 `small` (step 8), and the fingerprint and leak tests (step 9).
+
+## Sound and AirPlay (2026-11-01)
+
+The container plays sound through a system-wide PulseAudio, **`rd-pulse`** (`rd-pulse.pa`, socket
+`/run/pulse/native`, group `pulse-access`: users `browser` and `rdagent`). There's no sound card. CloakBrowser
+plays into the default sink, which starts as the null sink **`browser`**. The agent records
+`browser.monitor` (`PULSE_SOURCE` in its unit) and sends it to the viewer as Opus, like any computer's sound.
+`audio = true` in `desktop.ini`; an older `/data` keeps `false` until it is changed by hand.
+
+**AirPlay** goes to the speakers on the LAN. The bar's ⋯ → **Sound** page lists "This phone" and each speaker
+found, with volume − / +. A speaker starts at 30 %, because a new sink's 100 % is the speaker's loudest.
+Picking one makes its sink the default. The viewer then hears nothing: the agent still records `browser`.
+
+- **Finding and reaching speakers needs the container on the LAN itself.** Behind pasta there is no Bonjour,
+  and a HomePod's timing packets can't come back. The container gets a macvlan port named `lan0` and
+  `CAP_NET_ADMIN` (hqnode's advanced settings):
+  ```
+  hqnode cap browser-oect --add CAP_NET_ADMIN
+  hqnode link browser-oect --macvlan eth0 --name lan0      # pasta stays: it is the browser's way out
+  hqnode restart browser-oect
+  ```
+- **`rd-lan`** sets the port up, and keeps the browser off it:
+  - IPv6 is off on `lan0`, and DHCP (busybox `udhcpc`) gives it an address with **no route in the main
+    table**. Chromium still sees only pasta, the proxy and the kill switch.
+  - Table 100 holds the LAN subnet, multicast and an `unreachable` default.
+  - Only uid `pulse` (the AirPlay streams), uid `avahi` (Bonjour) and packets from `lan0`'s own address look
+    there.
+  - Without `lan0`, `rd-lan` and avahi don't start, and the Sound page says there is no AirPlay.
+- **avahi** listens on `lan0` only and publishes nothing. `module-raop-discover` turns each `_raop._tcp`
+  service into a sink, `raop_output.<host>`. Module loading must stay allowed for that.
+- **PulseAudio's AirPlay module is patched** (`browser/hqnode/pulse/raop-early-timing.patch`, built in the
+  image's `pulse-raop` stage from Debian's own source and options). Stock 17.0 can't play to a HomePod mini
+  (AirTunes 980): the HomePod asks the sender's timing port before it answers SETUP, and fails SETUP with 500
+  after 30 s without an answer. PulseAudio only reads that port after SETUP. The SETUP reply then says
+  `timing_port=0`, which PulseAudio also fails on. PipeWire 1.4's AirPlay sink got a 403 on its first
+  OPTIONS.
+- The HomePod's **Home app setting** must let non-Apple senders play: Allow Speaker & TV Access →
+  "Everyone" or "Anyone on the same network".

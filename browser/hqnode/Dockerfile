@@ -6,7 +6,9 @@
 #
 #   rd-xorg             Xorg :0, the dummy screen + the inputtest touch device     /run/rd-touch.sock
 #   rd-video            the MPP device nodes hqnode makes ("rkmpp") handed to group video
+#   rd-lan              the LAN port (a macvlan, lan0) for AirPlay alone, when there is one
 #   rd-pulse            PulseAudio: a null sink the browser plays into             /run/pulse/native
+#                       and the AirPlay speakers avahi finds on lan0
 #   rd-shell            the bar, the window manager, the browser supervisor        user browser
 #   remodroid-desktopd  capture → Rockchip MPP H.265 → WebRTC; touch and keys in   user rdagent
 #                       the sink's monitor → Opus, the sound
@@ -47,6 +49,24 @@ RUN set -eux; make -j"$(nproc)" desktop browser OPT='-O2 -g0'; \
     if [ "$TARGETARCH" = arm64 ]; then make browser-mpptest MPP_INC=/src/mpp/inc OPT='-O2 -g0'; \
         cp build/host/browser/mpptest /opt/mpp/bin/; fi
 
+# ── PulseAudio's AirPlay (RAOP) module, patched ─────────────────────────────
+# Debian's own source and build options, with browser/hqnode/pulse/*.patch applied; only libraop.so is
+# taken, in place of pulseaudio-module-raop's, with the RUNPATH meson would have installed it with. The
+# patch: a HomePod asks the timing port before it answers SETUP, which stock PulseAudio reads only after,
+# and then answers timing_port=0, which stock PulseAudio fails on (raop-early-timing.patch says more).
+FROM debian:13 AS pulse-raop
+RUN set -eux; echo 'deb-src http://deb.debian.org/debian trixie main' > /etc/apt/sources.list.d/src.list; \
+    apt-get update; apt-get build-dep -y pulseaudio; apt-get install -y --no-install-recommends dpkg-dev patchelf; \
+    mkdir /src; cd /src; apt-get source pulseaudio; mv pulseaudio-*/ pulseaudio
+COPY browser/hqnode/pulse/ /src/patches/
+RUN set -eux; cd /src/pulseaudio; for p in /src/patches/*.patch; do patch -p1 < "$p"; done; \
+    DEB_BUILD_OPTIONS=nocheck debian/rules override_dh_auto_configure; \
+    ninja -C obj-* src/modules/raop/libraop.so; mkdir /out; cp obj-*/src/modules/raop/libraop.so /out/; \
+    dpkg-parsechangelog -S Version > /out/version; \
+    up=$(sed 's/-[^-]*$//' /out/version); \
+    patchelf --set-rpath "/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/pulseaudio:/usr/lib/pulse-$up/modules" \
+        /out/libraop.so
+
 # ── the container ────────────────────────────────────────────────────────────
 FROM ghcr.io/yinyue123/hqnode:debian-13
 ARG TARGETARCH
@@ -57,7 +77,8 @@ ARG CLOAKBROWSER_SHA256=
 # Xorg (its inputtest driver is in xserver-xorg-core) with the dummy screen; the fonts a page expects, and
 # the ones CloakBrowser asks for (anti-bot scripts hash emoji and CJK drawn on a canvas, and a set no real
 # browser has gives it away); the agent's and the bar's libraries; xauth for the display's cookie.
-# PulseAudio for the sound (libpulse0 has the libpulse-simple the agent records with).
+# PulseAudio for the sound (libpulse0 has the libpulse-simple the agent records with), its AirPlay module,
+# and what that needs on the LAN port: avahi (on D-Bus) to find speakers, busybox's udhcpc and ipcalc.
 RUN set -eux; apt-get update; \
     apt-get install -y --no-install-recommends xserver-xorg-core xserver-xorg-video-dummy xauth x11-utils xinput \
         fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
@@ -65,7 +86,7 @@ RUN set -eux; apt-get update; \
         libx11-6 libxext6 libxtst6 libxrandr2 libxdamage1 libxfixes3 libxft2 libfontconfig1 \
         libnss3 libgbm1 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 libxkbcommon0 libpango-1.0-0 \
         libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 curl ca-certificates \
-        pulseaudio libpulse0; \
+        pulseaudio libpulse0 pulseaudio-module-raop avahi-daemon dbus busybox iproute2; \
     if [ "$CLOAKBROWSER" = chromium ]; then apt-get install -y --no-install-recommends chromium; fi; \
     rm -rf /var/lib/apt/lists/*
 
@@ -100,13 +121,22 @@ COPY --from=build /src/remodroid/build/host/desktop/libremodroid.so /usr/lib/rem
 COPY --from=build /src/remodroid/build/host/desktop/remodroid-desktopd /usr/bin/remodroid-desktopd
 COPY --from=build /src/remodroid/build/host/browser/rd-shell /usr/bin/rd-shell
 COPY --from=build /opt/mpp/lib/ /usr/local/lib/
+COPY --from=pulse-raop /out/ /tmp/pulse-raop/
 COPY --from=build /opt/mpp/bin/ /usr/local/bin/
 COPY browser/hqnode/rd-xorg-light.conf browser/hqnode/rd-xorg-small.conf browser/hqnode/rd-xorg-native.conf /etc/X11/
-COPY browser/hqnode/rd-xorg-prepare browser/hqnode/rd-video-prepare /usr/lib/rd-browser/
+COPY browser/hqnode/rd-xorg-prepare browser/hqnode/rd-video-prepare browser/hqnode/rd-lan /usr/lib/rd-browser/
+COPY browser/hqnode/avahi/avahi-daemon.conf /etc/avahi/
+COPY browser/hqnode/avahi/lan0.conf /etc/systemd/system/avahi-daemon.service.d/
+COPY browser/hqnode/avahi/lan0.conf /etc/systemd/system/avahi-daemon.socket.d/
 COPY browser/hqnode/units/ /etc/systemd/system/
 COPY browser/hqnode/browser.conf.example browser/hqnode/desktop.ini.example browser/hqnode/rd-pulse.pa /etc/rd-browser/
+# the patched AirPlay module, built from the very version installed (the pulse-raop stage)
+RUN set -eux; v=$(dpkg-query -W -f '${source:Version}' pulseaudio-module-raop); [ "$v" = "$(cat /tmp/pulse-raop/version)" ]; \
+    install -m 0644 /tmp/pulse-raop/libraop.so "$(dpkg -L pulseaudio-module-raop | grep '/libraop\.so$')"; \
+    rm -rf /tmp/pulse-raop
 RUN set -eux; ldconfig; mkdir -p /etc/X11/rd-xorg.conf.d; chmod 0755 /usr/lib/rd-browser/*; \
-    systemctl enable rd-xorg.service rd-pulse.service rd-video.service rd-shell.service remodroid-desktopd.service
+    systemctl enable rd-xorg.service rd-lan.service rd-pulse.service rd-video.service rd-shell.service \
+        remodroid-desktopd.service
 
 # Inherited from the system image, restated because a wrong one turns every stop into 30 s and a kill.
 STOPSIGNAL SIGRTMIN+3

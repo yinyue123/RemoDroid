@@ -1,8 +1,9 @@
-/* The computer's sound on Linux: the default output's monitor source (@DEFAULT_MONITOR@) through
+/* The computer's sound on Linux: the default output's monitor source (@DEFAULT_MONITOR@, or PULSE_SOURCE) through
  * libpulse-simple, which PulseAudio and PipeWire (pipewire-pulse) both serve. The library is
  * loaded at run time, so the agent still starts where it is missing (no sound then). */
 #include <dlfcn.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "desk.h"
@@ -76,8 +77,10 @@ int dsk_audio_start(dsk_pcm_cb cb)
     pa_sample_spec ss = { PA_SAMPLE_FLOAT32LE, RATE, CH };
     pa_buffer_attr at = { (uint32_t)-1, (uint32_t)-1, (uint32_t)-1, (uint32_t)-1, CHUNK * CH * sizeof(float) };
     int err = 0;
-    P.s = P.new_(NULL, "RemoDroid", PA_STREAM_RECORD, "@DEFAULT_MONITOR@", "the computer's sound for the viewer", &ss,
-                 NULL, &at, &err);
+    /* PULSE_SOURCE names another source, which libpulse takes when the device is NULL: the remote browser's
+     * agent records its own sink's monitor, whichever sink (an AirPlay speaker) is the default */
+    const char *dev = getenv("PULSE_SOURCE") && *getenv("PULSE_SOURCE") ? NULL : "@DEFAULT_MONITOR@";
+    P.s = P.new_(NULL, "RemoDroid", PA_STREAM_RECORD, dev, "the computer's sound for the viewer", &ss, NULL, &at, &err);
     if (!P.s) {
         LOGW("sound: PulseAudio: %s", P.strerror ? P.strerror(err) : "cannot connect");
         return -1;

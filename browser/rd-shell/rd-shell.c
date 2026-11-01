@@ -1321,8 +1321,8 @@ static void icon_star(Drawable dr, GC gc, int cx, int cy, int r, int filled)
 
 /* The pages drawn over the browser, below the bar. Drawn into a pixmap first: a drag redraws the whole
  * page for every move, and the video would show it half drawn. */
-enum { P_NONE, P_USERS, P_HISTORY, P_FAVS };
-static const char *PAGE_NAME[] = { "", "Users", "History", "Favourites" };
+enum { P_NONE, P_USERS, P_HISTORY, P_FAVS, P_SOUND };
+static const char *PAGE_NAME[] = { "", "Users", "History", "Favourites", "Sound" };
 
 static struct {
     int kind;
@@ -1401,7 +1401,7 @@ static void draw_bar(void)
     } else if (page) {
         char s[80];
         snprintf(s, sizeof s, "%s · %s", PAGE_NAME[P.kind], user());
-        text(bar_draw, &c_text, tx, base, P.kind == P_USERS ? PAGE_NAME[P.kind] : s, maxw);
+        text(bar_draw, &c_text, tx, base, P.kind == P_USERS || P.kind == P_SOUND ? PAGE_NAME[P.kind] : s, maxw);
     } else if (message[0]) {
         text(bar_draw, &c_bad, tx, base, message, maxw);
     } else {
@@ -1502,10 +1502,141 @@ static void size_str(unsigned long long v, char *out, size_t cap)
         snprintf(out, cap, "%.1f GB", (double)v / (1024.0 * 1024 * 1024));
 }
 
+/* ---------------- sound: to the viewer, or to an AirPlay speaker ---------------- */
+
+/* rd-pulse's sinks: "browser", which the desktop agent records and sends to the viewer, and the
+ * raop_output.* its AirPlay discovery adds for each speaker found on the container's LAN port (rd-lan).
+ * The browser plays into the default sink, so picking a speaker makes its sink the default; the agent
+ * records browser.monitor whatever the default, so the viewer hears nothing meanwhile. */
+#define MAX_OUTS 12
+static struct {
+    int n, cur;      /* outputs (the browser's first), the default's index or -1 */
+    char name[MAX_OUTS][160], desc[MAX_OUTS][96];
+    int vol[MAX_OUTS]; /* percent */
+    int lan;         /* the container has its LAN port: speakers can be found */
+    double next;     /* the Sound page looks again then: speakers come and go */
+} SO = { .cur = -1 };
+static char pa_out[1 << 17];
+
+/* pactl with these arguments (NULL-terminated), no shell; what it printed into pa_out. 2 s at most. */
+static int pactl(const char *arg, ...)
+{
+    const char *argv[12] = { "pactl" };
+    int n = 1, fd[2], st = 0;
+    va_list ap;
+    va_start(ap, arg);
+    for (const char *a = arg; a && n < 11; a = va_arg(ap, const char *))
+        argv[n++] = a;
+    va_end(ap);
+    argv[n] = NULL;
+    pa_out[0] = 0;
+    if (pipe2(fd, O_CLOEXEC) < 0)
+        return -1;
+    pid_t pid = fork();
+    if (pid == 0) {
+        int nul = open("/dev/null", O_WRONLY);
+        dup2(fd[1], 1);
+        if (nul >= 0)
+            dup2(nul, 2);
+        execvp("pactl", (char *const *)argv);
+        _exit(127);
+    }
+    close(fd[1]);
+    size_t len = 0;
+    double end = now_s() + 2;
+    while (pid > 0 && len < sizeof pa_out - 1) {
+        struct pollfd pf = { fd[0], POLLIN, 0 };
+        int ms = (int)((end - now_s()) * 1000);
+        if (ms <= 0 || poll(&pf, 1, ms) <= 0) {
+            kill(pid, SIGKILL);
+            break;
+        }
+        ssize_t r = read(fd[0], pa_out + len, sizeof pa_out - 1 - len);
+        if (r <= 0)
+            break;
+        len += (size_t)r;
+    }
+    pa_out[len] = 0;
+    close(fd[0]);
+    if (pid < 0 || waitpid(pid, &st, 0) < 0) /* before reap() can: it runs from the loop, not the handler */
+        return -1;
+    return WIFEXITED(st) && !WEXITSTATUS(st) ? 0 : -1;
+}
+
+static void sound_load(void)
+{
+    char cur[160] = "";
+    SO.n = 0;
+    SO.cur = -1;
+    SO.lan = access("/sys/class/net/lan0", F_OK) == 0;
+    if (!pactl("get-default-sink", NULL)) {
+        snprintf(cur, sizeof cur, "%s", pa_out);
+        cur[strcspn(cur, "\n")] = 0;
+    }
+    if (pactl("-f", "json", "list", "sinks", NULL))
+        return;
+    cJSON *all = cJSON_Parse(pa_out), *s;
+    cJSON_ArrayForEach(s, all) {
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(s, "name"));
+        const char *desc = cJSON_GetStringValue(cJSON_GetObjectItem(s, "description"));
+        if (!name || SO.n == MAX_OUTS || (strcmp(name, "browser") && strncmp(name, "raop_output.", 12)))
+            continue;
+        int i = SO.n++;
+        snprintf(SO.name[i], sizeof SO.name[i], "%s", name);
+        snprintf(SO.desc[i], sizeof SO.desc[i], "%s", desc ? desc : name);
+        one_line(SO.desc[i]);
+        cJSON *v = cJSON_GetObjectItem(s, "volume"), *ch = v ? v->child : NULL; /* the first channel's */
+        const char *pc = ch ? cJSON_GetStringValue(cJSON_GetObjectItem(ch, "value_percent")) : NULL;
+        SO.vol[i] = pc ? atoi(pc) : 0;
+        if (!strcmp(name, "browser") && i) { /* the browser's own first */
+            char tn[160], td[96];
+            int tv = SO.vol[i];
+            memcpy(tn, SO.name[i], sizeof tn);
+            memcpy(td, SO.desc[i], sizeof td);
+            memmove(SO.name[1], SO.name[0], sizeof SO.name[0] * (size_t)i);
+            memmove(SO.desc[1], SO.desc[0], sizeof SO.desc[0] * (size_t)i);
+            memmove(SO.vol + 1, SO.vol, sizeof SO.vol[0] * (size_t)i);
+            memcpy(SO.name[0], tn, sizeof tn);
+            memcpy(SO.desc[0], td, sizeof td);
+            SO.vol[0] = tv;
+        }
+    }
+    cJSON_Delete(all);
+    for (int i = 0; i < SO.n; i++)
+        if (!strcmp(SO.name[i], cur))
+            SO.cur = i;
+}
+
+static int is_speaker(int i) { return i >= 0 && i < SO.n && strcmp(SO.name[i], "browser"); }
+
+static void sound_volume(int i, int pct)
+{
+    char v[16];
+    pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    snprintf(v, sizeof v, "%d%%", pct);
+    if (!pactl("set-sink-volume", SO.name[i], v, NULL))
+        SO.vol[i] = pct;
+}
+
+static void sound_pick(int i)
+{
+    /* a speaker's sink starts at 100 %, which AirPlay makes the speaker's loudest */
+    if (is_speaker(i) && SO.vol[i] >= 100)
+        sound_volume(i, 30);
+    if (pactl("set-default-sink", SO.name[i], NULL)) {
+        show_note("The sound server didn't answer");
+        return;
+    }
+    SO.cur = i;
+    char s[140];
+    snprintf(s, sizeof s, is_speaker(i) ? "Sound to %s" : "Sound to this phone", SO.desc[i]);
+    show_note(s);
+}
+
 /* The menu's rows. The tabs are listed only when there is more than one, with Close tab under them; one tab
  * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W).
  * The last three only show the container's CPU, memory and disk. */
-enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_NEW_ID, M_RESTART,
+enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_SOUND, M_NEW_ID, M_RESTART,
        M_STARTSTOP, M_PROXY, M_CPU, M_MEM, M_DISK };
 
 static struct {
@@ -1523,7 +1654,7 @@ static void menu_layout(void)
     if (BR.pid > 0)
         ITEM(M_NEW_TAB, -1);
     if (T.ntabs > 1) {
-        int room = (H - B) / B - 13; /* the rows that fit on the screen beside the others */
+        int room = (H - B) / B - 14; /* the rows that fit on the screen beside the others */
         for (int i = 0; i < T.ntabs && i < room; i++)
             ITEM(M_TAB, i);
         ITEM(M_CLOSE_TAB, -1);
@@ -1534,6 +1665,7 @@ static void menu_layout(void)
     ITEM(M_FAVS, -1);
     ITEM(M_HISTORY, -1);
     ITEM(M_USER, -1);
+    ITEM(M_SOUND, -1);
     ITEM(M_NEW_ID, -1);
     ITEM(M_RESTART, -1);
     ITEM(M_STARTSTOP, -1);
@@ -1556,6 +1688,7 @@ static void menu_label(int i, char *out, size_t cap)
     case M_FAVS: snprintf(out, cap, "Favourites"); break;
     case M_HISTORY: snprintf(out, cap, "History"); break;
     case M_USER: snprintf(out, cap, "User: %s", user()); break;
+    case M_SOUND: snprintf(out, cap, "Sound: %s", is_speaker(SO.cur) ? SO.desc[SO.cur] : "this phone"); break;
     case M_NEW_ID: snprintf(out, cap, "New identity"); break;
     case M_RESTART: snprintf(out, cap, "Restart browser"); break;
     case M_STARTSTOP: snprintf(out, cap, BR.pid > 0 ? "Stop browser" : "Start browser"); break;
@@ -1636,6 +1769,7 @@ static void menu_show(int on)
             T.list_id = cdp_send("Target.getTargets", NULL);
         stats_sample(); /* the CPU needs a second reading: in a second, then every two */
         ST.next = now_s() + 1;
+        sound_load();
         menu_layout();
         XMapRaised(dpy, menu);
         draw_menu();
@@ -1651,7 +1785,7 @@ static void menu_show(int on)
 
 /* ---------------- the pages: Users, History, Favourites ---------------- */
 
-enum { R_HEAD, R_CLEAR_ALL, R_CLEAR_COOKIES, R_USER, R_HIST, R_FAV, R_EMPTY };
+enum { R_HEAD, R_CLEAR_ALL, R_CLEAR_COOKIES, R_USER, R_HIST, R_FAV, R_EMPTY, R_OUT, R_VOL, R_NO_SPEAKER };
 
 static struct {
     int kind, ref, y, h; /* ref: the user, history entry or favourite; y: from the top of the list */
@@ -1692,6 +1826,14 @@ static void panel_layout(void)
             }
             ROW(R_HIST, i, tall);
         }
+        break;
+    case P_SOUND: /* this phone, the speakers, and the volume of the one in use */
+        for (int i = 0; i < SO.n; i++)
+            ROW(R_OUT, i, tall);
+        if (is_speaker(SO.cur))
+            ROW(R_VOL, SO.cur, B);
+        if (SO.n < 2)
+            ROW(R_NO_SPEAKER, 0, tall);
         break;
     case P_FAVS: /* the newest first */
         if (!nfavs)
@@ -1769,6 +1911,39 @@ static void panel_draw(void)
             snprintf(s, sizeof s, "%s%d tab%s · %d favourite%s", ref == U.cur ? "In use · " : "", P.utabs[ref],
                      P.utabs[ref] == 1 ? "" : "s", P.ufavs[ref], P.ufavs[ref] == 1 ? "" : "s");
             text_in(font_s, P.d, &c_dim, x, low, s, tw);
+            break;
+        case R_OUT:
+            if (ref == SO.cur) {
+                XSetForeground(dpy, gc, px_press);
+                XFillRectangle(dpy, P.pm, gc, 0, y, (unsigned)W, (unsigned)h);
+                XSetForeground(dpy, gc, c_ok.pixel);
+                XFillRectangle(dpy, P.pm, gc, 0, y, (unsigned)(S * 3), (unsigned)h);
+            }
+            text(P.d, &c_text, x, top, is_speaker(ref) ? SO.desc[ref] : "This phone", tw);
+            if (is_speaker(ref))
+                snprintf(s, sizeof s, "%sAirPlay · %d %%", ref == SO.cur ? "In use · " : "", SO.vol[ref]);
+            else
+                snprintf(s, sizeof s, "%sThrough RemoDroid", ref == SO.cur ? "In use · " : "");
+            text_in(font_s, P.d, &c_dim, x, low, s, tw);
+            break;
+        case R_VOL: { /* − and + at the right, a step of 5 % */
+            int cm = W - B * 3 / 2, cp = W - B / 2, r = B / 7;
+            text(P.d, &c_dim, x, one, "Volume", tw / 2);
+            snprintf(s, sizeof s, "%d %%", SO.vol[ref]);
+            int vw = text_in(font_s, NULL, NULL, 0, 0, s, 0);
+            text(P.d, &c_text, W - B * 2 - S * 8 - vw, one, s, 0);
+            XSetForeground(dpy, gc, c_text.pixel);
+            XSetLineAttributes(dpy, gc, (unsigned)(S * 2), LineSolid, CapRound, JoinRound);
+            XDrawLine(dpy, P.pm, gc, cm - r, mid, cm + r, mid);
+            XDrawLine(dpy, P.pm, gc, cp - r, mid, cp + r, mid);
+            XDrawLine(dpy, P.pm, gc, cp, mid - r, cp, mid + r);
+            XSetLineAttributes(dpy, gc, 0, LineSolid, CapButt, JoinMiter);
+            break;
+        }
+        case R_NO_SPEAKER:
+            text(P.d, &c_dim, x, top, SO.lan ? "No AirPlay speaker found yet" : "No AirPlay here", tw);
+            text_in(font_s, P.d, &c_dim, x, low,
+                    SO.lan ? "Speakers on the LAN show up as they're found" : "It needs the container's LAN port (lan0)", tw);
             break;
         case R_HIST:
             localtime_r(&HI[ref].t, &tm);
@@ -1873,6 +2048,18 @@ static void panel_tap(int x, int y)
     case R_USER:
         panel_show(P_NONE);
         user_switch(ref);
+        break;
+    case R_OUT:
+        sound_pick(ref);
+        sound_load();
+        panel_refresh();
+        draw_bar();
+        break;
+    case R_VOL:
+        if (x >= W - B * 2) {
+            sound_volume(ref, SO.vol[ref] + (x >= W - B ? 5 : -5));
+            panel_draw();
+        }
         break;
     case R_HIST:
         snprintf(url, sizeof url, "%s", HI[ref].url);
@@ -2183,8 +2370,10 @@ static void menu_action(int i)
     if (kind == M_CPU || kind == M_MEM || kind == M_DISK) /* nothing to do: the menu stays */
         return;
     menu_show(0);
-    if (kind == M_FAVS || kind == M_HISTORY || kind == M_USER) {
-        panel_show(kind == M_FAVS ? P_FAVS : kind == M_HISTORY ? P_HISTORY : P_USERS);
+    if (kind == M_FAVS || kind == M_HISTORY || kind == M_USER || kind == M_SOUND) {
+        if (kind == M_SOUND)
+            SO.next = now_s() + 3;
+        panel_show(kind == M_FAVS ? P_FAVS : kind == M_HISTORY ? P_HISTORY : kind == M_USER ? P_USERS : P_SOUND);
         return;
     }
     panel_show(P_NONE);
@@ -2515,6 +2704,11 @@ int main(int argc, char **argv)
             P.confirm = 0;
             panel_draw();
         }
+        if (P.kind == P_SOUND && t >= SO.next) {
+            SO.next = t + 3;
+            sound_load();
+            panel_refresh();
+        }
         if (menu_open && t >= ST.next) {
             stats_sample();
             ST.next = t + 2;
@@ -2532,6 +2726,8 @@ int main(int argc, char **argv)
             next = P.confirm_until;
         if (menu_open && ST.next < next)
             next = ST.next;
+        if (P.kind == P_SOUND && SO.next < next)
+            next = SO.next;
         if (BR.restart_at && BR.restart_at < next)
             next = BR.restart_at;
         if (PX.fd < 0 && PX.next < next)

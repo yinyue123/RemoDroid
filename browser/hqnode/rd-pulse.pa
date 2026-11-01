@@ -1,9 +1,15 @@
 # /etc/rd-browser/rd-pulse.pa: the container's sound server (units/rd-pulse.service). No sound card:
-# CloakBrowser plays into a null sink and the desktop agent records its monitor (@DEFAULT_MONITOR@)
-# and sends it to the viewer as Opus.
+# CloakBrowser plays into the default sink. "browser" is a null sink whose monitor the desktop agent
+# records and sends to the viewer as Opus; the AirPlay speakers on the LAN port (rd-lan) are sinks too,
+# raop_output.*, and the bar's Sound page makes one of them the default instead.
 load-module module-null-sink sink_name=browser rate=48000 channels=2 sink_properties=device.description=Browser
 set-default-sink browser
+set-default-source browser.monitor
 # /run/pulse/native, for the members of pulse-access: browser and rdagent
 load-module module-native-protocol-unix auth-group=pulse-access auth-anonymous=0
-# no listener, no cost: the sink sleeps while nothing plays and nobody records
+# no listener, no cost: a sink sleeps while nothing plays into it, and a speaker is let go
 load-module module-suspend-on-idle
+# the speakers avahi finds on lan0; without lan0 none are
+.nofail
+load-module module-raop-discover
+.fail

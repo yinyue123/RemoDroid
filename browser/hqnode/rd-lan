@@ -1,0 +1,47 @@
+#!/bin/sh
+# The container's own port on the LAN, lan0 (hqnode link <c> --macvlan eth0 --name lan0, and
+# CAP_NET_ADMIN), for AirPlay alone. The browser must not see the LAN or the internet through it: its
+# traffic keeps going through pasta and the host's kill switch. So the address DHCP gives lan0 gets no
+# route in the main table; table 100 routes the LAN, and only the sound server (user pulse, which
+# streams to the speakers) and avahi (which finds them) look there, and so does anything from that
+# address. Nothing else: no default route through lan0, no IPv6 on it.
+#
+#   rd-lan             the service: DHCP on lan0, in the foreground (rd-lan.service)
+#   rd-lan EVENT       udhcpc's script: bound, renew, deconfig
+set -u
+IF=lan0 T=100
+
+case "${1:-}" in
+deconfig)
+	ip -4 addr flush dev "$IF"
+	ip -4 route flush table $T
+	ip -4 rule del pref 100 2>/dev/null
+	exit 0
+	;;
+bound|renew)
+	: "${ip:?}" "${mask:?}"
+	if ! ip -4 -o addr show dev "$IF" | grep -q " $ip/$mask "; then
+		ip -4 addr flush dev "$IF"
+		ip addr add "$ip/$mask" dev "$IF" noprefixroute
+	fi
+	eval "$(busybox ipcalc -n "$ip/$mask")"
+	ip route replace "$NETWORK/$mask" dev "$IF" src "$ip" table $T
+	ip route replace 224.0.0.0/4 dev "$IF" table $T
+	ip route replace unreachable default table $T
+	ip -4 rule del pref 100 2>/dev/null
+	ip rule add from "$ip" lookup $T pref 100
+	echo "rd-lan: $IF $ip/$mask"
+	exit 0
+	;;
+"") ;;
+*) exit 0 ;;
+esac
+
+[ -e /sys/class/net/$IF ] || { echo "rd-lan: no $IF" >&2; exit 1; }
+echo 1 > /proc/sys/net/ipv6/conf/$IF/disable_ipv6
+ip link set "$IF" up
+while ip rule del pref 101 2>/dev/null; do :; done
+for u in pulse avahi; do
+	id=$(id -u $u) && ip rule add uidrange "$id-$id" lookup $T pref 101
+done
+exec busybox udhcpc -i "$IF" -f -R -s "$0"

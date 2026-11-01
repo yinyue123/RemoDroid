@@ -1,13 +1,15 @@
 # The remote browser's sound: a system-wide PulseAudio (rd-pulse.pa) whose null sink CloakBrowser
-# plays into and the desktop agent records. Socket /run/pulse/native, group pulse-access.
+# plays into and the desktop agent records, and whose AirPlay sinks reach the speakers on the LAN port
+# (rd-lan, avahi). Socket /run/pulse/native, group pulse-access.
 [Unit]
 Description=Remote browser: sound server
-After=local-fs.target
+After=local-fs.target rd-lan.service avahi-daemon.service
 
 [Service]
 Type=simple
+# Module loading stays allowed: AirPlay discovery loads a sink for each speaker it finds.
 ExecStart=/usr/bin/pulseaudio --system --daemonize=no --disallow-exit --exit-idle-time=-1 \
-    --disallow-module-loading --realtime=no --high-priority=no --use-pid-file=no --log-target=stderr \
+    --realtime=no --high-priority=no --use-pid-file=no --log-target=stderr \
     -n -F /etc/rd-browser/rd-pulse.pa
 Restart=always
 RestartSec=2
