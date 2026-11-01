@@ -7,8 +7,12 @@
 # packets there by their source address, so another program can't bind to the address and get out.
 # No IPv6 on lan0.
 #
-# The address: lan_address (192.168.10.44/24) and lan_gateway (192.168.10.2) in /data/browser.conf, or
-# DHCP when lan_address is unset. Without a gateway, table 100 ends in an unreachable default.
+# The address, first found first used:
+#   - hqnode's: the container's Network card (or hqnode link --address --gateway) sets it over netlink
+#     at start, with the subnet and gateway in a table of the link's own; rd-lan only narrows who uses it
+#   - lan_address (192.168.10.44/24) and lan_gateway (192.168.10.2) in /data/browser.conf
+#   - DHCP
+# Without a gateway, table 100 ends in an unreachable default.
 #
 #   rd-lan             the service (rd-lan.service): set up the port, then DHCP in the foreground if needed
 #   rd-lan EVENT       udhcpc's script: bound, renew, deconfig
@@ -61,6 +65,26 @@ while ip rule del pref 101 2>/dev/null; do :; done
 for u in pulse avahi; do
 	id=$(id -u $u) && ip rule add uidrange "$id-$id" lookup $T pref 101
 done
+
+# hqnode gave lan0 its address (its Network card, or hqnode link --address --gateway): it put the
+# subnet and gateway in a table of the link's own, with a rule sending there what leaves from the
+# address. Keep the table, swap the rule for the users above: the browser could bind to the address.
+have=$(ip -4 -o addr show dev "$IF" | awk '{print $4}' | head -n 1)
+a=${have%/*}
+t=
+[ -z "$have" ] || t=$(ip -4 rule | sed -n "s/^[0-9]*:[[:space:]]*from $a lookup \([0-9a-z]*\).*/\1/p" | head -n 1)
+# an rd-lan restarted after taking hqnode's address over: the rule is gone, /run remembers the table
+[ -n "$t" ] || [ -z "$have" ] || t=$(sed -n "s|^$have ||p" /run/rd-lan.hqnode 2>/dev/null)
+if [ -n "$t" ]; then
+	while ip rule del from "$a" lookup "$t" 2>/dev/null; do :; done
+	while ip rule del pref 101 2>/dev/null; do :; done
+	for u in pulse avahi; do
+		id=$(id -u $u) && ip rule add uidrange "$id-$id" lookup "$t" pref 101
+	done
+	echo "$have $t" > /run/rd-lan.hqnode
+	echo "rd-lan: $IF $have, from hqnode, table $t: for the sound server and avahi only"
+	exit 0
+fi
 
 addr=$(conf lan_address)
 if [ -n "$addr" ]; then

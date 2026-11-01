@@ -948,9 +948,15 @@ Picking one makes its sink the default. The viewer then hears nothing: the agent
   hqnode restart browser-oect
   ```
 - **`rd-lan`** sets the port up, and keeps the browser off it:
-  - IPv6 is off on `lan0`. Its address is `lan_address` / `lan_gateway` from `/data/browser.conf`
-    (`browser-oect`: 192.168.10.44/24 via 192.168.10.2), or DHCP (busybox `udhcpc`) without them. Either way
-    it gets **no route in the main table**, so Chromium still sees only pasta, the proxy and the kill switch.
+  - IPv6 is off on `lan0`. Its address comes from, first found first used:
+    - **hqnode**: the container's Network card (Address, Gateway), or
+      `hqnode link browser-oect --name lan0 --address 192.168.10.44/24 --gateway 192.168.10.2`. The agent
+      sets them over netlink at start, beside pasta in a table of the link's own with a rule `from <address>`.
+      `rd-lan` keeps the table and swaps that rule for the two uid rules below.
+    - `lan_address` / `lan_gateway` in `/data/browser.conf`.
+    - DHCP (busybox `udhcpc`).
+  - Either way the address gets **no route in the main table**, so Chromium still sees only pasta, the proxy
+    and the kill switch.
   - Table 100 holds the LAN subnet, multicast and the gateway, or an `unreachable` default without one.
   - Only uid `pulse` (the AirPlay streams) and uid `avahi` (Bonjour) look there. There's no rule by source
     address, so a program bound to `lan0`'s address still routes by the main table.
