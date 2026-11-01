@@ -50,8 +50,9 @@ RUN set -eux; make -j"$(nproc)" desktop browser OPT='-O2 -g0'; \
         cp build/host/browser/mpptest /opt/mpp/bin/; fi
 
 # ── PulseAudio's AirPlay (RAOP) module, patched ─────────────────────────────
-# Debian's own source and build options, with browser/hqnode/pulse/*.patch applied; only libraop.so is
-# taken, in place of pulseaudio-module-raop's, with the RUNPATH meson would have installed it with. The
+# Debian's own source and build options, with browser/hqnode/pulse/*.patch applied; only libraop.so and
+# module-raop-discover.so are taken, in place of pulseaudio-module-raop's, with the RUNPATH meson would
+# have installed them with. The
 # patch: a HomePod asks the timing port before it answers SETUP, which stock PulseAudio reads only after,
 # and then answers timing_port=0, which stock PulseAudio fails on (raop-early-timing.patch says more).
 FROM debian:13 AS pulse-raop
@@ -61,11 +62,13 @@ RUN set -eux; echo 'deb-src http://deb.debian.org/debian trixie main' > /etc/apt
 COPY browser/hqnode/pulse/ /src/patches/
 RUN set -eux; cd /src/pulseaudio; for p in /src/patches/*.patch; do patch -p1 < "$p"; done; \
     DEB_BUILD_OPTIONS=nocheck debian/rules override_dh_auto_configure; \
-    ninja -C obj-* src/modules/raop/libraop.so; mkdir /out; cp obj-*/src/modules/raop/libraop.so /out/; \
+    ninja -C obj-* src/modules/raop/libraop.so src/modules/module-raop-discover.so; mkdir /out; \
+    cp obj-*/src/modules/raop/libraop.so obj-*/src/modules/module-raop-discover.so /out/; \
     dpkg-parsechangelog -S Version > /out/version; \
     up=$(sed 's/-[^-]*$//' /out/version); \
-    patchelf --set-rpath "/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/pulseaudio:/usr/lib/pulse-$up/modules" \
-        /out/libraop.so
+    for f in /out/*.so; do \
+        patchelf --set-rpath "/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/pulseaudio:/usr/lib/pulse-$up/modules" "$f"; \
+    done
 
 # ── the container ────────────────────────────────────────────────────────────
 FROM ghcr.io/yinyue123/hqnode:debian-13
@@ -137,7 +140,9 @@ COPY browser/hqnode/units/ /etc/systemd/system/
 COPY browser/hqnode/browser.conf.example browser/hqnode/desktop.ini.example browser/hqnode/rd-pulse.pa /etc/rd-browser/
 # the patched AirPlay module, built from the very version installed (the pulse-raop stage)
 RUN set -eux; v=$(dpkg-query -W -f '${source:Version}' pulseaudio-module-raop); [ "$v" = "$(cat /tmp/pulse-raop/version)" ]; \
-    install -m 0644 /tmp/pulse-raop/libraop.so "$(dpkg -L pulseaudio-module-raop | grep '/libraop\.so$')"; \
+    for f in libraop.so module-raop-discover.so; do \
+        install -m 0644 "/tmp/pulse-raop/$f" "$(dpkg -L pulseaudio-module-raop | grep "/$f\$")"; \
+    done; \
     rm -rf /tmp/pulse-raop
 RUN set -eux; ldconfig; mkdir -p /etc/X11/rd-xorg.conf.d; chmod 0755 /usr/lib/rd-browser/*; \
     systemctl enable rd-xorg.service rd-lan.service rd-pulse.service rd-video.service rd-shell.service \

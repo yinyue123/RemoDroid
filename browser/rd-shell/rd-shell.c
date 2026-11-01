@@ -1583,7 +1583,19 @@ static void sound_load(void)
             continue;
         int i = SO.n++;
         snprintf(SO.name[i], sizeof SO.name[i], "%s", name);
-        snprintf(SO.desc[i], sizeof SO.desc[i], "%s", desc ? desc : name);
+        if (desc && strcmp(desc, "(null)")) {
+            snprintf(SO.desc[i], sizeof SO.desc[i], "%s", desc);
+        } else { /* pactl's JSON gives "(null)" for a name it can't encode ("Music’s MacBook Air"): the
+                  * sink's own name, raop_output.Musics-MacBook-Air.local, read back into words */
+            const char *n = strncmp(name, "raop_output.", 12) ? name : name + 12;
+            snprintf(SO.desc[i], sizeof SO.desc[i], "%s", n);
+            char *dot = strstr(SO.desc[i], ".local");
+            if (dot)
+                *dot = 0;
+            for (char *c = SO.desc[i]; *c; c++)
+                if (*c == '-')
+                    *c = ' ';
+        }
         one_line(SO.desc[i]);
         cJSON *v = cJSON_GetObjectItem(s, "volume"), *ch = v ? v->child : NULL; /* the first channel's */
         const char *pc = ch ? cJSON_GetStringValue(cJSON_GetObjectItem(ch, "value_percent")) : NULL;
