@@ -1,5 +1,6 @@
 # The container's LAN port (lan0, a macvlan) for AirPlay: its address, and routes only the sound server
-# and avahi use (rd-lan). Without the port, there is no AirPlay and this doesn't run.
+# and avahi use (rd-lan). Without the port, there is no AirPlay and this doesn't run. With a fixed
+# address (lan_address in /data/browser.conf) it sets up and exits; with DHCP it stays.
 [Unit]
 Description=Remote browser: the LAN port, for AirPlay
 ConditionPathExists=/sys/class/net/lan0
@@ -8,7 +9,8 @@ Before=avahi-daemon.service rd-pulse.service
 [Service]
 Type=simple
 ExecStart=/usr/lib/rd-browser/rd-lan
-Restart=always
+Restart=on-failure
+RemainAfterExit=yes
 RestartSec=5
 
 [Install]

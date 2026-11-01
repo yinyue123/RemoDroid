@@ -948,11 +948,12 @@ Picking one makes its sink the default. The viewer then hears nothing: the agent
   hqnode restart browser-oect
   ```
 - **`rd-lan`** sets the port up, and keeps the browser off it:
-  - IPv6 is off on `lan0`, and DHCP (busybox `udhcpc`) gives it an address with **no route in the main
-    table**. Chromium still sees only pasta, the proxy and the kill switch.
-  - Table 100 holds the LAN subnet, multicast and an `unreachable` default.
-  - Only uid `pulse` (the AirPlay streams), uid `avahi` (Bonjour) and packets from `lan0`'s own address look
-    there.
+  - IPv6 is off on `lan0`. Its address is `lan_address` / `lan_gateway` from `/data/browser.conf`
+    (`browser-oect`: 192.168.10.44/24 via 192.168.10.2), or DHCP (busybox `udhcpc`) without them. Either way
+    it gets **no route in the main table**, so Chromium still sees only pasta, the proxy and the kill switch.
+  - Table 100 holds the LAN subnet, multicast and the gateway, or an `unreachable` default without one.
+  - Only uid `pulse` (the AirPlay streams) and uid `avahi` (Bonjour) look there. There's no rule by source
+    address, so a program bound to `lan0`'s address still routes by the main table.
   - Without `lan0`, `rd-lan` and avahi don't start, and the Sound page says there is no AirPlay.
 - **avahi** listens on `lan0` only and publishes nothing. `module-raop-discover` turns each `_raop._tcp`
   service into a sink, `raop_output.<host>`. Module loading must stay allowed for that.

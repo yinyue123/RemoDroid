@@ -47,3 +47,9 @@ args = --disable-gpu-compositing
 renderer_process_limit = 2
 # A URL opened from the bar replaces the tab (1), or opens beside it (0).
 one_tab = 1
+
+# AirPlay: the container's own LAN port (lan0, a macvlan; see remote-browser-plan.md). Only the sound
+# server and avahi use it, never the browser. A fixed address and gateway, or DHCP when lan_address is
+# left out (no gateway then unless lan_gateway is given).
+#lan_address = 192.168.10.44/24
+#lan_gateway = 192.168.10.2
