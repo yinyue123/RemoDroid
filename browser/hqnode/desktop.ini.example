@@ -9,11 +9,12 @@ touch = inputtest:/run/rd-touch.sock
 touch_points = 5
 
 [desktop]
-; nothing crosses between the browser and the iPhone but the picture and the input
+; nothing crosses between the browser and the iPhone but the picture, the sound and the input
 clipboard_sync = false
 allow_shell = false
 notify = false
-audio = false
+; the browser's sound (rd-pulse's null sink); the viewer's Sound switch mutes it
+audio = true
 
 [files]
 ; uploads refused (any file over 0 MB)

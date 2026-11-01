@@ -1,0 +1,16 @@
+# The remote browser's sound: a system-wide PulseAudio (rd-pulse.pa) whose null sink CloakBrowser
+# plays into and the desktop agent records. Socket /run/pulse/native, group pulse-access.
+[Unit]
+Description=Remote browser: sound server
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/pulseaudio --system --daemonize=no --disallow-exit --exit-idle-time=-1 \
+    --disallow-module-loading --realtime=no --high-priority=no --use-pid-file=no --log-target=stderr \
+    -n -F /etc/rd-browser/rd-pulse.pa
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

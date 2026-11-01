@@ -6,8 +6,10 @@
 #
 #   rd-xorg             Xorg :0, the dummy screen + the inputtest touch device     /run/rd-touch.sock
 #   rd-video            the MPP device nodes hqnode makes ("rkmpp") handed to group video
+#   rd-pulse            PulseAudio: a null sink the browser plays into             /run/pulse/native
 #   rd-shell            the bar, the window manager, the browser supervisor        user browser
 #   remodroid-desktopd  capture → Rockchip MPP H.265 → WebRTC; touch and keys in   user rdagent
+#                       the sink's monitor → Opus, the sound
 #
 # debian-13 rather than Alpine: CloakBrowser is a glibc build. systemd is PID 1, so the services
 # are units and Environment= works (no OpenRC scrubbing, unlike the sh0u image). /data holds what a
@@ -55,13 +57,15 @@ ARG CLOAKBROWSER_SHA256=
 # Xorg (its inputtest driver is in xserver-xorg-core) with the dummy screen; the fonts a page expects, and
 # the ones CloakBrowser asks for (anti-bot scripts hash emoji and CJK drawn on a canvas, and a set no real
 # browser has gives it away); the agent's and the bar's libraries; xauth for the display's cookie.
+# PulseAudio for the sound (libpulse0 has the libpulse-simple the agent records with).
 RUN set -eux; apt-get update; \
     apt-get install -y --no-install-recommends xserver-xorg-core xserver-xorg-video-dummy xauth x11-utils xinput \
         fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
         fonts-freefont-ttf fonts-unifont fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf \
         libx11-6 libxext6 libxtst6 libxrandr2 libxdamage1 libxfixes3 libxft2 libfontconfig1 \
         libnss3 libgbm1 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 libxkbcommon0 libpango-1.0-0 \
-        libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 curl ca-certificates; \
+        libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 curl ca-certificates \
+        pulseaudio libpulse0; \
     if [ "$CLOAKBROWSER" = chromium ]; then apt-get install -y --no-install-recommends chromium; fi; \
     rm -rf /var/lib/apt/lists/*
 
@@ -86,10 +90,11 @@ RUN set -eux; url=$CLOAKBROWSER_URL sum=$CLOAKBROWSER_SHA256; \
         mkdir -p /opt/cloakbrowser; ln -sf /usr/bin/chromium /opt/cloakbrowser/chrome; \
     fi
 
-# browser and rdagent share the X cookie (group rdx); only rdagent may open the encoder (group video)
+# browser and rdagent share the X cookie (group rdx) and the sound server (pulse-access, from the
+# pulseaudio package); only rdagent may open the encoder (group video)
 RUN set -eux; groupadd -r rdx; \
-    useradd -r -m -d /var/lib/browser -s /usr/sbin/nologin -G rdx browser; \
-    useradd -r -m -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video rdagent
+    useradd -r -m -d /var/lib/browser -s /usr/sbin/nologin -G rdx,pulse-access browser; \
+    useradd -r -m -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video,pulse-access rdagent
 
 COPY --from=build /src/remodroid/build/host/desktop/libremodroid.so /usr/lib/remodroid/libremodroid.so
 COPY --from=build /src/remodroid/build/host/desktop/remodroid-desktopd /usr/bin/remodroid-desktopd
@@ -99,9 +104,9 @@ COPY --from=build /opt/mpp/bin/ /usr/local/bin/
 COPY browser/hqnode/rd-xorg-light.conf browser/hqnode/rd-xorg-small.conf browser/hqnode/rd-xorg-native.conf /etc/X11/
 COPY browser/hqnode/rd-xorg-prepare browser/hqnode/rd-video-prepare /usr/lib/rd-browser/
 COPY browser/hqnode/units/ /etc/systemd/system/
-COPY browser/hqnode/browser.conf.example browser/hqnode/desktop.ini.example /etc/rd-browser/
+COPY browser/hqnode/browser.conf.example browser/hqnode/desktop.ini.example browser/hqnode/rd-pulse.pa /etc/rd-browser/
 RUN set -eux; ldconfig; mkdir -p /etc/X11/rd-xorg.conf.d; chmod 0755 /usr/lib/rd-browser/*; \
-    systemctl enable rd-xorg.service rd-video.service rd-shell.service remodroid-desktopd.service
+    systemctl enable rd-xorg.service rd-pulse.service rd-video.service rd-shell.service remodroid-desktopd.service
 
 # Inherited from the system image, restated because a wrong one turns every stop into 30 s and a kill.
 STOPSIGNAL SIGRTMIN+3
