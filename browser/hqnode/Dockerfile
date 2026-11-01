@@ -74,6 +74,14 @@ ARG CLOAKBROWSER=free
 ARG CLOAKBROWSER_URL=
 ARG CLOAKBROWSER_SHA256=
 
+# browser and rdagent share the X cookie (group rdx); only rdagent may open the encoder (group video).
+# Made before any package, with the ids they have always had: /data keeps their files across a
+# reinstall, owned by number, and a package that makes a system user (avahi, dbus) would otherwise take
+# these ids first and leave the users' profiles and favourites unreadable.
+RUN set -eux; groupadd -r -g 990 rdx; groupadd -r -g 989 browser; groupadd -r -g 988 rdagent; \
+    useradd -r -m -u 995 -g browser -d /var/lib/browser -s /usr/sbin/nologin -G rdx browser; \
+    useradd -r -m -u 994 -g rdagent -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video rdagent
+
 # Xorg (its inputtest driver is in xserver-xorg-core) with the dummy screen; the fonts a page expects, and
 # the ones CloakBrowser asks for (anti-bot scripts hash emoji and CJK drawn on a canvas, and a set no real
 # browser has gives it away); the agent's and the bar's libraries; xauth for the display's cookie.
@@ -111,11 +119,8 @@ RUN set -eux; url=$CLOAKBROWSER_URL sum=$CLOAKBROWSER_SHA256; \
         mkdir -p /opt/cloakbrowser; ln -sf /usr/bin/chromium /opt/cloakbrowser/chrome; \
     fi
 
-# browser and rdagent share the X cookie (group rdx) and the sound server (pulse-access, from the
-# pulseaudio package); only rdagent may open the encoder (group video)
-RUN set -eux; groupadd -r rdx; \
-    useradd -r -m -d /var/lib/browser -s /usr/sbin/nologin -G rdx,pulse-access browser; \
-    useradd -r -m -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video,pulse-access rdagent
+# the sound server (pulse-access, from the pulseaudio package) is theirs too
+RUN set -eux; usermod -aG pulse-access browser; usermod -aG pulse-access rdagent
 
 COPY --from=build /src/remodroid/build/host/desktop/libremodroid.so /usr/lib/remodroid/libremodroid.so
 COPY --from=build /src/remodroid/build/host/desktop/remodroid-desktopd /usr/bin/remodroid-desktopd

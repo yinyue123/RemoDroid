@@ -15,6 +15,9 @@ Environment=DISPLAY=:0 XAUTHORITY=/run/rd-xorg.auth HOME=/var/lib/browser PULSE_
 ExecStartPre=/bin/sh -c 'for i in $(seq 50); do [ -S /tmp/.X11-unix/X0 ] && exit 0; sleep 0.1; done; exit 1'
 # the users' profiles, tabs, history and favourites: /data is root's, so root makes the directory
 ExecStartPre=+/usr/bin/install -d -o browser -g browser -m 0700 /data/users
+# /data outlives the image, and its files are owned by number: an image whose browser user has another
+# id would find every profile and favourite unreadable (2026-11-01). Hand them to this one.
+ExecStartPre=+/usr/bin/chown -R browser:browser /data/users
 ExecStart=/usr/bin/rd-shell -c /data/browser.conf
 Restart=always
 RestartSec=2
