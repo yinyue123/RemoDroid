@@ -318,6 +318,12 @@ running `systemctl restart rd-xorg rd-shell`; `rd-shell` reads the same key for 
 the bar height. `native` (which needs a 30 Hz modeline: the dummy driver caps the pixel clock at 300 MHz)
 is for a stronger machine.
 
+**Desktop mode** (the bar's menu, per user): the X screen stays the same, and only Chrome's scale changes,
+to `desktop_scale` (1 by default). The page then lays out on the screen's full width, 880×1808 CSS px on
+`light`, and sites give their desktop layout, as "Request desktop site" does on a phone (Safari and Chrome
+use 980 px). Text is half the size; pinch to zoom. Chrome sets the scale when it starts, so the switch
+restarts it with its tabs. The choice is a file, `desktop` (`1` or `0`), in the user's directory.
+
 ### What was tested, and what it showed
 
 Tested in an Alpine 3.22 rootfs whose `/dev` held only hqnode's nodes (`null zero random urandom tty`),

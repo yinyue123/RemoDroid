@@ -4,8 +4,9 @@
  *   - The bar: a strip 44 CSS px tall across the top of the screen (88 px at 2x, 44 pt on the iPhone):
  *     back, forward, reload, the page's title (tap it to type a URL), a star that saves the page to the
  *     favourites (or takes it out), and a menu with Home, New tab, the tabs (listed only when there is
- *     more than one), Favourites, History, the user, New identity, Restart and Stop/Start, then the
- *     container's CPU, memory and disk. Taps arrive as the touch screen's emulated pointer events.
+ *     more than one), Favourites, History, the user, the sound, Desktop mode, New identity, Restart and
+ *     Stop/Start, then the container's CPU, memory and disk. Taps arrive as the touch screen's emulated
+ *     pointer events.
  *   - The pages: Users, History (with Clear history & data, Clear cookies) and Favourites (each with a
  *     close button that deletes it), drawn over the browser below the bar. A drag scrolls them.
  *   - The users (Alice … Frank by default): each has a profile of their own (cookies, site data), a
@@ -266,6 +267,7 @@ static struct {
     pid_t pid;
     int want;        /* the browser should be running */
     char seed[40];   /* the user's fingerprint */
+    int desktop;     /* desktop mode: the page laid out at desktop_scale (1: the screen's full width) */
     int fails;       /* quick deaths in a row: the restart waits longer */
     time_t started;
     double restart_at;
@@ -546,7 +548,10 @@ static char **browser_argv(const char *const *urls, int nurls, int devtools)
         ARG("--fingerprint-webrtc-ip=%s", uconf("webrtc_ip", "auto")); /* the proxy's exit address, not ours */
     }
     ARG("--kiosk");
-    ARG("--force-device-scale-factor=%d", S);
+    if (BR.desktop)
+        ARG("--force-device-scale-factor=%s", conf("desktop_scale", "1"));
+    else
+        ARG("--force-device-scale-factor=%d", S);
     ARG("--touch-events=enabled");
     char profile[PATH_MAX];
     upath(profile, sizeof profile, "profile");
@@ -1014,8 +1019,9 @@ static void browser_start(void)
             close(from[0]);
     }
     BR.started = time(NULL);
-    LOG("browser started for %s (pid %d, seed %s, %s)", user(), (int)BR.pid, BR.seed,
-        nurls < 0 ? "its last session" : nurls > 1 ? "its tabs" : nurls ? "its tab" : "the home page");
+    LOG("browser started for %s (pid %d, seed %s, %s%s)", user(), (int)BR.pid, BR.seed,
+        nurls < 0 ? "its last session" : nurls > 1 ? "its tabs" : nurls ? "its tab" : "the home page",
+        BR.desktop ? ", desktop mode" : "");
     draw_bar();
 }
 
@@ -1077,6 +1083,10 @@ static void user_open(void)
         LOG("mkdir %s: %s", p, strerror(errno));
     BR.seed[0] = 0;
     seed_load(0);
+    char d[8];
+    upath(p, sizeof p, "desktop");
+    read_line(p, d, sizeof d);
+    BR.desktop = d[0] == '1';
     lists_load();
     rm_tree(conf("cache", "/tmp/rd-cache"));
     snprintf(p, sizeof p, "%s/current", U.dir);
@@ -1674,7 +1684,7 @@ static void sound_pick(int i)
 /* The menu's rows. The tabs are listed only when there is more than one, with Close tab under them; one tab
  * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W).
  * The last three only show the container's CPU, memory and disk. */
-enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_SOUND, M_VOL, M_NEW_ID,
+enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_SOUND, M_VOL, M_DESKTOP, M_NEW_ID,
        M_RESTART, M_STARTSTOP, M_PROXY, M_CPU, M_MEM, M_DISK };
 
 static struct {
@@ -1692,7 +1702,7 @@ static void menu_layout(void)
     if (BR.pid > 0)
         ITEM(M_NEW_TAB, -1);
     if (T.ntabs > 1) {
-        int room = (H - B) / B - 15; /* the rows that fit on the screen beside the others */
+        int room = (H - B) / B - 16; /* the rows that fit on the screen beside the others */
         for (int i = 0; i < T.ntabs && i < room; i++)
             ITEM(M_TAB, i);
         ITEM(M_CLOSE_TAB, -1);
@@ -1706,6 +1716,7 @@ static void menu_layout(void)
     ITEM(M_SOUND, -1);
     if (is_speaker(SO.cur)) /* an AirPlay speaker's volume, here rather than a page away */
         ITEM(M_VOL, -1);
+    ITEM(M_DESKTOP, -1);
     ITEM(M_NEW_ID, -1);
     ITEM(M_RESTART, -1);
     ITEM(M_STARTSTOP, -1);
@@ -1730,6 +1741,7 @@ static void menu_label(int i, char *out, size_t cap)
     case M_USER: snprintf(out, cap, "User: %s", user()); break;
     case M_SOUND: snprintf(out, cap, "Sound: %s", is_speaker(SO.cur) ? SO.desc[SO.cur] : "this phone"); break;
     case M_VOL: snprintf(out, cap, "Volume"); break;
+    case M_DESKTOP: snprintf(out, cap, "Desktop mode"); break;
     case M_NEW_ID: snprintf(out, cap, "New identity"); break;
     case M_RESTART: snprintf(out, cap, "Restart browser"); break;
     case M_STARTSTOP: snprintf(out, cap, BR.pid > 0 ? "Stop browser" : "Start browser"); break;
@@ -1798,6 +1810,12 @@ static void draw_menu(void)
         }
         if (kind == M_VOL) {
             draw_volume(i, l);
+        } else if (kind == M_DESKTOP) { /* the name, and On or Off at the right */
+            int base = i * B + B / 2 + (font[0]->ascent - font[0]->descent) / 2, x = S * 12;
+            const char *st = BR.desktop ? "On" : "Off";
+            int sw = text_in(font, NULL, NULL, 0, 0, st, 0);
+            text(menu_draw, &c_text, x, base, l, mw - 2 * x - sw - S * 8);
+            text(menu_draw, BR.desktop ? &c_ok : &c_dim, mw - x - sw, base, st, 0);
         } else if (kind == M_CPU) {
             snprintf(v, sizeof v, ST.cpu < 0 ? "…" : "%d %%", ST.cpu);
             draw_gauge(i, l, v, ST.cpu / 100.0);
@@ -2425,6 +2443,26 @@ static void edit_key(XKeyEvent *ev)
     draw_bar();
 }
 
+/* Desktop mode: the browser again at desktop_scale (1 by default), so the page is laid out on the screen's
+ * full width (880 CSS px on the light screen, 440 otherwise) and sites give their desktop layout. The scale
+ * is set when Chromium starts, so it restarts, with its tabs; the choice is the user's, kept in their
+ * directory. */
+static void desktop_toggle(void)
+{
+    char p[PATH_MAX];
+    BR.desktop = !BR.desktop;
+    upath(p, sizeof p, "desktop");
+    write_line(p, BR.desktop ? "1" : "0");
+    if (BR.pid > 0) {
+        browser_stop();
+        BR.fails = 0;
+        browser_start();
+    }
+    char s[80];
+    snprintf(s, sizeof s, "Desktop mode %s", BR.desktop ? "on" : "off");
+    show_note(s);
+}
+
 static void menu_action(int i, int x)
 {
     KeySym ctrl = XK_Control_L;
@@ -2458,6 +2496,7 @@ static void menu_action(int i, int x)
             send_keys(&ctrl, 1, XK_w); /* the last one ends the browser: it restarts */
         break;
     case M_NEW_ID: new_identity(); break;
+    case M_DESKTOP: desktop_toggle(); break;
     case M_RESTART:
         browser_stop();
         BR.fails = 0;

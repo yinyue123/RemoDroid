@@ -15,6 +15,9 @@ lang = en-US
 # The screen: the iPhone 14 Plus's, below its status bar. light = 880x1808 at 2x (the OECT's),
 # small = 784x1616 at 2x, native = 1280x2624 at 3x (too heavy for the OECT).
 screen = light
+# Desktop mode (the bar's menu, each user's own) starts the browser at this scale instead of 2 (3 for
+# native): 1 lays the page out on the screen's full width, 880 CSS px on light.
+#desktop_scale = 1
 
 # The users, switched from the bar's menu (User: …). Each has a directory of their own in data:
 # profile/ (cookies, site data), seed (the fingerprint), tabs (open again on the next start), history
