@@ -1,9 +1,10 @@
 # The container's LAN port (lan0, a macvlan) for AirPlay: its address, and routes only the sound server
-# and avahi use (rd-lan). Without the port, there is no AirPlay and this doesn't run. With a fixed
-# address (lan_address in /data/browser.conf) it sets up and exits; with DHCP it stays.
+# and avahi use (rd-lan). Without the port, there is no AirPlay: it waits 30 s for one and exits. With a
+# fixed address (hqnode's, or lan_address in /data/browser.conf) it sets up and exits; with DHCP it stays.
+# No ConditionPathExists=/sys/class/net/lan0: hqnode moves the port in just after the container starts,
+# and systemd checked before it was there, so AirPlay was off until a restart (2026-11-02).
 [Unit]
 Description=Remote browser: the LAN port, for AirPlay
-ConditionPathExists=/sys/class/net/lan0
 Before=avahi-daemon.service rd-pipewire.service
 
 [Service]

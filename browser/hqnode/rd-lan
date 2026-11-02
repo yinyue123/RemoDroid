@@ -54,7 +54,10 @@ bound|renew)
 *) exit 0 ;;
 esac
 
-[ -e /sys/class/net/$IF ] || { echo "rd-lan: no $IF" >&2; exit 1; }
+# hqnode moves the port in a moment after the container starts: systemd may be here first
+i=0
+while [ ! -e /sys/class/net/$IF ] && [ $i -lt 60 ]; do sleep 0.5; i=$((i + 1)); done
+[ -e /sys/class/net/$IF ] || { echo "rd-lan: no $IF: no AirPlay"; exit 0; }
 echo 1 > /proc/sys/net/ipv6/conf/$IF/disable_ipv6
 # a speaker's packets arrive on lan0 while the main table reaches the LAN through tap0: no strict check
 echo 0 > /proc/sys/net/ipv4/conf/$IF/rp_filter

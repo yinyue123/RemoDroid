@@ -963,7 +963,8 @@ Picking one makes its sink the default. The viewer then hears nothing: the agent
   - Table 100 holds the LAN subnet, multicast and the gateway, or an `unreachable` default without one.
   - Only uid `pulse` (the AirPlay streams) and uid `avahi` (Bonjour) look there. There's no rule by source
     address, so a program bound to `lan0`'s address still routes by the main table.
-  - Without `lan0`, `rd-lan` and avahi don't start, and the Sound page says there is no AirPlay.
+  - Without `lan0` (rd-lan waits 30 s for hqnode to move it in), avahi finds nothing and the Sound page
+    says there is no AirPlay.
 - **avahi** listens on `lan0` only and publishes nothing. `libpipewire-module-raop-discover` turns each
   `_raop._tcp` service into a sink, `raop_sink.<host>.<address>.<port>`, with `raop.latency.ms = 500`.
 - **PipeWire's AirPlay sink is patched** (`browser/hqnode/pipewire/patches/`, built in the image's
