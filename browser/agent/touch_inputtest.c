@@ -46,6 +46,7 @@ static struct {
     int points;
     int fd;
     int root_w, root_h;
+    int sw, sh;      /* the screen's size when root_w, root_h were read: they are read again when it changes */
     uint32_t next_id;
     uint32_t tid[MAX_FINGERS]; /* the driver's touch id for each of the viewer's pointer ids */
     uint8_t on[MAX_FINGERS];
@@ -137,6 +138,18 @@ static int put(const void *m, size_t n)
     return 0;
 }
 
+/* the device's 0..65535 spans the whole root window, whose size RandR can change (the remote browser's
+ * desktop mode) */
+static void root_size(void)
+{
+    Display *d = x11_open();
+    if (d) {
+        T.root_w = DisplayWidth(d, DefaultScreen(d));
+        T.root_h = DisplayHeight(d, DefaultScreen(d));
+        XCloseDisplay(d);
+    }
+}
+
 static int connect_x(void)
 {
     if (now_s() < T.retry_at)
@@ -171,13 +184,7 @@ static int connect_x(void)
         forget();
         return -1;
     }
-    /* the device's 0..65535 spans the whole root window */
-    Display *d = x11_open();
-    if (d) {
-        T.root_w = DisplayWidth(d, DefaultScreen(d));
-        T.root_h = DisplayHeight(d, DefaultScreen(d));
-        XCloseDisplay(d);
-    }
+    root_size();
     LOGI("touch: inputtest %u.%u at %s, %d fingers, root %dx%d", r.major, r.minor, T.path, T.points, T.root_w,
          T.root_h);
     T.retry_at = 0;
@@ -229,6 +236,11 @@ void dsk_touch(const dsk_screen_t *s, int id, int action, double nx, double ny)
         return; /* a finger we never put down (or lost with the X server) */
     if (T.fd < 0 && connect_x() < 0)
         return;
+    if (s->w != T.sw || s->h != T.sh) {
+        T.sw = s->w;
+        T.sh = s->h;
+        root_size();
+    }
     int rw = T.root_w > 1 ? T.root_w : s->x + s->w, rh = T.root_h > 1 ? T.root_h : s->y + s->h;
     double rx = (s->x + nx * (s->w - 1)) / (rw - 1), ry = (s->y + ny * (s->h - 1)) / (rh - 1);
     if (action == 0) {

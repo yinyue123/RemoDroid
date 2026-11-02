@@ -57,6 +57,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/XTest.h>
+#include <X11/extensions/Xrandr.h>
 #include <X11/keysym.h>
 
 #include "cJSON.h"
@@ -238,6 +239,7 @@ static void users_load(void)
 static Display *dpy;
 static Window root, bar, menu, check;
 static int W, H, S, B; /* screen size, scale, bar height */
+static int desktop;    /* desktop mode: the iPad's screen, landscape, and the page at desktop_scale */
 static XftFont *font[2], *font_s[2]; /* the main size, the small one */
 static XftDraw *bar_draw, *menu_draw;
 static XftColor c_text, c_dim, c_ok, c_bad, c_star;
@@ -267,7 +269,6 @@ static struct {
     pid_t pid;
     int want;        /* the browser should be running */
     char seed[40];   /* the user's fingerprint */
-    int desktop;     /* desktop mode: the page laid out at desktop_scale (1: the screen's full width) */
     int fails;       /* quick deaths in a row: the restart waits longer */
     time_t started;
     double restart_at;
@@ -548,7 +549,7 @@ static char **browser_argv(const char *const *urls, int nurls, int devtools)
         ARG("--fingerprint-webrtc-ip=%s", uconf("webrtc_ip", "auto")); /* the proxy's exit address, not ours */
     }
     ARG("--kiosk");
-    if (BR.desktop)
+    if (desktop)
         ARG("--force-device-scale-factor=%s", conf("desktop_scale", "1"));
     else
         ARG("--force-device-scale-factor=%d", S);
@@ -1021,7 +1022,7 @@ static void browser_start(void)
     BR.started = time(NULL);
     LOG("browser started for %s (pid %d, seed %s, %s%s)", user(), (int)BR.pid, BR.seed,
         nurls < 0 ? "its last session" : nurls > 1 ? "its tabs" : nurls ? "its tab" : "the home page",
-        BR.desktop ? ", desktop mode" : "");
+        desktop ? ", desktop mode" : "");
     draw_bar();
 }
 
@@ -1083,10 +1084,6 @@ static void user_open(void)
         LOG("mkdir %s: %s", p, strerror(errno));
     BR.seed[0] = 0;
     seed_load(0);
-    char d[8];
-    upath(p, sizeof p, "desktop");
-    read_line(p, d, sizeof d);
-    BR.desktop = d[0] == '1';
     lists_load();
     rm_tree(conf("cache", "/tmp/rd-cache"));
     snprintf(p, sizeof p, "%s/current", U.dir);
@@ -1692,7 +1689,7 @@ static struct {
 } items[MAX_TABS + 16];
 static int nitems;
 
-static int menu_w(void) { return W * 3 / 5; }
+static int menu_w(void) { return W * 3 / 5 < 264 * S ? W * 3 / 5 : 264 * S; } /* the phone's 3/5, at most */
 
 static void menu_layout(void)
 {
@@ -1812,10 +1809,10 @@ static void draw_menu(void)
             draw_volume(i, l);
         } else if (kind == M_DESKTOP) { /* the name, and On or Off at the right */
             int base = i * B + B / 2 + (font[0]->ascent - font[0]->descent) / 2, x = S * 12;
-            const char *st = BR.desktop ? "On" : "Off";
+            const char *st = desktop ? "On" : "Off";
             int sw = text_in(font, NULL, NULL, 0, 0, st, 0);
             text(menu_draw, &c_text, x, base, l, mw - 2 * x - sw - S * 8);
-            text(menu_draw, BR.desktop ? &c_ok : &c_dim, mw - x - sw, base, st, 0);
+            text(menu_draw, desktop ? &c_ok : &c_dim, mw - x - sw, base, st, 0);
         } else if (kind == M_CPU) {
             snprintf(v, sizeof v, ST.cpu < 0 ? "…" : "%d %%", ST.cpu);
             draw_gauge(i, l, v, ST.cpu / 100.0);
@@ -2315,6 +2312,14 @@ static void net_state(Window w, long action, Atom a1, Atom a2)
     place(w, i >= 0 && clients[i].transient);
 }
 
+/* the screen and the area below the bar: again whenever the screen changes size */
+static void ewmh_geometry(void)
+{
+    long geom[2] = { W, H }, area[4] = { 0, B, W, H - B };
+    XChangeProperty(dpy, root, A[A_NET_GEOMETRY], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)geom, 2);
+    XChangeProperty(dpy, root, A[A_NET_WORKAREA], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)area, 4);
+}
+
 static void ewmh_setup(void)
 {
     check = XCreateSimpleWindow(dpy, root, -1, -1, 1, 1, 0, 0, 0);
@@ -2326,12 +2331,11 @@ static void ewmh_setup(void)
                    A[A_NET_GEOMETRY], A[A_NET_VIEWPORT] };
     XChangeProperty(dpy, root, A[A_NET_SUPPORTED], XA_ATOM, 32, PropModeReplace, (unsigned char *)sup,
                     (int)(sizeof sup / sizeof sup[0]));
-    long one = 1, zero[2] = { 0, 0 }, geom[2] = { W, H }, area[4] = { 0, B, W, H - B };
+    long one = 1, zero[2] = { 0, 0 };
     XChangeProperty(dpy, root, A[A_NET_DESKTOPS], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&one, 1);
     XChangeProperty(dpy, root, A[A_NET_DESKTOP], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)zero, 1);
-    XChangeProperty(dpy, root, A[A_NET_GEOMETRY], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)geom, 2);
     XChangeProperty(dpy, root, A[A_NET_VIEWPORT], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)zero, 2);
-    XChangeProperty(dpy, root, A[A_NET_WORKAREA], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)area, 4);
+    ewmh_geometry();
 }
 
 static int another_wm;
@@ -2443,24 +2447,147 @@ static void edit_key(XKeyEvent *ev)
     draw_bar();
 }
 
-/* Desktop mode: the browser again at desktop_scale (1 by default), so the page is laid out on the screen's
- * full width (880 CSS px on the light screen, 440 otherwise) and sites give their desktop layout. The scale
- * is set when Chromium starts, so it restarts, with its tabs; the choice is the user's, kept in their
- * directory. */
+/* The bar's fonts at scale S: again when S changes */
+static int fonts_open(void)
+{
+    int scr = DefaultScreen(dpy);
+    for (int i = 0; i < 2; i++) {
+        if (font[i])
+            XftFontClose(dpy, font[i]);
+        if (font_s[i])
+            XftFontClose(dpy, font_s[i]);
+        font[i] = font_s[i] = NULL;
+    }
+    char fn[96];
+    snprintf(fn, sizeof fn, "%s:pixelsize=%d", conf("font", "Noto Sans"), 15 * S);
+    font[0] = XftFontOpenName(dpy, scr, fn);
+    snprintf(fn, sizeof fn, "Noto Sans CJK SC:pixelsize=%d", 15 * S);
+    font[1] = XftFontOpenName(dpy, scr, fn);
+    snprintf(fn, sizeof fn, "%s:pixelsize=%d", conf("font", "Noto Sans"), 12 * S);
+    font_s[0] = XftFontOpenName(dpy, scr, fn);
+    snprintf(fn, sizeof fn, "Noto Sans CJK SC:pixelsize=%d", 12 * S);
+    font_s[1] = XftFontOpenName(dpy, scr, fn);
+    return font[0] && font_s[0] ? 0 : -1;
+}
+
+/* Puts the X screen in the mode of that size (on: desktop_screen; off: the output's preferred mode, the one
+ * Xorg started with), through RandR: the modes are in rd-xorg-*.conf. Gives the size in *w, *h. */
+static int screen_mode(int on, int *w, int *h)
+{
+    int ww = 0, wh = 0;
+    if (on && sscanf(conf("desktop_screen", "1184x800"), "%dx%d", &ww, &wh) != 2)
+        ww = wh = 0;
+    XRRScreenResources *r = XRRGetScreenResources(dpy, root);
+    if (!r)
+        return -1;
+    RROutput out = None;
+    RRCrtc crtc = None;
+    RRMode mode = None, cur = None;
+    for (int i = 0; i < r->noutput && !out; i++) {
+        XRROutputInfo *o = XRRGetOutputInfo(dpy, r, r->outputs[i]);
+        if (o && o->connection == RR_Connected && o->nmode > 0) {
+            out = r->outputs[i];
+            crtc = o->crtc ? o->crtc : o->ncrtc > 0 ? o->crtcs[0] : None;
+            if (!on)
+                mode = o->modes[0]; /* the preferred one comes first */
+            for (int m = 0; on && m < o->nmode && !mode; m++)
+                for (int k = 0; k < r->nmode; k++)
+                    if (r->modes[k].id == o->modes[m] && (int)r->modes[k].width == ww && (int)r->modes[k].height == wh)
+                        mode = o->modes[m];
+        }
+        if (o)
+            XRRFreeOutputInfo(o);
+    }
+    for (int k = 0; k < r->nmode; k++)
+        if (r->modes[k].id == mode)
+            ww = (int)r->modes[k].width, wh = (int)r->modes[k].height;
+    if (crtc) {
+        XRRCrtcInfo *c = XRRGetCrtcInfo(dpy, r, crtc);
+        if (c) {
+            cur = c->mode;
+            XRRFreeCrtcInfo(c);
+        }
+    }
+    int ok = -1;
+    if (!out || !crtc || !mode) {
+        LOG("screen: no %s mode%s%s", on ? conf("desktop_screen", "1184x800") : "preferred",
+            out ? "" : " (no output)", on ? " in Xorg's config" : "");
+    } else if (mode == cur && ww == W && wh == H) {
+        ok = 0;
+    } else {
+        /* off, the new size, on again: RandR won't shrink the screen under a mode still showing */
+        XGrabServer(dpy);
+        XRRSetCrtcConfig(dpy, r, crtc, CurrentTime, 0, 0, None, RR_Rotate_0, NULL, 0);
+        XRRSetScreenSize(dpy, root, ww, wh, (int)(ww * 25.4 / 96 + 0.5), (int)(wh * 25.4 / 96 + 0.5));
+        ok = XRRSetCrtcConfig(dpy, r, crtc, CurrentTime, 0, 0, mode, RR_Rotate_0, &out, 1) == RRSetConfigSuccess ? 0 : -1;
+        XUngrabServer(dpy);
+        XSync(dpy, False);
+        LOG("screen: %dx%d%s", ww, wh, ok ? " failed" : "");
+    }
+    XRRFreeScreenResources(r);
+    *w = ww;
+    *h = wh;
+    return ok;
+}
+
+/* Desktop mode on or off: the screen's mode, then the bar, the menu, the pages and the browser's windows
+ * at the new size and scale. */
+static int desktop_apply(int on)
+{
+    int w, h;
+    if (screen_mode(on, &w, &h) < 0) {
+        show_note(on ? "No desktop screen in Xorg's config" : "Can't switch the screen back");
+        return -1;
+    }
+    desktop = on;
+    W = w;
+    H = h;
+    int s = atoi(on ? conf("desktop_bar_scale", "1") : conf("scale", !strcmp(conf("screen", "light"), "native") ? "3" : "2"));
+    S = s >= 1 && s <= 4 ? s : on ? 1 : 2;
+    B = 44 * S;
+    fonts_open();
+    XMoveResizeWindow(dpy, bar, 0, 0, (unsigned)W, (unsigned)B);
+    long strut[12] = { 0, 0, B, 0, 0, 0, 0, 0, 0, W - 1, 0, 0 };
+    XChangeProperty(dpy, bar, A[A_NET_STRUT], XA_CARDINAL, 32, PropModeReplace, (unsigned char *)strut, 12);
+    XMoveResizeWindow(dpy, menu, W - menu_w(), B, (unsigned)menu_w(), (unsigned)B);
+    XMoveResizeWindow(dpy, P.w, 0, B, (unsigned)W, (unsigned)(H - B));
+    int scr = DefaultScreen(dpy);
+    XftDrawDestroy(P.d);
+    XFreePixmap(dpy, P.pm);
+    P.pm = XCreatePixmap(dpy, P.w, (unsigned)W, (unsigned)(H - B), (unsigned)DefaultDepth(dpy, scr));
+    P.d = XftDrawCreate(dpy, P.pm, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
+    ewmh_geometry();
+    for (int i = 0; i < nclients; i++)
+        place(clients[i].w, clients[i].transient);
+    draw_bar();
+    XFlush(dpy);
+    return 0;
+}
+
+/* Desktop mode, for the iPad: the X screen switches to desktop_screen (1184x800 by default: an 11" iPad in
+ * landscape below its status bar, in points), the bar to desktop_bar_scale (1) and the page to
+ * desktop_scale (1), so a site gets a desktop's window and gives its desktop layout. Off, the screen goes
+ * back to the one Xorg started with (the iPhone's, rd-xorg-*.conf) and the scale to scale. Chromium takes
+ * the scale only when it starts, so it restarts with its tabs. The desktop agent sees the new size and
+ * starts the video over at it. One setting for everyone (it follows the device, not the user):
+ * <data>/desktop. */
 static void desktop_toggle(void)
 {
-    char p[PATH_MAX];
-    BR.desktop = !BR.desktop;
-    upath(p, sizeof p, "desktop");
-    write_line(p, BR.desktop ? "1" : "0");
-    if (BR.pid > 0) {
-        browser_stop();
+    int on = !desktop, was = BR.pid > 0;
+    browser_stop();
+    panel_show(P_NONE);
+    if (desktop_apply(on) == 0) {
+        char p[PATH_MAX];
+        snprintf(p, sizeof p, "%s/desktop", U.dir);
+        write_line(p, on ? "1" : "0");
+        char m[80];
+        snprintf(m, sizeof m, "Desktop mode %s: %dx%d", on ? "on" : "off", W, H);
+        show_note(m);
+    }
+    if (was) {
         BR.fails = 0;
         browser_start();
     }
-    char s[80];
-    snprintf(s, sizeof s, "Desktop mode %s", BR.desktop ? "on" : "off");
-    show_note(s);
 }
 
 static void menu_action(int i, int x)
@@ -2600,16 +2727,7 @@ int main(int argc, char **argv)
     XSetErrorHandler(on_error);
     ewmh_setup();
 
-    char fn[96];
-    snprintf(fn, sizeof fn, "%s:pixelsize=%d", conf("font", "Noto Sans"), 15 * S);
-    font[0] = XftFontOpenName(dpy, scr, fn);
-    snprintf(fn, sizeof fn, "Noto Sans CJK SC:pixelsize=%d", 15 * S);
-    font[1] = XftFontOpenName(dpy, scr, fn);
-    snprintf(fn, sizeof fn, "%s:pixelsize=%d", conf("font", "Noto Sans"), 12 * S);
-    font_s[0] = XftFontOpenName(dpy, scr, fn);
-    snprintf(fn, sizeof fn, "Noto Sans CJK SC:pixelsize=%d", 12 * S);
-    font_s[1] = XftFontOpenName(dpy, scr, fn);
-    if (!font[0] || !font_s[0]) {
+    if (fonts_open() < 0) {
         LOG("no font");
         return 1;
     }
@@ -2668,6 +2786,10 @@ int main(int argc, char **argv)
 
     users_load();
     user_open();
+    char dp[PATH_MAX], dm[8];
+    snprintf(dp, sizeof dp, "%s/desktop", U.dir);
+    read_line(dp, dm, sizeof dm);
+    desktop_apply(dm[0] == '1'); /* as it was left; off, the phone's screen even if Xorg was left in another */
     draw_bar();
     if (strcmp(conf("autostart", "1"), "0"))
         browser_start();

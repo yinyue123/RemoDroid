@@ -318,11 +318,24 @@ running `systemctl restart rd-xorg rd-shell`; `rd-shell` reads the same key for 
 the bar height. `native` (which needs a 30 Hz modeline: the dummy driver caps the pixel clock at 300 MHz)
 is for a stronger machine.
 
-**Desktop mode** (the bar's menu, per user): the X screen stays the same, and only Chrome's scale changes,
-to `desktop_scale` (1 by default). The page then lays out on the screen's full width, 880×1808 CSS px on
-`light`, and sites give their desktop layout, as "Request desktop site" does on a phone (Safari and Chrome
-use 980 px). Text is half the size; pinch to zoom. Chrome sets the scale when it starts, so the switch
-restarts it with its tabs. The choice is a file, `desktop` (`1` or `0`), in the user's directory.
+**Desktop mode** (the bar's menu), for viewing from an iPad. The iPhone gets the screen above; the iPad
+gets the shape of its own screen in landscape below its 24 pt status bar, in points:
+
+| `desktop_screen =` | iPad | Its screen in landscape, below the status bar | Pixels |
+|---|---|---|---|
+| **`1184x800`** (default) | 11" (iPad, iPad Air, iPad Pro) | 1180×796 pt | 0.95 MP |
+| `1376x1008` | 13" (iPad Air, iPad Pro) | 1376×1008 pt | 1.39 MP |
+| `1136x720` | mini | 1133×720 pt | 0.82 MP |
+
+- **rd-shell switches the X screen through RandR** to that mode (all three are in `rd-xorg-*.conf`, after
+  the phone's, which stays the one at start), the bar to `desktop_bar_scale` (1: 44 px, 44 pt on the iPad)
+  and Chromium to `desktop_scale` (1). The page then sees a desktop's 1184×800 screen and window, as iPad
+  Safari does, and sites give their desktop layout.
+- **Chromium takes the scale only when it starts**, so it restarts, with its tabs.
+- **The desktop agent sees the new size** within a second, starts the video over at it and tells the viewer
+  (`screen.changed`); the viewer lays the picture out again from the video's size.
+- **Off, everything goes back** to the screen Xorg started with. The setting is one for everyone, since it
+  follows the device rather than the user: `<data>/desktop` (`1` or `0`), applied when rd-shell starts.
 
 ### What was tested, and what it showed
 

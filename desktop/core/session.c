@@ -131,6 +131,24 @@ static void send_screen_changed(void)
     session_send(m);
 }
 
+/* The screen in view changed size during the session (a resolution change; the remote browser's desktop
+ * mode switches it through RandR): the video starts over at the new size and the viewer is told, as when it
+ * picks a screen. A screen plugged in or out is left to the next session. */
+static void check_screen_size(void)
+{
+    dsk_screen_t s[DSK_MAX_SCREENS];
+    int n = dsk_screens(s, DSK_MAX_SCREENS);
+    if (n != D.nscreens || D.screen < 0 || D.screen >= n)
+        return;
+    const dsk_screen_t *a = &D.screens[D.screen], *b = &s[D.screen];
+    if (a->pw == b->pw && a->ph == b->ph && a->w == b->w && a->h == b->h && a->x == b->x && a->y == b->y)
+        return;
+    LOGI("session: screen %d is now %dx%d (was %dx%d)", D.screen, b->pw, b->ph, a->pw, a->ph);
+    desk_refresh_screens();
+    start_video();
+    send_screen_changed();
+}
+
 /* ---------------- lifecycle ---------------- */
 
 /* ---------------- sound ---------------- */
@@ -583,6 +601,7 @@ void session_tick(void)
 {
     if (!S.active || !S.ctrl_open)
         return;
+    check_screen_size();
     check_clipboard();
     char st[1024];
     rd_rtc_stats(st, sizeof st);
