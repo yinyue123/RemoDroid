@@ -80,11 +80,12 @@ ARG CLOAKBROWSER_SHA256=
 # reinstall, owned by number, and a package that makes a system user (avahi, dbus) would otherwise take
 # these ids first and leave the users' profiles and favourites unreadable.
 # The sound server runs as pulse; pulse-access may use its socket (no package makes them without
-# PulseAudio's own daemon).
+# PulseAudio's own daemon). pulse comes last: a system user without an id takes the highest one free.
 RUN set -eux; groupadd -r -g 990 rdx; groupadd -r -g 989 browser; groupadd -r -g 988 rdagent; \
-    groupadd -r pulse-access; useradd -r -U -M -d /run/rd-pw -s /usr/sbin/nologin -G audio pulse; \
+    groupadd -r pulse-access; \
     useradd -r -m -u 995 -g browser -d /var/lib/browser -s /usr/sbin/nologin -G rdx,pulse-access browser; \
-    useradd -r -m -u 994 -g rdagent -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video,pulse-access rdagent
+    useradd -r -m -u 994 -g rdagent -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video,pulse-access rdagent; \
+    useradd -r -U -M -d /run/rd-pw -s /usr/sbin/nologin -G audio pulse
 
 # Xorg (its inputtest driver is in xserver-xorg-core) with the dummy screen; the fonts a page expects, and
 # the ones CloakBrowser asks for (anti-bot scripts hash emoji and CJK drawn on a canvas, and a set no real
