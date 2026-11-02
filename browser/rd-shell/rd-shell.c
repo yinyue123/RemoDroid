@@ -223,7 +223,7 @@ static void users_load(void)
     }
     if (!U.n)
         snprintf(U.name[U.n++], sizeof U.name[0], "Default");
-    if (mkdir(U.dir, 0700) && errno != EEXIST)
+    if (mkdir(U.dir, 0777) && errno != EEXIST) /* anyone's: an owner mix-up must never hide a user's files */
         LOG("mkdir %s: %s", U.dir, strerror(errno));
     snprintf(p, sizeof p, "%s/current", U.dir); /* the one in use when rd-shell last ran */
     read_line(p, cur, sizeof cur);
@@ -324,6 +324,9 @@ static struct hist {
 } HI[MAX_HIST];         /* oldest first */
 static int nhist, hist_dirty;
 static double hist_save_at;
+/* The file is there but couldn't be read (another owner, 2026-11-01): what's in memory is not what's on
+ * disk, and saving it would replace the user's list with an empty one. So it is never saved. */
+static int hist_unreadable, favs_unreadable;
 
 static struct {
     char url[URL_MAX], title[200];
@@ -400,6 +403,8 @@ static void hist_save(void)
 {
     char p[PATH_MAX], tmp[PATH_MAX + 8];
     hist_dirty = 0;
+    if (hist_unreadable)
+        return;
     upath(p, sizeof p, "history");
     FILE *f = save_begin(p, tmp, sizeof tmp);
     for (int i = 0; f && i < nhist; i++)
@@ -410,6 +415,10 @@ static void hist_save(void)
 static void favs_save(void)
 {
     char p[PATH_MAX], tmp[PATH_MAX + 8];
+    if (favs_unreadable) {
+        show_note("Can't read the favourites file: not saved");
+        return;
+    }
     upath(p, sizeof p, "favourites");
     FILE *f = save_begin(p, tmp, sizeof tmp);
     for (int i = 0; f && i < nfavs; i++)
@@ -425,6 +434,8 @@ static void lists_load(void)
     nhist = nfavs = hist_dirty = 0;
     upath(p, sizeof p, "history");
     FILE *f = fopen(p, "r");
+    if ((hist_unreadable = !f && errno != ENOENT))
+        LOG("can't read %s: %s; it won't be saved over", p, strerror(errno));
     while (f && fgets(line, sizeof line, f)) {
         line[strcspn(line, "\r\n")] = 0;
         char *u = strchr(line, '\t'), *t = u ? strchr(u + 1, '\t') : NULL;
@@ -438,6 +449,8 @@ static void lists_load(void)
         fclose(f);
     upath(p, sizeof p, "favourites");
     f = fopen(p, "r");
+    if ((favs_unreadable = !f && errno != ENOENT))
+        LOG("can't read %s: %s; it won't be saved over", p, strerror(errno));
     while (f && fgets(line, sizeof line, f) && nfavs < MAX_FAVS) {
         line[strcspn(line, "\r\n")] = 0;
         char *t = strchr(line, '\t');
@@ -1060,7 +1073,7 @@ static void user_open(void)
 {
     char p[PATH_MAX];
     snprintf(p, sizeof p, "%s/%s", U.dir, user());
-    if (mkdir(p, 0700) && errno != EEXIST)
+    if (mkdir(p, 0777) && errno != EEXIST)
         LOG("mkdir %s: %s", p, strerror(errno));
     BR.seed[0] = 0;
     seed_load(0);
