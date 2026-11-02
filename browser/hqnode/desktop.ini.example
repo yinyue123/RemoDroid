@@ -13,7 +13,7 @@ touch_points = 5
 clipboard_sync = false
 allow_shell = false
 notify = false
-; the browser's sound (rd-pulse's null sink); the viewer's Sound switch mutes it
+; the browser's sound (rd-pipewire's "browser" sink); the viewer's Sound switch mutes it
 audio = true
 
 [files]

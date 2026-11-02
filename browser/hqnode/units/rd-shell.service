@@ -1,8 +1,8 @@
 # The controller bar, window manager and CloakBrowser supervisor (browser/rd-shell).
 [Unit]
 Description=Remote browser: controller bar and CloakBrowser
-After=rd-xorg.service rd-pulse.service
-Wants=rd-pulse.service
+After=rd-xorg.service rd-pipewire-pulse.service
+Wants=rd-pipewire-pulse.service
 Requires=rd-xorg.service
 PartOf=rd-xorg.service
 

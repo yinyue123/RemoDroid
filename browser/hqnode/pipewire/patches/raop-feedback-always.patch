@@ -1,0 +1,14 @@
+--- a/src/modules/module-raop-sink.c
++++ b/src/modules/module-raop-sink.c
+@@ -891,8 +891,9 @@
+ 	interval.tv_sec = 2;
+ 	interval.tv_nsec = 0;
+ 
+-	// feedback timer is only needed for auth_setup	encryption
+-	if (impl->encryption == CRYPTO_AUTH_SETUP && !impl->feedback_timer) {
++	/* POST /feedback every 2 s, whatever the encryption: a HomePod (et=0, no auth-setup: it answers
++	 * that with 404) closes the connection about 15 s into a session that doesn't send it. */
++	if (!impl->feedback_timer) {
+ 
+ 		impl->feedback_timer = pw_loop_add_timer(impl->loop, rtsp_do_post_feedback, impl);
+ 		pw_loop_update_timer(impl->loop, impl->feedback_timer, &timeout, &interval, false);

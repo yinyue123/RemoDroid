@@ -4,7 +4,7 @@
 [Unit]
 Description=Remote browser: the LAN port, for AirPlay
 ConditionPathExists=/sys/class/net/lan0
-Before=avahi-daemon.service rd-pulse.service
+Before=avahi-daemon.service rd-pipewire.service
 
 [Service]
 Type=simple

@@ -1,0 +1,23 @@
+# The remote browser's sound server: PipeWire as user pulse (pipewire/pipewire.conf.d/rd.conf), with
+# "browser", the sink CloakBrowser plays into and the desktop agent records, and one sink per AirPlay
+# speaker avahi finds on the LAN port (rd-lan). pipewire-pulse speaks the PulseAudio protocol on
+# /run/pulse/native for Chromium, the agent and the bar's pactl; WirePlumber links the streams.
+[Unit]
+Description=Remote browser: sound server (PipeWire)
+After=local-fs.target rd-lan.service avahi-daemon.service
+
+[Service]
+Type=simple
+User=pulse
+Group=pulse
+# no login session here: its runtime directory is made by hand, and its config is ours
+Environment=XDG_RUNTIME_DIR=/run/rd-pw XDG_CONFIG_HOME=/etc/rd-browser HOME=/run/rd-pw
+ExecStartPre=+/usr/bin/install -d -o pulse -g pulse -m 0700 /run/rd-pw
+# only pulse-access (browser, rdagent) may enter: the socket in it is left open (UMask in rd-pipewire-pulse)
+ExecStartPre=+/usr/bin/install -d -o pulse -g pulse-access -m 0750 /run/pulse
+ExecStart=/usr/bin/pipewire
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

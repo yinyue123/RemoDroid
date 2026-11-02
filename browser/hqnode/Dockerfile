@@ -7,8 +7,8 @@
 #   rd-xorg             Xorg :0, the dummy screen + the inputtest touch device     /run/rd-touch.sock
 #   rd-video            the MPP device nodes hqnode makes ("rkmpp") handed to group video
 #   rd-lan              the LAN port (a macvlan, lan0) for AirPlay alone, when there is one
-#   rd-pulse            PulseAudio: a null sink the browser plays into             /run/pulse/native
-#                       and the AirPlay speakers avahi finds on lan0
+#   rd-pipewire         PipeWire (+ rd-pipewire-pulse, rd-wireplumber): the sink   /run/pulse/native
+#                       the browser plays into, and the AirPlay speakers avahi finds on lan0
 #   rd-shell            the bar, the window manager, the browser supervisor        user browser
 #   remodroid-desktopd  capture → Rockchip MPP H.265 → WebRTC; touch and keys in   user rdagent
 #                       the sink's monitor → Opus, the sound
@@ -49,26 +49,24 @@ RUN set -eux; make -j"$(nproc)" desktop browser OPT='-O2 -g0'; \
     if [ "$TARGETARCH" = arm64 ]; then make browser-mpptest MPP_INC=/src/mpp/inc OPT='-O2 -g0'; \
         cp build/host/browser/mpptest /opt/mpp/bin/; fi
 
-# ── PulseAudio's AirPlay (RAOP) module, patched ─────────────────────────────
-# Debian's own source and build options, with browser/hqnode/pulse/*.patch applied; only libraop.so and
-# module-raop-discover.so are taken, in place of pulseaudio-module-raop's, with the RUNPATH meson would
-# have installed them with. The
-# patch: a HomePod asks the timing port before it answers SETUP, which stock PulseAudio reads only after,
-# and then answers timing_port=0, which stock PulseAudio fails on (raop-early-timing.patch says more).
-FROM debian:13 AS pulse-raop
+# ── PipeWire's AirPlay (RAOP) sink, patched ─────────────────────────────────
+# Debian's own source and build options, with browser/hqnode/pipewire/patches/*.patch applied; only the
+# RAOP sink module is built and taken, in place of libpipewire-0.3-modules' (browser/airplay.md):
+#   raop-user-agent.patch       a HomePod answers 403 to the User-Agent "PipeWire/<version>"
+#   raop-feedback-always.patch  the 2 s POST /feedback for every speaker, not only auth-setup ones: a
+#                               HomePod mini (no auth-setup) hangs up about 15 s into a session without it
+FROM debian:13 AS pipewire-raop
 RUN set -eux; echo 'deb-src http://deb.debian.org/debian trixie main' > /etc/apt/sources.list.d/src.list; \
-    apt-get update; apt-get build-dep -y pulseaudio; apt-get install -y --no-install-recommends dpkg-dev patchelf; \
-    mkdir /src; cd /src; apt-get source pulseaudio; mv pulseaudio-*/ pulseaudio
-COPY browser/hqnode/pulse/ /src/patches/
-RUN set -eux; cd /src/pulseaudio; for p in /src/patches/*.patch; do patch -p1 < "$p"; done; \
-    DEB_BUILD_OPTIONS=nocheck debian/rules override_dh_auto_configure; \
-    ninja -C obj-* src/modules/raop/libraop.so src/modules/module-raop-discover.so; mkdir /out; \
-    cp obj-*/src/modules/raop/libraop.so obj-*/src/modules/module-raop-discover.so /out/; \
-    dpkg-parsechangelog -S Version > /out/version; \
-    up=$(sed 's/-[^-]*$//' /out/version); \
-    for f in /out/*.so; do \
-        patchelf --set-rpath "/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/pulseaudio:/usr/lib/pulse-$up/modules" "$f"; \
-    done
+    apt-get update; apt-get build-dep -y pipewire; apt-get install -y --no-install-recommends dpkg-dev patchelf; \
+    mkdir /src; cd /src; apt-get source pipewire; mv pipewire-*/ pipewire
+COPY browser/hqnode/pipewire/patches/ /src/patches/
+RUN set -eux; cd /src/pipewire; for p in /src/patches/*.patch; do patch -p1 < "$p"; done; \
+    DEB_BUILD_PROFILES=nodoc DEB_BUILD_OPTIONS=nocheck debian/rules override_dh_auto_configure; \
+    ninja -C obj-* src/modules/libpipewire-module-raop-sink.so; mkdir /out; \
+    cp obj-*/src/modules/libpipewire-module-raop-sink.so /out/; \
+    patchelf --remove-rpath /out/libpipewire-module-raop-sink.so; \
+    grep -q 'AirPlay/381.13' /out/libpipewire-module-raop-sink.so; \
+    dpkg-parsechangelog -S Version > /out/version
 
 # ── the container ────────────────────────────────────────────────────────────
 FROM ghcr.io/yinyue123/hqnode:debian-13
@@ -81,15 +79,19 @@ ARG CLOAKBROWSER_SHA256=
 # Made before any package, with the ids they have always had: /data keeps their files across a
 # reinstall, owned by number, and a package that makes a system user (avahi, dbus) would otherwise take
 # these ids first and leave the users' profiles and favourites unreadable.
+# The sound server runs as pulse; pulse-access may use its socket (no package makes them without
+# PulseAudio's own daemon).
 RUN set -eux; groupadd -r -g 990 rdx; groupadd -r -g 989 browser; groupadd -r -g 988 rdagent; \
-    useradd -r -m -u 995 -g browser -d /var/lib/browser -s /usr/sbin/nologin -G rdx browser; \
-    useradd -r -m -u 994 -g rdagent -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video rdagent
+    groupadd -r pulse-access; useradd -r -U -M -d /run/rd-pw -s /usr/sbin/nologin -G audio pulse; \
+    useradd -r -m -u 995 -g browser -d /var/lib/browser -s /usr/sbin/nologin -G rdx,pulse-access browser; \
+    useradd -r -m -u 994 -g rdagent -d /var/lib/rdagent -s /usr/sbin/nologin -G rdx,video,pulse-access rdagent
 
 # Xorg (its inputtest driver is in xserver-xorg-core) with the dummy screen; the fonts a page expects, and
 # the ones CloakBrowser asks for (anti-bot scripts hash emoji and CJK drawn on a canvas, and a set no real
 # browser has gives it away); the agent's and the bar's libraries; xauth for the display's cookie.
-# PulseAudio for the sound (libpulse0 has the libpulse-simple the agent records with), its AirPlay module,
-# and what that needs on the LAN port: avahi (on D-Bus) to find speakers, busybox's udhcpc and ipcalc.
+# PipeWire for the sound, with its PulseAudio server (libpulse0 has the libpulse-simple the agent records
+# with, pulseaudio-utils the bar's pactl) and its AirPlay modules (libpipewire-0.3-modules), and what
+# AirPlay needs on the LAN port: avahi (on D-Bus) to find speakers, busybox's udhcpc and ipcalc.
 RUN set -eux; apt-get update; \
     apt-get install -y --no-install-recommends xserver-xorg-core xserver-xorg-video-dummy xauth x11-utils xinput \
         fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
@@ -97,7 +99,8 @@ RUN set -eux; apt-get update; \
         libx11-6 libxext6 libxtst6 libxrandr2 libxdamage1 libxfixes3 libxft2 libfontconfig1 \
         libnss3 libgbm1 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 libxkbcommon0 libpango-1.0-0 \
         libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 curl ca-certificates \
-        pulseaudio libpulse0 pulseaudio-module-raop avahi-daemon dbus busybox iproute2; \
+        pipewire pipewire-pulse wireplumber libpipewire-0.3-modules libspa-0.2-modules libpulse0 pulseaudio-utils \
+        avahi-daemon dbus busybox iproute2; \
     if [ "$CLOAKBROWSER" = chromium ]; then apt-get install -y --no-install-recommends chromium; fi; \
     rm -rf /var/lib/apt/lists/*
 
@@ -122,14 +125,11 @@ RUN set -eux; url=$CLOAKBROWSER_URL sum=$CLOAKBROWSER_SHA256; \
         mkdir -p /opt/cloakbrowser; ln -sf /usr/bin/chromium /opt/cloakbrowser/chrome; \
     fi
 
-# the sound server (pulse-access, from the pulseaudio package) is theirs too
-RUN set -eux; usermod -aG pulse-access browser; usermod -aG pulse-access rdagent
-
 COPY --from=build /src/remodroid/build/host/desktop/libremodroid.so /usr/lib/remodroid/libremodroid.so
 COPY --from=build /src/remodroid/build/host/desktop/remodroid-desktopd /usr/bin/remodroid-desktopd
 COPY --from=build /src/remodroid/build/host/browser/rd-shell /usr/bin/rd-shell
 COPY --from=build /opt/mpp/lib/ /usr/local/lib/
-COPY --from=pulse-raop /out/ /tmp/pulse-raop/
+COPY --from=pipewire-raop /out/ /tmp/pipewire-raop/
 COPY --from=build /opt/mpp/bin/ /usr/local/bin/
 COPY browser/hqnode/rd-xorg-light.conf browser/hqnode/rd-xorg-small.conf browser/hqnode/rd-xorg-native.conf /etc/X11/
 COPY browser/hqnode/rd-xorg-prepare browser/hqnode/rd-video-prepare browser/hqnode/rd-lan /usr/lib/rd-browser/
@@ -137,15 +137,17 @@ COPY browser/hqnode/avahi/avahi-daemon.conf /etc/avahi/
 COPY browser/hqnode/avahi/lan0.conf /etc/systemd/system/avahi-daemon.service.d/
 COPY browser/hqnode/avahi/lan0.conf /etc/systemd/system/avahi-daemon.socket.d/
 COPY browser/hqnode/units/ /etc/systemd/system/
-COPY browser/hqnode/browser.conf.example browser/hqnode/desktop.ini.example browser/hqnode/rd-pulse.pa /etc/rd-browser/
-# the patched AirPlay module, built from the very version installed (the pulse-raop stage)
-RUN set -eux; v=$(dpkg-query -W -f '${source:Version}' pulseaudio-module-raop); [ "$v" = "$(cat /tmp/pulse-raop/version)" ]; \
-    for f in libraop.so module-raop-discover.so; do \
-        install -m 0644 "/tmp/pulse-raop/$f" "$(dpkg -L pulseaudio-module-raop | grep "/$f\$")"; \
-    done; \
-    rm -rf /tmp/pulse-raop
+COPY browser/hqnode/browser.conf.example browser/hqnode/desktop.ini.example /etc/rd-browser/
+COPY browser/hqnode/pipewire/pipewire.conf.d/ /etc/rd-browser/pipewire/pipewire.conf.d/
+COPY browser/hqnode/pipewire/pipewire-pulse.conf.d/ /etc/rd-browser/pipewire/pipewire-pulse.conf.d/
+# the patched AirPlay sink, built from the very version installed (the pipewire-raop stage)
+RUN set -eux; v=$(dpkg-query -W -f '${source:Version}' libpipewire-0.3-modules); [ "$v" = "$(cat /tmp/pipewire-raop/version)" ]; \
+    f=$(dpkg -L libpipewire-0.3-modules | grep '/libpipewire-module-raop-sink.so$'); \
+    install -m 0644 /tmp/pipewire-raop/libpipewire-module-raop-sink.so "$f"; \
+    rm -rf /tmp/pipewire-raop
 RUN set -eux; ldconfig; mkdir -p /etc/X11/rd-xorg.conf.d; chmod 0755 /usr/lib/rd-browser/*; \
-    systemctl enable rd-xorg.service rd-lan.service rd-pulse.service rd-video.service rd-shell.service \
+    systemctl enable rd-xorg.service rd-lan.service rd-pipewire.service rd-pipewire-pulse.service \
+        rd-wireplumber.service rd-video.service rd-shell.service \
         remodroid-desktopd.service
 
 # Inherited from the system image, restated because a wrong one turns every stop into 30 s and a kill.

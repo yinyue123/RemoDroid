@@ -1504,8 +1504,9 @@ static void size_str(unsigned long long v, char *out, size_t cap)
 
 /* ---------------- sound: to the viewer, or to an AirPlay speaker ---------------- */
 
-/* rd-pulse's sinks: "browser", which the desktop agent records and sends to the viewer, and the
- * raop_output.* its AirPlay discovery adds for each speaker found on the container's LAN port (rd-lan).
+/* The sound server's sinks (PipeWire, through pipewire-pulse): "browser", which the desktop agent records
+ * and sends to the viewer, and one per AirPlay speaker its discovery finds on the container's LAN port
+ * (rd-lan): raop_sink.<host>.<address>.<port>, or raop_output.<host> as PulseAudio named them.
  * The browser plays into the default sink, so picking a speaker makes its sink the default; the agent
  * records browser.monitor whatever the default, so the viewer hears nothing meanwhile. */
 #define MAX_OUTS 12
@@ -1517,6 +1518,7 @@ static struct {
     double next;     /* the Sound page looks again then: speakers come and go */
 } SO = { .cur = -1 };
 static char pa_out[1 << 17];
+static const char *raop_host(const char *name);
 
 /* pactl with these arguments (NULL-terminated), no shell; what it printed into pa_out. 2 s at most. */
 static int pactl(const char *arg, ...)
@@ -1579,15 +1581,16 @@ static void sound_load(void)
     cJSON_ArrayForEach(s, all) {
         const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(s, "name"));
         const char *desc = cJSON_GetStringValue(cJSON_GetObjectItem(s, "description"));
-        if (!name || SO.n == MAX_OUTS || (strcmp(name, "browser") && strncmp(name, "raop_output.", 12)))
+        if (!name || SO.n == MAX_OUTS || (strcmp(name, "browser") && !raop_host(name)))
             continue;
         int i = SO.n++;
         snprintf(SO.name[i], sizeof SO.name[i], "%s", name);
         if (desc && strcmp(desc, "(null)")) {
             snprintf(SO.desc[i], sizeof SO.desc[i], "%s", desc);
         } else { /* pactl's JSON gives "(null)" for a name it can't encode ("Music’s MacBook Air"): the
-                  * sink's own name, raop_output.Musics-MacBook-Air.local, read back into words */
-            const char *n = strncmp(name, "raop_output.", 12) ? name : name + 12;
+                  * sink's own name, raop_sink.Musics-MacBook-Air.local.192.168.10.31.7000, read back
+                  * into words */
+            const char *n = raop_host(name) ? raop_host(name) : name;
             snprintf(SO.desc[i], sizeof SO.desc[i], "%s", n);
             char *dot = strstr(SO.desc[i], ".local");
             if (dot)
@@ -1621,6 +1624,16 @@ static void sound_load(void)
 
 static int is_speaker(int i) { return i >= 0 && i < SO.n && strcmp(SO.name[i], "browser"); }
 
+/* an AirPlay speaker's sink: what's after the prefix, or NULL */
+static const char *raop_host(const char *name)
+{
+    if (!strncmp(name, "raop_sink.", 10))
+        return name + 10;
+    if (!strncmp(name, "raop_output.", 12))
+        return name + 12;
+    return NULL;
+}
+
 static void sound_volume(int i, int pct)
 {
     char v[16];
@@ -1648,8 +1661,8 @@ static void sound_pick(int i)
 /* The menu's rows. The tabs are listed only when there is more than one, with Close tab under them; one tab
  * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W).
  * The last three only show the container's CPU, memory and disk. */
-enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_SOUND, M_NEW_ID, M_RESTART,
-       M_STARTSTOP, M_PROXY, M_CPU, M_MEM, M_DISK };
+enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_SOUND, M_VOL, M_NEW_ID,
+       M_RESTART, M_STARTSTOP, M_PROXY, M_CPU, M_MEM, M_DISK };
 
 static struct {
     int kind, tab;
@@ -1666,7 +1679,7 @@ static void menu_layout(void)
     if (BR.pid > 0)
         ITEM(M_NEW_TAB, -1);
     if (T.ntabs > 1) {
-        int room = (H - B) / B - 14; /* the rows that fit on the screen beside the others */
+        int room = (H - B) / B - 15; /* the rows that fit on the screen beside the others */
         for (int i = 0; i < T.ntabs && i < room; i++)
             ITEM(M_TAB, i);
         ITEM(M_CLOSE_TAB, -1);
@@ -1678,6 +1691,8 @@ static void menu_layout(void)
     ITEM(M_HISTORY, -1);
     ITEM(M_USER, -1);
     ITEM(M_SOUND, -1);
+    if (is_speaker(SO.cur)) /* an AirPlay speaker's volume, here rather than a page away */
+        ITEM(M_VOL, -1);
     ITEM(M_NEW_ID, -1);
     ITEM(M_RESTART, -1);
     ITEM(M_STARTSTOP, -1);
@@ -1701,6 +1716,7 @@ static void menu_label(int i, char *out, size_t cap)
     case M_HISTORY: snprintf(out, cap, "History"); break;
     case M_USER: snprintf(out, cap, "User: %s", user()); break;
     case M_SOUND: snprintf(out, cap, "Sound: %s", is_speaker(SO.cur) ? SO.desc[SO.cur] : "this phone"); break;
+    case M_VOL: snprintf(out, cap, "Volume"); break;
     case M_NEW_ID: snprintf(out, cap, "New identity"); break;
     case M_RESTART: snprintf(out, cap, "Restart browser"); break;
     case M_STARTSTOP: snprintf(out, cap, BR.pid > 0 ? "Stop browser" : "Start browser"); break;
@@ -1730,6 +1746,25 @@ static void draw_gauge(int i, const char *name, const char *value, double frac)
     }
 }
 
+/* the speaker's volume: the percentage, then − and + in the two squares at the right, a step of 5 % */
+static void draw_volume(int i, const char *name)
+{
+    GC gc = DefaultGC(dpy, DefaultScreen(dpy));
+    int mw = menu_w(), x = S * 12, mid = i * B + B / 2, cm = mw - B * 3 / 2, cp = mw - B / 2, r = B / 7;
+    int base = mid + (font[0]->ascent - font[0]->descent) / 2;
+    char v[16];
+    snprintf(v, sizeof v, "%d %%", SO.vol[SO.cur]);
+    text(menu_draw, &c_dim, x, base, name, mw / 3);
+    int vw = text_in(font, NULL, NULL, 0, 0, v, 0);
+    text(menu_draw, &c_text, mw - B * 2 - S * 8 - vw, base, v, 0);
+    XSetForeground(dpy, gc, c_text.pixel);
+    XSetLineAttributes(dpy, gc, (unsigned)(S * 2), LineSolid, CapRound, JoinRound);
+    XDrawLine(dpy, menu, gc, cm - r, mid, cm + r, mid);
+    XDrawLine(dpy, menu, gc, cp - r, mid, cp + r, mid);
+    XDrawLine(dpy, menu, gc, cp, mid - r, cp, mid + r);
+    XSetLineAttributes(dpy, gc, 0, LineSolid, CapButt, JoinMiter);
+}
+
 static void draw_menu(void)
 {
     if (!menu_open)
@@ -1748,7 +1783,9 @@ static void draw_menu(void)
             XSetForeground(dpy, gc, c_ok.pixel);
             XFillRectangle(dpy, menu, gc, 0, i * B, (unsigned)(S * 3), (unsigned)B);
         }
-        if (kind == M_CPU) {
+        if (kind == M_VOL) {
+            draw_volume(i, l);
+        } else if (kind == M_CPU) {
             snprintf(v, sizeof v, ST.cpu < 0 ? "…" : "%d %%", ST.cpu);
             draw_gauge(i, l, v, ST.cpu / 100.0);
         } else if (kind == M_MEM || kind == M_DISK) {
@@ -2375,10 +2412,17 @@ static void edit_key(XKeyEvent *ev)
     draw_bar();
 }
 
-static void menu_action(int i)
+static void menu_action(int i, int x)
 {
     KeySym ctrl = XK_Control_L;
     int kind = items[i].kind, tab = items[i].tab;
+    if (kind == M_VOL) { /* − or +, and the menu stays for the next tap */
+        if (is_speaker(SO.cur) && x >= menu_w() - B * 2) {
+            sound_volume(SO.cur, SO.vol[SO.cur] + (x >= menu_w() - B ? 5 : -5));
+            draw_menu();
+        }
+        return;
+    }
     if (kind == M_CPU || kind == M_MEM || kind == M_DISK) /* nothing to do: the menu stays */
         return;
     menu_show(0);
@@ -2671,7 +2715,7 @@ int main(int argc, char **argv)
                 if (menu_open) {
                     int x = ev.xbutton.x_root - (W - menu_w()), y = ev.xbutton.y_root - B;
                     if (x >= 0 && x < menu_w() && y >= 0 && y < B * nitems)
-                        menu_action(y / B);
+                        menu_action(y / B, x);
                     else if (ev.xbutton.y_root < B && ev.xbutton.x_root >= W - B)
                         menu_show(0); /* the ⋯ again */
                     else

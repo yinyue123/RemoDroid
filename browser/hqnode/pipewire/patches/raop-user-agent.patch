@@ -1,0 +1,13 @@
+--- a/src/modules/module-raop-sink.c
++++ b/src/modules/module-raop-sink.c
+@@ -1461,7 +1461,9 @@
+ 	pw_properties_setf(impl->headers, "DACP-ID",
+ 			"%08X%08X", sci[0], sci[1]);
+ 
+-	pw_properties_set(impl->headers, "User-Agent", DEFAULT_USER_NAME "/" PACKAGE_VERSION);
++	/* A HomePod answers 403 to OPTIONS from "PipeWire/<version>"; it takes AirPlay's own and
++	 * iTunes'. */
++	pw_properties_set(impl->headers, "User-Agent", "AirPlay/381.13");
+ 
+ 	pw_rtsp_client_send(impl->rtsp, "OPTIONS", &impl->headers->dict,
+ 			NULL, NULL, rtsp_options_reply, impl);

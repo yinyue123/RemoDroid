@@ -1,0 +1,17 @@
+# The session manager for rd-pipewire: it links each stream to its sink and keeps the default sink.
+[Unit]
+Description=Remote browser: sound server, session manager
+After=rd-pipewire.service
+BindsTo=rd-pipewire.service
+
+[Service]
+Type=simple
+User=pulse
+Group=pulse
+Environment=XDG_RUNTIME_DIR=/run/rd-pw XDG_CONFIG_HOME=/etc/rd-browser HOME=/run/rd-pw
+ExecStart=/usr/bin/wireplumber
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

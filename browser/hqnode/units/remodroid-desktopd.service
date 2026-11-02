@@ -1,11 +1,11 @@
-# The RemoDroid desktop agent: the screen (Rockchip MPP H.265) and the browser's sound (rd-pulse) to
+# The RemoDroid desktop agent: the screen (Rockchip MPP H.265) and the browser's sound (rd-pipewire) to
 # the iPhone, touches and keys back.
 # Paired once with `remodroid-desktopd -c /data/remodroid/desktop.ini pair --panel … --code …`; the
 # pairing is on /data, so a reinstall keeps it.
 [Unit]
 Description=RemoDroid desktop agent for the remote browser
-After=rd-xorg.service rd-video.service rd-pulse.service network-online.target
-Wants=network-online.target rd-pulse.service
+After=rd-xorg.service rd-video.service rd-pipewire-pulse.service network-online.target
+Wants=network-online.target rd-pipewire-pulse.service
 PartOf=rd-xorg.service
 
 [Service]

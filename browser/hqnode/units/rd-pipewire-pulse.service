@@ -1,0 +1,20 @@
+# The PulseAudio protocol on PipeWire (rd-pipewire), at /run/pulse/native.
+[Unit]
+Description=Remote browser: sound server, PulseAudio protocol
+After=rd-pipewire.service
+BindsTo=rd-pipewire.service
+
+[Service]
+Type=simple
+User=pulse
+Group=pulse
+Environment=XDG_RUNTIME_DIR=/run/rd-pw XDG_CONFIG_HOME=/etc/rd-browser HOME=/run/rd-pw
+# the socket open to everyone who can enter /run/pulse: pulse-access
+UMask=0000
+ExecStartPre=+/bin/rm -f /run/pulse/native /run/pulse/pid
+ExecStart=/usr/bin/pipewire-pulse
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
