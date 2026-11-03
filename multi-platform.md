@@ -347,8 +347,8 @@ is viewing**). It always shows when the computer is being watched.
  ─────────────────────────────────
    Disconnect viewer                          (only during a session)
    View only (block mouse and keyboard)       ✓ toggle
-   Open window                                → the panel in its own window (macOS);
-                                                default browser (Windows, Linux)
+   Open window                                → the panel in its own window (macOS, Windows);
+                                                default browser (Linux)
    Pair with a panel…  /  Pairing & status…   → window
    Show log                                   → log window
  ─────────────────────────────────
@@ -362,8 +362,16 @@ A system notification is shown when a session starts and when it ends ("alice is
 single-site browser: the default website data store keeps the sign-in cookie across launches; links to other
 sites open in the default browser; files the viewer downloads go to `~/Downloads`. While the window is open
 the app is a regular app (Dock icon, ⌘-Tab, a View menu with Reload, zoom and **Open in Browser**); when it
-closes, the app is menu-bar only again. Windows and Linux open the panel in the default browser (WebView2 and
-WebKitGTK would be extra runtime dependencies).
+closes, the app is menu-bar only again.
+
+On Windows (`app/win/web.c`) the window is WebView2, the Edge engine that comes with Windows 11 and with Edge
+on Windows 10. Nothing extra is built or shipped: `win/wv2.h` declares the few COM interfaces used (slot for
+slot as in the SDK's `WebView2.h`), and the runtime is found as `WebView2Loader.dll` finds it, through its
+EdgeUpdate `ClientState` key, whose folder holds `EmbeddedBrowserWebView.dll`. The profile, with the sign-in
+cookie, is in `%LOCALAPPDATA%\RemoDroid\WebView2`; other sites open in the default browser; WebView2 handles
+downloads and file pickers itself; the page's full screen fills the monitor; the window menu (Alt+Space) has
+**Reload** and **Open in browser**. Without the WebView2 Runtime, **Open window** opens the default browser.
+Linux opens the panel in the default browser (WebKitGTK would be an extra runtime dependency).
 
 **Show log** (also a button in the pairing window) opens a resizable log window: the agent's last 1000
 lines in a monospaced view that follows new lines (unless scrolled up), the path of `desktop.log` (which

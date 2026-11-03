@@ -18,6 +18,7 @@
 
 #include "icon.h"
 #include "rd_agent.h"
+#include "web.h"
 
 #define WM_TRAY (WM_APP + 1)
 #define WM_STATUS (WM_APP + 2)
@@ -228,9 +229,10 @@ static void toast(const wchar_t *text)
     Shell_NotifyIconW(NIM_MODIFY, &n);
 }
 
+/* the panel in a window of its own (web.c, WebView2); the default browser where WebView2 is missing */
 static void open_panel(void)
 {
-    if (!g_st.panel[0])
+    if (!g_st.panel[0] || rd_web_show(g_inst, LoadIconW(g_inst, L"APP"), g_st.panel) == 0)
         return;
     wchar_t *u = wide(g_st.panel);
     ShellExecuteW(NULL, L"open", u, NULL, NULL, SW_SHOWNORMAL);
@@ -256,7 +258,7 @@ static void tray_menu(int x, int y)
         AppendMenuW(m, MF_STRING, ID_DISCONNECT, L"Disconnect viewer");
     AppendMenuW(m, MF_STRING | (g_st.view_only ? MF_CHECKED : 0), ID_VIEWONLY, L"View only (ignore mouse and keyboard)");
     if (g_st.panel[0])
-        AppendMenuW(m, MF_STRING, ID_OPEN, L"Open panel");
+        AppendMenuW(m, MF_STRING, ID_OPEN, L"Open window");
     AppendMenuW(m, MF_STRING, ID_WINDOW, g_st.state == RD_UNPAIRED ? L"Pair with a panel…" : L"Pairing && status…");
     AppendMenuW(m, MF_STRING, ID_LOG, L"Show log");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);

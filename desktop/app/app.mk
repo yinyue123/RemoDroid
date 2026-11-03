@@ -22,9 +22,10 @@ $(DESK_OUT)/remodroid.ico: $(DESK_OUT)/icongen
 $(DESK_OUT)/app.res: $(APP_DIR)/win/app.rc $(APP_DIR)/win/app.manifest $(DESK_OUT)/remodroid.ico
 	$(WINDRES) -I$(APP_DIR)/win -I$(DESK_OUT) -O coff -i $< -o $@
 
-$(APP): $(APP_DIR)/win/main.c $(APP_DIR)/icon.c $(DESK_OUT)/app.res $(DESK_LIB)
+$(APP): $(APP_DIR)/win/main.c $(APP_DIR)/win/web.c $(APP_DIR)/win/web.h $(APP_DIR)/win/wv2.h $(APP_DIR)/icon.c $(DESK_OUT)/app.res $(DESK_LIB)
 	$(CC) $(OPT) $(ARCHFLAGS) -std=gnu11 -municode -mwindows -I$(APP_DIR) -Idesktop/core $(DESK_WARN) -o $@ \
-	    $(APP_DIR)/win/main.c $(APP_DIR)/icon.c $(DESK_OUT)/app.res $(DESK_LINK) -static-libgcc -lcomctl32 -lshell32 -luser32 -lgdi32 -ladvapi32
+	    $(APP_DIR)/win/main.c $(APP_DIR)/win/web.c $(APP_DIR)/icon.c $(DESK_OUT)/app.res $(DESK_LINK) -static-libgcc -lcomctl32 \
+	    -lshell32 -luser32 -lgdi32 -ladvapi32 -lole32 -luuid
 
 # remodroid-input.exe: the RemoDroidInput service, for windows of elevated programs (desktop/win/inputpipe.h)
 APP_EXTRA := $(DESK_OUT)/remodroid-input.exe
