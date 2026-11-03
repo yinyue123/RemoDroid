@@ -11,11 +11,14 @@
 # install script, which brings its pinned toolchain (uv, Python 3.14, Node, ripgrep, FFmpeg) through `pm`.
 # No browser and no computer-use tools: Chromium wouldn't fit beside the remote browser in 3.8 GB.
 #
-# /opt/hermes is the checkout and its venv, the toolchain is under the hermes user's home; both are the
-# image's and a reinstall replaces them. /data/hermes is HERMES_HOME (.env, config.yaml, sessions,
-# memories, skills, logs) and survives. So `hermes update` is never run in here: rebuild and reinstall.
+# /opt/hermes/agent is the checkout and its venv, /opt/hermes/tools the pinned toolchain
+# (HERMES_RUNTIME_DIR, as in upstream's image); both are the image's and a reinstall replaces them.
+# /data/hermes is HERMES_HOME (.env, config.yaml, sessions, memories, skills, logs) and survives, so
+# `hermes update` is never run in here: rebuild and reinstall. What the installer writes into a fresh
+# HERMES_HOME (bundled skills, config.yaml from the example) is kept as /opt/hermes/home-template and
+# copied into /data/hermes at each start without overwriting anything (hermes-gateway.service).
 #
-# Build context: this directory (browser/hermes/hqnode/build.sh, or the hermes-hqnode workflow).
+# Build context: this directory (browser/hermes/hqnode/build.sh, or .github/workflows/hermes-image.yml).
 #   HERMES_CHANNEL   stable (default) or main
 #   HERMES_COMMIT    a hermes-agent commit to pin, instead of the channel's head
 
@@ -33,16 +36,18 @@ RUN set -eux; apt-get update; \
 RUN set -eux; useradd -r -m -d /var/lib/hermes -s /bin/bash hermes; \
     install -d -o hermes -g hermes /opt/hermes
 
-# The installer, as the user that runs it. HERMES_HOME is a throwaway during the build: the real one is
-# on /data, which doesn't exist until the container does.
+# The installer, as the user that runs it. The real HERMES_HOME is on /data, which doesn't exist until
+# the container does, so the build's becomes the template. The install dir must not exist yet: the
+# installer removes an empty one and clones in its place, so it goes under a parent hermes owns.
 USER hermes
-ENV HOME=/var/lib/hermes
+ENV HOME=/var/lib/hermes HERMES_RUNTIME_DIR=/opt/hermes/tools
 RUN set -eux; cd /var/lib/hermes; \
     curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o install.sh; \
-    HERMES_HOME=/tmp/hermes-build HERMES_INSTALL_DIR=/opt/hermes \
+    HERMES_HOME=/opt/hermes/home-template HERMES_INSTALL_DIR=/opt/hermes/agent \
         bash install.sh --non-interactive --skip-browser --skip-computer-use \
         --channel "$HERMES_CHANNEL" ${HERMES_COMMIT:+--commit "$HERMES_COMMIT"}; \
-    rm -rf install.sh /tmp/hermes-build; \
+    rm -rf install.sh /opt/hermes/home-template/logs /opt/hermes/home-template/telemetry \
+        /opt/hermes/home-template/.env; \
     test -x /var/lib/hermes/.local/bin/hermes
 USER root
 ENV HOME=/root
@@ -58,7 +63,7 @@ RUN set -eux; chmod 0755 /usr/local/bin/hermes; \
     runuser -u hermes -- env HERMES_HOME=/tmp/hermes-smoke hermes gateway --help >/dev/null; \
     runuser -u hermes -- env HERMES_HOME=/tmp/hermes-smoke hermes dashboard --help >/dev/null; \
     rm -rf /tmp/hermes-smoke; \
-    git -C /opt/hermes rev-parse HEAD > /etc/hermes/commit; \
+    git -C /opt/hermes/agent rev-parse HEAD > /etc/hermes/commit; \
     systemctl enable hermes-gateway.service
 
 # Inherited from the system image, restated because a wrong one turns every stop into 30 s and a kill.

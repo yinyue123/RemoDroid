@@ -8,13 +8,16 @@ Wants=network-online.target
 [Service]
 User=hermes
 Group=hermes
-Environment=HOME=/var/lib/hermes HERMES_HOME=/data/hermes HERMES_WRITE_SAFE_ROOT=/data/hermes PYTHONUNBUFFERED=1
+Environment=HOME=/var/lib/hermes HERMES_HOME=/data/hermes HERMES_RUNTIME_DIR=/opt/hermes/tools HERMES_WRITE_SAFE_ROOT=/data/hermes PYTHONUNBUFFERED=1
 # The keys and the proxy. Hermes reads $HERMES_HOME/.env itself as well; having systemd load it too puts
 # HTTPS_PROXY in the environment before any client is made, and in the tools' subprocesses.
 EnvironmentFile=-/data/hermes/.env
-# /data is root's, so root makes the directory
+# /data is root's, so root makes the directory; then what the installer put in a fresh HERMES_HOME
+# (bundled skills, config.yaml), never over a file already there
 ExecStartPre=+/usr/bin/install -d -o hermes -g hermes -m 0700 /data/hermes /data/hermes/work
-WorkingDirectory=/data/hermes/work
+ExecStartPre=/bin/cp -a --update=none /opt/hermes/home-template/. /data/hermes/
+# "-": on the first start it does not exist yet when the ExecStartPre lines run
+WorkingDirectory=-/data/hermes/work
 ExecStart=/usr/local/bin/hermes gateway run
 Restart=always
 RestartSec=5

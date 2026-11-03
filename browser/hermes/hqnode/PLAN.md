@@ -47,7 +47,7 @@ Nothing here has been installed yet. The environment below is from the box itsel
 | Question | Choice | Why |
 |---|---|---|
 | Where | a new hqnode container `hermes-oect` | the container is the agent's sandbox: whatever it runs in a shell stays inside it, with its own CPU/memory/disk/traffic limits, and a reinstall resets everything but `/data` |
-| Image | `localhost/hermes-hqnode:arm64`, `FROM ghcr.io/yinyue123/hqnode:debian-13`, Hermes installed by its own install script at build time into `/opt/hermes` | systemd units like the browser's; the installer is upstream's supported path, so `pm`'s toolchain is what they test |
+| Image | `localhost/hermes-hqnode:arm64`, `FROM ghcr.io/yinyue123/hqnode:debian-13`, Hermes installed by its own install script at build time into `/opt/hermes/agent` | systemd units like the browser's; the installer is upstream's supported path, so `pm`'s toolchain is what they test |
 | Build | GitHub Actions on an arm64 runner (`.github/workflows/hermes-image.yml`, manual), an oci-archive artifact sideloaded by `fetch-image.sh` | as the browser's; no podman/docker here or on the OECT. Not encrypted: Hermes is MIT and the image holds no keys |
 | Hermes version | `--channel stable`, pinned with `HERMES_COMMIT=` when a build is known good | a reinstall shouldn't silently move to `main` |
 | Browser tools | **off** (`--skip-browser --skip-computer-use`) | Chromium would need another 1–2 GB; the box has `browser-oect` for browsing, and Hermes' web search/extract tools work without a local browser |
@@ -141,7 +141,7 @@ $SSH $NODE_SSH "hqnode exec hermes-oect systemctl restart hermes-gateway"
 
 ### 4.6 Updates
 
-Not `hermes update` (it would write into the image's `/opt/hermes`, which a reinstall throws away):
+Not `hermes update` (it would write into the image's `/opt/hermes/agent`, which a reinstall throws away):
 rebuild in CI, `fetch-image.sh`, then `MACHINE=oect ./browser/hermes/hqnode/reinstall.sh`.
 
 ## 5. Files here

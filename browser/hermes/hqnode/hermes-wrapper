@@ -1,5 +1,7 @@
 #!/bin/sh
-# /usr/local/bin/hermes: the installer's CLI, with the state on /data unless told otherwise.
+# /usr/local/bin/hermes: the installer's CLI, with the state on /data unless told otherwise, and the
+# toolchain where the image put it.
 # Run it as hermes (`runuser -u hermes -- hermes …`): as root it would leave root-owned files in /data/hermes.
 export HERMES_HOME="${HERMES_HOME:-/data/hermes}"
+export HERMES_RUNTIME_DIR="${HERMES_RUNTIME_DIR:-/opt/hermes/tools}"
 exec /var/lib/hermes/.local/bin/hermes "$@"
