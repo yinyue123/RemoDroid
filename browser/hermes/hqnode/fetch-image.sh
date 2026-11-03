@@ -18,8 +18,12 @@ RUN_ID="${RUN_ID:-}"
 read -r -a SSH_CMD <<< "${SSH:-ssh}"
 node_ssh() { "${SSH_CMD[@]}" -o BatchMode=yes -o ConnectTimeout=20 "$NODE_SSH" "$@"; }
 
-work=$(mktemp -d)
+# On disk, not /tmp: the artifact is 1.2 GB zipped and as much again unpacked, and /tmp is often a
+# small tmpfs. gh stages its download in TMPDIR, so that goes there too.
+WORK_ROOT="${WORK_ROOT:-/var/tmp}"
+work=$(mktemp -d -p "$WORK_ROOT" hermes-fetch.XXXXXX)
 trap 'rm -rf "$work"' EXIT
+export TMPDIR="$work"
 
 if [ -z "$RUN_ID" ]; then
 	RUN_ID=$(gh run list --workflow hermes-image.yml --status success --limit 1 --json databaseId -q '.[0].databaseId')

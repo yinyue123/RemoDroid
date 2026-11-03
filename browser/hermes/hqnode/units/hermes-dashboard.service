@@ -1,5 +1,6 @@
 # Hermes Agent's web dashboard on :9119, inside the container only: the container port is mapped host-only
-# (create.sh's PORTS=22,9119) and reached through an ssh tunnel. Basic auth from .env. Not enabled by
+# (create.sh's PORTS=22,9119) and reached through an ssh tunnel. Its login page takes the user and password
+# in .env (HERMES_DASHBOARD_BASIC_AUTH_*). Not enabled by
 # default: systemctl enable --now hermes-dashboard
 [Unit]
 Description=Hermes Agent dashboard
