@@ -40,10 +40,10 @@ VERSION ?= 0.5
 $(DESK_OUT)/remodroid.icns: $(DESK_OUT)/icongen
 	$(DESK_OUT)/icongen $@
 
-$(DESK_OUT)/RemoDroid: $(APP_DIR)/mac/main.m $(APP_DIR)/icon.c $(DESK_LIB)
-	$(CC) $(OPT) $(ARCHFLAGS) -fobjc-arc -I$(APP_DIR) -Idesktop/core $(DESK_WARN) -o $@ $(APP_DIR)/mac/main.m $(APP_DIR)/icon.c \
-	    $(DESK_LINK) -Wl,-rpath,@executable_path/../Frameworks -framework AppKit -framework ApplicationServices \
-	    -framework ServiceManagement -framework UserNotifications
+$(DESK_OUT)/RemoDroid: $(APP_DIR)/mac/main.m $(APP_DIR)/mac/web.m $(APP_DIR)/mac/web.h $(APP_DIR)/icon.c $(DESK_LIB)
+	$(CC) $(OPT) $(ARCHFLAGS) -fobjc-arc -I$(APP_DIR) -Idesktop/core $(DESK_WARN) -o $@ $(APP_DIR)/mac/main.m $(APP_DIR)/mac/web.m \
+	    $(APP_DIR)/icon.c $(DESK_LINK) -Wl,-rpath,@executable_path/../Frameworks -framework AppKit -framework ApplicationServices \
+	    -framework ServiceManagement -framework UserNotifications -framework WebKit
 
 # the bundle: the app, the agent library, the headless agent, the icon; signed ad hoc (see multi-platform.md §13.4)
 $(APP): $(DESK_OUT)/RemoDroid $(DESK_OUT)/remodroid-desktopd $(DESK_OUT)/remodroid.icns $(APP_DIR)/mac/Info.plist

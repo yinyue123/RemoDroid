@@ -23,6 +23,12 @@
 	<!-- menu bar only: no Dock icon -->
 	<key>LSUIElement</key>
 	<true/>
+	<!-- the panel window (web.m) also opens panels served over plain http -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

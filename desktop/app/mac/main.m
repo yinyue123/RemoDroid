@@ -9,6 +9,7 @@
 
 #include "icon.h"
 #include "rd_agent.h"
+#include "web.h"
 
 static NSString *str(const char *s) { return [NSString stringWithUTF8String:s ?: ""] ?: @""; }
 
@@ -217,7 +218,7 @@ static void on_notify(void *ud, const char *text)
     vo.target = self;
     vo.state = self.st.view_only ? NSControlStateValueOn : NSControlStateValueOff;
     if (self.st.panel[0])
-        [m addItemWithTitle:@"Open panel" action:@selector(openPanel:) keyEquivalent:@""].target = self;
+        [m addItemWithTitle:@"Open window" action:@selector(openPanel:) keyEquivalent:@""].target = self;
     [m addItemWithTitle:self.st.state == RD_UNPAIRED ? @"Pair with a panel…" : @"Pairing & status…" action:@selector(showWindow:) keyEquivalent:@""].target = self;
     [m addItemWithTitle:@"Show log" action:@selector(showLog:) keyEquivalent:@""].target = self;
     [m addItem:[NSMenuItem separatorItem]];
@@ -231,10 +232,11 @@ static void on_notify(void *ud, const char *text)
 - (void)toggleViewOnly:(id)sender { rd_agent_set("desktop.view_only", self.st.view_only ? "false" : "true"); }
 - (void)toggleLogin:(id)sender { [self setStartAtLogin:![self loginEnabled]]; [self refresh]; }
 
+/* the panel in a window of its own (web.m), not in the default browser */
 - (void)openPanel:(id)sender
 {
     if (self.st.panel[0])
-        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:str(self.st.panel)]];
+        rd_web_show(self.st.panel, ^(NSString *text) { [app notify:text]; });
 }
 
 /* ---------------- window ---------------- */
@@ -530,7 +532,8 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)a hasVisibleWindows:(BOOL)visible
 {
-    [self showWindow:nil]; /* opened again from Finder / Launchpad */
+    if (!rd_web_reopen())
+        [self showWindow:nil]; /* opened again from Finder / Launchpad */
     return NO;
 }
 
@@ -539,13 +542,18 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
 @end
 
 /* ⌘X/⌘C/⌘V/⌘A/⌘Z in text fields and ⌘W are key equivalents of the main menu, which an accessory app
- * never shows but still needs */
+ * never shows but still needs; while the panel window is open the app is a regular one and the bar shows */
 static NSMenu *main_menu(void)
 {
     NSMenu *bar = [[NSMenu alloc] init];
+    NSMenu *appm = [[NSMenu alloc] initWithTitle:@"RemoDroid"];
+    [appm addItemWithTitle:@"Hide RemoDroid" action:@selector(hide:) keyEquivalent:@"h"];
+    [appm addItem:[NSMenuItem separatorItem]];
+    [appm addItemWithTitle:@"Quit RemoDroid" action:@selector(terminate:) keyEquivalent:@"q"];
+    [bar addItemWithTitle:@"" action:nil keyEquivalent:@""].submenu = appm;
     NSMenu *file = [[NSMenu alloc] initWithTitle:@"File"];
     [file addItemWithTitle:@"Close Window" action:@selector(performClose:) keyEquivalent:@"w"];
-    [bar addItemWithTitle:@"" action:nil keyEquivalent:@""].submenu = file;
+    [bar addItemWithTitle:@"File" action:nil keyEquivalent:@""].submenu = file;
     NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
     [edit addItemWithTitle:@"Undo" action:NSSelectorFromString(@"undo:") keyEquivalent:@"z"];
     [edit addItemWithTitle:@"Redo" action:NSSelectorFromString(@"redo:") keyEquivalent:@"Z"];
@@ -555,6 +563,11 @@ static NSMenu *main_menu(void)
     [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
     [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
     [bar addItemWithTitle:@"Edit" action:nil keyEquivalent:@""].submenu = edit;
+    [bar addItemWithTitle:@"View" action:nil keyEquivalent:@""].submenu = rd_web_menu();
+    NSMenu *win = [[NSMenu alloc] initWithTitle:@"Window"];
+    [win addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
+    [bar addItemWithTitle:@"Window" action:nil keyEquivalent:@""].submenu = win;
+    NSApp.windowsMenu = win;
     return bar;
 }
 
