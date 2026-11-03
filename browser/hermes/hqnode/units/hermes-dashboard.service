@@ -11,6 +11,7 @@ Group=hermes
 Environment=HOME=/var/lib/hermes HERMES_HOME=/data/hermes HERMES_RUNTIME_DIR=/opt/hermes/tools HERMES_WRITE_SAFE_ROOT=/data/hermes PYTHONUNBUFFERED=1
 EnvironmentFile=-/data/hermes/.env
 ExecStartPre=+/usr/bin/install -d -o hermes -g hermes -m 0700 /data/hermes
+ExecStartPre=/usr/local/bin/hermes-seed-home /data/hermes
 ExecStart=/usr/local/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open
 Restart=always
 RestartSec=5

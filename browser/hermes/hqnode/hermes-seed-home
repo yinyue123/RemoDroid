@@ -1,0 +1,20 @@
+#!/bin/sh
+# hermes-seed-home [HERMES_HOME]: make a HERMES_HOME (default /data/hermes) usable with this image.
+#
+# The installer ran with HERMES_HOME=/opt/hermes/home-template, and Hermes' package manager keeps the
+# install's dependency environment there, under installs/<hash of /opt/hermes/agent>/ with facts.json
+# naming it: without it `hermes` says "no dependency environment is committed for this install". That
+# belongs to the image, not to /data, so installs is a link to the image's and a reinstall brings the
+# new one. Everything else the installer put there (bundled skills, config.yaml, the empty dirs) is
+# copied in, never over a file already there.
+set -eu
+home="${1:-${HERMES_HOME:-/data/hermes}}"
+tpl=/opt/hermes/home-template
+mkdir -p "$home"
+[ -L "$home/installs" ] || rm -rf "$home/installs"
+ln -sfn "$tpl/installs" "$home/installs"
+for entry in "$tpl"/* "$tpl"/.[!.]*; do
+	[ -e "$entry" ] || continue
+	[ "$(basename "$entry")" = installs ] && continue
+	cp -a --update=none "$entry" "$home/"
+done

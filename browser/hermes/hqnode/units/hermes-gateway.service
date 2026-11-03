@@ -12,10 +12,10 @@ Environment=HOME=/var/lib/hermes HERMES_HOME=/data/hermes HERMES_RUNTIME_DIR=/op
 # The keys and the proxy. Hermes reads $HERMES_HOME/.env itself as well; having systemd load it too puts
 # HTTPS_PROXY in the environment before any client is made, and in the tools' subprocesses.
 EnvironmentFile=-/data/hermes/.env
-# /data is root's, so root makes the directory; then what the installer put in a fresh HERMES_HOME
-# (bundled skills, config.yaml), never over a file already there
+# /data is root's, so root makes the directory; then the image's dependency environment linked in and
+# what the installer put in a fresh HERMES_HOME (bundled skills, config.yaml), never over a file there
 ExecStartPre=+/usr/bin/install -d -o hermes -g hermes -m 0700 /data/hermes /data/hermes/work
-ExecStartPre=/bin/cp -a --update=none /opt/hermes/home-template/. /data/hermes/
+ExecStartPre=/usr/local/bin/hermes-seed-home /data/hermes
 # "-": on the first start it does not exist yet when the ExecStartPre lines run
 WorkingDirectory=-/data/hermes/work
 ExecStart=/usr/local/bin/hermes gateway run

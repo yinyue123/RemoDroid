@@ -15,8 +15,9 @@
 # (HERMES_RUNTIME_DIR, as in upstream's image); both are the image's and a reinstall replaces them.
 # /data/hermes is HERMES_HOME (.env, config.yaml, sessions, memories, skills, logs) and survives, so
 # `hermes update` is never run in here: rebuild and reinstall. What the installer writes into a fresh
-# HERMES_HOME (bundled skills, config.yaml from the example) is kept as /opt/hermes/home-template and
-# copied into /data/hermes at each start without overwriting anything (hermes-gateway.service).
+# HERMES_HOME is kept as /opt/hermes/home-template: its installs/ (the dependency environment, which
+# Hermes looks for under HERMES_HOME) is linked from /data/hermes, the rest (bundled skills, config.yaml)
+# copied in without overwriting anything, at each start (hermes-seed-home, hermes-gateway.service).
 #
 # Build context: this directory (browser/hermes/hqnode/build.sh, or .github/workflows/hermes-image.yml).
 #   HERMES_CHANNEL   stable (default) or main
@@ -56,9 +57,11 @@ ENV HOME=/root
 # needs nothing else. The smoke test runs it against a scratch home; it fails the build when the install
 # didn't produce a working CLI.
 COPY hermes-wrapper /usr/local/bin/hermes
+COPY hermes-seed-home /usr/local/bin/hermes-seed-home
 COPY units/ /etc/systemd/system/
 COPY hermes.env.example /etc/hermes/
-RUN set -eux; chmod 0755 /usr/local/bin/hermes; \
+RUN set -eux; chmod 0755 /usr/local/bin/hermes /usr/local/bin/hermes-seed-home; \
+    runuser -u hermes -- hermes-seed-home /tmp/hermes-smoke; \
     runuser -u hermes -- env HERMES_HOME=/tmp/hermes-smoke hermes --version; \
     runuser -u hermes -- env HERMES_HOME=/tmp/hermes-smoke hermes gateway --help >/dev/null; \
     runuser -u hermes -- env HERMES_HOME=/tmp/hermes-smoke hermes dashboard --help >/dev/null; \
