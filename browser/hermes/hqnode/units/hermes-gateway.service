@@ -1,0 +1,26 @@
+# Hermes Agent's gateway: the messaging platforms in .env (Telegram, …), cron jobs, and the API server
+# when API_SERVER_ENABLED. In the foreground, as upstream says for containers.
+[Unit]
+Description=Hermes Agent gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hermes
+Group=hermes
+Environment=HOME=/var/lib/hermes HERMES_HOME=/data/hermes HERMES_WRITE_SAFE_ROOT=/data/hermes PYTHONUNBUFFERED=1
+# The keys and the proxy. Hermes reads $HERMES_HOME/.env itself as well; having systemd load it too puts
+# HTTPS_PROXY in the environment before any client is made, and in the tools' subprocesses.
+EnvironmentFile=-/data/hermes/.env
+# /data is root's, so root makes the directory
+ExecStartPre=+/usr/bin/install -d -o hermes -g hermes -m 0700 /data/hermes /data/hermes/work
+WorkingDirectory=/data/hermes/work
+ExecStart=/usr/local/bin/hermes gateway run
+Restart=always
+RestartSec=5
+# systemd's default is 15% of the container's pids.max: a tool run that forks node and a shell or two runs
+# out. The container's own limit still applies.
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

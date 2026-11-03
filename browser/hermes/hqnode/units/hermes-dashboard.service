@@ -1,0 +1,19 @@
+# Hermes Agent's web dashboard on :9119, inside the container only: the container port is mapped host-only
+# (create.sh's PORTS=22,9119) and reached through an ssh tunnel. Basic auth from .env. Not enabled by
+# default: systemctl enable --now hermes-dashboard
+[Unit]
+Description=Hermes Agent dashboard
+After=hermes-gateway.service
+
+[Service]
+User=hermes
+Group=hermes
+Environment=HOME=/var/lib/hermes HERMES_HOME=/data/hermes HERMES_WRITE_SAFE_ROOT=/data/hermes PYTHONUNBUFFERED=1
+EnvironmentFile=-/data/hermes/.env
+ExecStartPre=+/usr/bin/install -d -o hermes -g hermes -m 0700 /data/hermes
+ExecStart=/usr/local/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

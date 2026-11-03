@@ -1,0 +1,4 @@
+# The build context is this directory; local secrets and the docs stay out of the image.
+hermes.env
+PLAN.md
+*.sh

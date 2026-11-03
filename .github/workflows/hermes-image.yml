@@ -1,0 +1,54 @@
+# Builds the Hermes Agent hqnode image (browser/hermes/hqnode/Dockerfile) for the OECT, natively on an
+# arm64 runner. Hermes is MIT and the image holds no keys (they go in the container's /data), so unlike
+# browser-image.yml the artifact isn't encrypted. It is saved here as an oci-archive already named
+# localhost/hermes-hqnode:arm64, which is what hqnode's sideload takes the name from, so
+# browser/hermes/hqnode/fetch-image.sh needs no podman.
+name: hermes-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: hermes-agent channel (stable or main)
+        default: stable
+      commit:
+        description: a hermes-agent commit to pin instead (optional)
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          docker buildx build --platform linux/arm64 \
+            --build-arg HERMES_CHANNEL="$CHANNEL" --build-arg HERMES_COMMIT="$COMMIT" \
+            -f browser/hermes/hqnode/Dockerfile -t localhost/hermes-hqnode:arm64 \
+            --output type=oci,dest=oci.tar browser/hermes/hqnode
+      - name: Name it
+        run: |
+          loaded=$(podman load -q -i oci.tar | sed -n 's/^Loaded image: //p' | head -1)
+          [ -n "$loaded" ] || { echo "podman loaded nothing" >&2; exit 1; }
+          [ "$loaded" = localhost/hermes-hqnode:arm64 ] || podman tag "$loaded" localhost/hermes-hqnode:arm64
+          rm oci.tar
+          podman save --format oci-archive -o hermes-arm64.tar localhost/hermes-hqnode:arm64
+          podman run --rm --entrypoint cat localhost/hermes-hqnode:arm64 /etc/hermes/commit | tee hermes-commit
+          sha256sum hermes-arm64.tar | tee hermes-arm64.tar.sha256
+      - uses: actions/upload-artifact@v5
+        with:
+          name: hermes-arm64
+          path: |
+            hermes-arm64.tar
+            hermes-arm64.tar.sha256
+            hermes-commit
+          retention-days: 3
+          compression-level: 0

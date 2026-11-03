@@ -11,3 +11,5 @@ __pycache__/
 
 # the remote browser's live settings (deploy.sh pushes them; the example is browser.conf.example)
 browser/hqnode/browser.conf
+# the Hermes container's keys (browser/hermes/hqnode/hermes.env.example)
+/browser/hermes/hqnode/hermes.env

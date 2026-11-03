@@ -1,0 +1,5 @@
+#!/bin/sh
+# /usr/local/bin/hermes: the installer's CLI, with the state on /data unless told otherwise.
+# Run it as hermes (`runuser -u hermes -- hermes …`): as root it would leave root-owned files in /data/hermes.
+export HERMES_HOME="${HERMES_HOME:-/data/hermes}"
+exec /var/lib/hermes/.local/bin/hermes "$@"
