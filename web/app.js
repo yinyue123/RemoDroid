@@ -156,17 +156,41 @@ function connectWs() {
   if (DEMO) return;
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/viewer');
   st.ws = ws;
-  ws.onopen = () => { st.wsBackoff = 1; setOverlay('Connecting', 'Looking for your phone…'); };
-  ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } onWs(m); };
-  ws.onclose = () => {
-    st.ws = null;
-    setOverlay('Server unreachable', `Retrying in ${st.wsBackoff} s…`, true);
-    /* a refused upgrade looks the same as a dead server: a logged-out browser goes to the login page */
-    fetch('/api/v1/me', { credentials: 'same-origin' }).then(r => { if (r.status === 401) toLogin(); }).catch(() => {});
-    setTimeout(connectWs, st.wsBackoff * 1000);
-    st.wsBackoff = Math.min(st.wsBackoff * 2, 30);
-  };
+  ws.onopen = () => { st.wsBackoff = 1; st.wsRx = Date.now(); setOverlay('Connecting', 'Looking for your phone…'); };
+  ws.onmessage = e => { st.wsRx = Date.now(); let m; try { m = JSON.parse(e.data); } catch (_) { return; } onWs(m); };
+  ws.onclose = () => { if (st.ws === ws) wsLost(); };
 }
+function wsLost() {
+  st.ws = null;
+  /* the server ended the session along with the socket: the next one starts a new one */
+  if (st.sid) { closePeer(); st.sid = null; }
+  setOverlay('Server unreachable', `Retrying in ${st.wsBackoff} s…`, true);
+  /* a refused upgrade looks the same as a dead server: a logged-out browser goes to the login page */
+  fetch('/api/v1/me', { credentials: 'same-origin' }).then(r => { if (r.status === 401) toLogin(); }).catch(() => {});
+  setTimeout(connectWs, st.wsBackoff * 1000);
+  st.wsBackoff = Math.min(st.wsBackoff * 2, 30);
+}
+/* The server's WebSocket pings are answered by the browser itself, out of the page's sight. So a socket the server
+   has already dropped (60 s without a word: a phone asleep, the app in the background) can still read as open here,
+   and every request on it times out with nothing to say why. Ask with the protocol's own ping when the line has
+   been quiet and whenever the page comes back; no pong within 5 s means a new socket, now. */
+function dropWs() {
+  const ws = st.ws;
+  if (!ws) return;
+  ws.onclose = ws.onmessage = null;
+  try { ws.close(); } catch (_) {}
+  st.wsBackoff = 1;
+  wsLost();
+}
+async function checkWs() {
+  if (DEMO) return true;
+  if (!st.ws || st.ws.readyState !== 1) return false;
+  try { await request('ping', { client_ts: Date.now() }, 5000); return true; } catch (_) { if (st.ws) dropWs(); return false; }
+}
+setInterval(() => { if (!document.hidden && st.ws && st.ws.readyState === 1 && Date.now() - (st.wsRx || 0) > 25000) checkWs(); }, 10000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkWs(); });
+window.addEventListener('pageshow', () => checkWs());
+window.addEventListener('online', () => checkWs());
 function pickDevice() {
   const saved = st.devices.find(d => d.id === S.device);
   return (saved && saved.online) ? saved : st.devices.find(d => d.online) || saved || st.devices[0] || null;
@@ -207,19 +231,20 @@ function onWs(m) {
   case 'session.ice': st.iceChoices = d.ice_choices || d.ice_servers || []; startPeer(d.ice_servers || []); break;
   case 'signal': onSignal(d); break;
   case 'session.ended': sessionEnded(d.reason || 'ended'); break;
-  case 'ack': case 'error': {
+  case 'ack': case 'pong': case 'error': {
     const p = st.pending.get(m.id);
-    if (p) { st.pending.delete(m.id); m.t === 'ack' ? p.res(d) : p.rej(Object.assign(new Error(d.msg || d.code), d)); }
+    if (p) { st.pending.delete(m.id); m.t === 'error' ? p.rej(Object.assign(new Error(d.msg || d.code), d)) : p.res(d); }
     break;
   }
   }
 }
-function request(t, d) {
+function request(t, d, ms) {
+  if (!st.ws || st.ws.readyState !== 1) return Promise.reject(new Error('not connected'));
   const id = st.msgId++;
   return new Promise((res, rej) => {
     st.pending.set(id, { res, rej });
     wsSend({ t, id, d });
-    setTimeout(() => { if (st.pending.delete(id)) rej(new Error('timeout')); }, 10000);
+    setTimeout(() => { if (st.pending.delete(id)) rej(new Error('timeout')); }, ms || 10000);
   });
 }
 
@@ -256,6 +281,8 @@ async function startSession(takeover) {
   } catch (e) {
     st.sid = null;
     setOverlay('Cannot connect', e.msg || e.message, true);
+    /* no answer at all is usually a socket that died unseen: a new one starts the session again */
+    if (e.message === 'timeout') checkWs();
   }
 }
 function startPeer(iceServers) {
@@ -368,7 +395,7 @@ $('#reconnect').addEventListener('click', () => {
   if (DEMO) { $('#disc').hidden = true; ball.hidden = false; return; }
   wantSession = true;
   setOverlay('Connecting', '…');
-  if (!st.ws) connectWs(); else maybeStart();
+  if (!st.ws) connectWs(); else checkWs().then(ok => { if (ok) maybeStart(); });
 });
 $('#takeover').addEventListener('click', () => {
   wantSession = true;
