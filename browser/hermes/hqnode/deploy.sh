@@ -7,6 +7,8 @@
 #
 #   ENV_FILE   what becomes /data/hermes/.env (default browser/hermes/hqnode/hermes.env: copy the
 #              example, fill it in; it is git-ignored)
+#   FRPC_FILE  what becomes /data/frpc.toml, the dashboard at hermes.11100.top (default
+#              browser/hermes/hqnode/frpc.toml, git-ignored; skipped when there is none)
 #
 # The model itself is chosen once with `hermes model`, which writes /data/hermes/config.yaml (see the
 # end of the output). Files go in through the host's mount of /data, never through `hqnode exec`'s
@@ -22,6 +24,7 @@ MACHINE="${MACHINE:-oect}"
 CONTAINER_NAME="${CONTAINER_NAME:-hermes-${MACHINE}}"
 NODE_SSH="${NODE_SSH:-root@192.168.10.15}"
 ENV_FILE="${ENV_FILE:-$HERE/hermes.env}"
+FRPC_FILE="${FRPC_FILE:-$HERE/frpc.toml}"
 read -r -a SSH_CMD <<< "${SSH:-ssh}"
 
 node_ssh() { "${SSH_CMD[@]}" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=20 "$NODE_SSH" "$@"; }
@@ -83,6 +86,20 @@ main() {
     push_into_data "$hcid" "$ENV_FILE" hermes.env.new || exit 1
     ex "sh -c 'install -d -o hermes -g hermes -m 0700 /data/hermes && install -o hermes -g hermes -m 0600 /data/hermes.env.new /data/hermes/.env && rm /data/hermes.env.new'" || exit 1
     echo "  pushed ($(grep -c '^[A-Z]' "$ENV_FILE") settings)"
+
+    if [[ -f "$FRPC_FILE" ]]; then
+        echo -e "\n${BLUE}--- /data/frpc.toml ---${NC}"
+        if grep -q 'REPLACE-WITH-THE-FRP-TOKEN' "$FRPC_FILE"; then
+            echo -e "${RED}  ${FRPC_FILE} still has the example token${NC}"; exit 1
+        fi
+        if [[ -z "$(env_val HERMES_DASHBOARD_BASIC_AUTH_PASSWORD)" ]]; then
+            echo -e "${RED}  frpc publishes the dashboard: set HERMES_DASHBOARD_BASIC_AUTH_PASSWORD first${NC}"; exit 1
+        fi
+        push_into_data "$hcid" "$FRPC_FILE" frpc.toml || exit 1
+        ex "sh -c 'systemctl enable --now hermes-dashboard && systemctl restart frpc'" 2>&1 | grep -v cgroup | sed 's/^/  /'
+        sleep 5
+        ex "journalctl -u frpc -o cat --no-pager | tail -3" 2>&1 | sed 's/^/  /'
+    fi
 
     echo -e "\n${BLUE}--- the way out ---${NC}"
     local proxy; proxy=$(env_val HTTPS_PROXY)

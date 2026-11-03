@@ -1,0 +1,20 @@
+# frp client: publishes the dashboard (:9119) as https://hermes.11100.top through the frp server on
+# hk2, as surveil's frpc does for surveil.11100.top. Its config holds the frp token, so it is on /data
+# (deploy.sh writes it from frpc.toml) and never in the image; without it this does not start.
+# Straight to hk2 (11100.top is direct on this network), not through the agent's HTTPS_PROXY.
+[Unit]
+Description=frp client: the Hermes dashboard at hermes.11100.top
+After=network-online.target hermes-dashboard.service
+Wants=network-online.target
+ConditionPathExists=/data/frpc.toml
+
+[Service]
+ExecStart=/usr/local/bin/frpc -c /data/frpc.toml
+# Never give up: a failed login exits frpc, and the server being unreachable at boot is no reason to
+# stay down.
+Restart=always
+RestartSec=30
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

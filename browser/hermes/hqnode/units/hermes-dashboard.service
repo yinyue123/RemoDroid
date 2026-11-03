@@ -1,7 +1,6 @@
-# Hermes Agent's web dashboard on :9119, inside the container only: the container port is mapped host-only
-# (create.sh's PORTS=22,9119) and reached through an ssh tunnel. Its login page takes the user and password
-# in .env (HERMES_DASHBOARD_BASIC_AUTH_*). Not enabled by
-# default: systemctl enable --now hermes-dashboard
+# Hermes Agent's web dashboard on :9119: public as https://hermes.11100.top through frpc.service, and
+# host-only on the container's 9119 mapping (an ssh tunnel). Its login page takes the user and password
+# in .env (HERMES_DASHBOARD_BASIC_AUTH_*): set them before frpc.toml is pushed.
 [Unit]
 Description=Hermes Agent dashboard
 After=hermes-gateway.service

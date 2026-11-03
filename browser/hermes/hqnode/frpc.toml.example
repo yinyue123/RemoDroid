@@ -1,0 +1,31 @@
+# /data/frpc.toml in the hermes container: the dashboard published through frp, as surveil's is.
+# Copy to browser/hermes/hqnode/frpc.toml (git-ignored), put in the token (the same as surveil's
+# /data/frpc.toml), and deploy.sh pushes it. Then: systemctl restart frpc
+
+# Unique per frpc: frps prefixes every proxy name with it, so this does not collide with surveil's
+# client (user "oect") on the same server.
+user = "oect-hermes"
+
+# The host that answers *.11100.top, or the vhost lookup 404s.
+serverAddr = "hk2.11100.top"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "REPLACE-WITH-THE-FRP-TOKEN"
+
+log.to = "console"
+log.level = "info"
+
+transport.tcpMux = true
+transport.poolCount = 2
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+# The dashboard. hk2's wildcard *.11100.top server block terminates TLS and forwards to frps, so no
+# other entry is needed there. The dashboard has its own login (HERMES_DASHBOARD_BASIC_AUTH_* in .env).
+[[proxies]]
+name = "hermes"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 9119
+customDomains = ["hermes.11100.top"]

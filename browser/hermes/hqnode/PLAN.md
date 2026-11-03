@@ -55,7 +55,7 @@ Nothing here has been installed yet. The environment below is from the box itsel
 | State | `HERMES_HOME=/data/hermes` | `/data` survives reinstalls, like the browser's pairing |
 | Egress | a new sing-box inbound `mixed-hermes` on host `127.0.0.1:1091`, HTTP+SOCKS, routed to **us**; the container uses `http://192.168.10.1:1091` | HTTP proxying works for every client Hermes runs (httpx, aiohttp, git, npm, uv) without SOCKS extras; the US exit is one Anthropic/OpenAI/Google serve (HK isn't); loopback-only so the LAN can't use it |
 | Limits | 2 cores, 1 GiB memory, 8 G root, 8 G `/data`, 256 G/month | leaves the browser its 1.5 G; Hermes without a browser idles at a few hundred MB, Python 3.14 + Node + the venv are ~2 GB on disk |
-| Ports | 22 and 9119, both host-only mappings | ssh for `hermes setup`; the dashboard reached through an ssh tunnel, never published |
+| Ports | 22 and 9119, both host-only mappings; the dashboard public as **https://hermes.11100.top** through frp | ssh for `hermes model`; frpc is in the image as in surveil (`frpc.service`, user `oect-hermes`, hk2's frps, whose wildcard `*.11100.top` block terminates TLS), with the token in `/data/frpc.toml`; the dashboard's own login guards it |
 | Messaging | Telegram first (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`) | the simplest gateway; others are a `.env` line each |
 
 **Yours to decide before step 4:** the LLM provider and model (OpenRouter, Nous Portal, Anthropic,

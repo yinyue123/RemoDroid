@@ -13,3 +13,4 @@ __pycache__/
 browser/hqnode/browser.conf
 # the Hermes container's keys (browser/hermes/hqnode/hermes.env.example)
 /browser/hermes/hqnode/hermes.env
+/browser/hermes/hqnode/frpc.toml
