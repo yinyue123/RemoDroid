@@ -66,7 +66,7 @@ RUN set -eux; chmod 0755 /usr/local/bin/hermes /usr/local/bin/hermes-seed-home; 
     runuser -u hermes -- env HERMES_HOME=/tmp/hermes-smoke hermes gateway --help >/dev/null; \
     runuser -u hermes -- env HERMES_HOME=/tmp/hermes-smoke hermes dashboard --help >/dev/null; \
     rm -rf /tmp/hermes-smoke; \
-    git -C /opt/hermes/agent rev-parse HEAD > /etc/hermes/commit; \
+    runuser -u hermes -- git -C /opt/hermes/agent rev-parse HEAD > /etc/hermes/commit; \
     systemctl enable hermes-gateway.service
 
 # Inherited from the system image, restated because a wrong one turns every stop into 30 s and a kill.
