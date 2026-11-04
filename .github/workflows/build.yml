@@ -76,48 +76,6 @@ jobs:
       - name: Install site uses the panel's stylesheet
         run: cmp web/setup.css wizard/setup.css
 
-  # The Cloudflare Worker (worker/, serving web/): deployed from main once the tests above (tests/worker.mjs
-  # among them) pass, and only when worker/ or web/ changed, since a deploy restarts the Durable Object and
-  # so drops every router and viewer for a moment. Needs the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
-  # secrets; without them it says so and skips. Run the workflow by hand to deploy regardless.
-  worker:
-    name: deploy the Cloudflare Worker
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [test]
-    runs-on: ubuntu-24.04
-    concurrency:
-      group: worker-deploy
-      cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      BEFORE: ${{ github.event.before }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Anything new for the Worker?
-        id: changed
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::notice::No CLOUDFLARE_API_TOKEN secret, so the Worker is not deployed"
-          elif [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ -z "${BEFORE//0/}" ] ||
-               ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null || ! git diff --quiet "$BEFORE" HEAD -- worker web; then
-            echo "deploy=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "Nothing in worker/ or web/ changed"
-          fi
-      - uses: actions/setup-node@v5
-        if: steps.changed.outputs.deploy
-        with:
-          node-version: 22
-      - name: Deploy
-        if: steps.changed.outputs.deploy
-        working-directory: worker
-        run: |
-          npm install --no-audit --no-fund
-          npx wrangler deploy --message "$(git log -1 --format='%h %s' | cut -c1-90)"
-
   binaries:
     name: binaries (${{ matrix.arch }})
     runs-on: ubuntu-24.04
