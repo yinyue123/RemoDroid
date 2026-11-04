@@ -128,6 +128,9 @@ async def trackpad(browser, http_port, probe, logs):
     await page.fill("#user", "me")
     await page.fill("#password", "pw")
     await page.click("#go")
+    # no device chosen in this browser yet: the device page; tapping one opens it here
+    await page.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+    await page.locator('a[href^="/?device="]').first.click()
     await page.wait_for_url(f"http://127.0.0.1:{http_port}/")
     ready = "() => document.querySelector('#disc').hidden && document.querySelector('#video').videoWidth > 0"
     await page.wait_for_function(ready, timeout=30000)
@@ -361,6 +364,9 @@ async def trackpad(browser, http_port, probe, logs):
     await page.fill("#user", "me")
     await page.fill("#password", "pw")
     await page.click("#go")
+    # no device chosen in this browser yet: the device page; tapping one opens it here
+    await page.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+    await page.locator('a[href^="/?device="]').first.click()
     await page.wait_for_url(f"http://127.0.0.1:{http_port}/")
     await page.wait_for_function(ready, timeout=30000)
     await page.wait_for_timeout(800)
@@ -554,6 +560,9 @@ notify = false
             await page.fill("#user", "me")
             await page.fill("#password", "pw")
             await page.click("#go")
+            # no device chosen in this browser yet: the device page; tapping one opens it here
+            await page.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+            await page.locator('a[href^="/?device="]').first.click()
             await page.wait_for_url(f"http://127.0.0.1:{http_port}/")
             t0 = time.time()
             try:
@@ -710,6 +719,9 @@ notify = false
             await tp.fill("#user", "me")
             await tp.fill("#password", "pw")
             await tp.click("#go")
+            # no device chosen in this browser yet: the device page; tapping one opens it here
+            await tp.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+            await tp.locator('a[href^="/?device="]').first.click()
             await tp.wait_for_url(f"http://127.0.0.1:{http_port}/")
             await tp.wait_for_function("() => document.querySelector('#disc').hidden && document.querySelector('#video').videoWidth > 0",
                                        timeout=30000)
@@ -894,6 +906,9 @@ notify = false
             await mp.fill("#user", "me")
             await mp.fill("#password", "pw")
             await mp.click("#go")
+            # no device chosen in this browser yet: the device page; tapping one opens it here
+            await mp.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+            await mp.locator('a[href^="/?device="]').first.click()
             await mp.wait_for_url(f"http://127.0.0.1:{http_port}/")
             await mp.wait_for_function("() => document.querySelector('#disc').hidden && document.querySelector('#video').videoWidth > 0",
                                        timeout=30000)

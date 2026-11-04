@@ -16,6 +16,7 @@ Needs Xvfb, xdotool, dbus-run-session and python3-gi (the drag source) besides P
 """
 import argparse
 import asyncio
+import re
 import json
 import os
 import shutil
@@ -123,6 +124,9 @@ async def run(args):
             await page.fill("#user", "me")
             await page.fill("#password", "pw")
             await page.click("#go")
+            # no device chosen in this browser yet: the device page; tapping one opens it here
+            await page.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+            await page.locator('a[href^="/?device="]').first.click()
             await page.wait_for_url(base + "/")
             await page.wait_for_function("() => { const v = document.querySelector('#video'); return v && v.videoWidth > 0; }",
                                          timeout=30000)
@@ -209,10 +213,29 @@ async def run(args):
                     res["clip_to_computer"] = ev["text"]
                     break
                 await page.wait_for_timeout(200)
+            # 4. the device is a cookie: the menu's Devices lists it (chosen), Exit forgets it and goes to the
+            # device page, and the viewer without it shows the device page rather than picking one
+            res["device_cookie"] = any(c["name"] == "rd_device" for c in await ctx.cookies())
+            await page.locator("#ball").click()
+            await page.locator('#menu button[data-act="devices"]').click()
+            await page.wait_for_selector("#sheet-devices:not([hidden])")
+            res["switch_list"] = await page.locator('#devList .dev-row[aria-pressed="true"]').count() == 1
+            await page.locator("#sheet-devices button[data-close]").click()
+            await page.locator("#ball").click()
+            await page.locator('#menu button[data-act="exit"]').click()
+            await page.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+            res["exit_forgets"] = not any(c["name"] == "rd_device" for c in await ctx.cookies())
+            await page.goto(base + "/")
+            try:
+                await page.wait_for_url(re.compile(r".*/panel\.html#devices$"), timeout=10000)
+                res["no_cookie_device_page"] = True
+            except Exception:
+                res["no_cookie_device_page"] = False
             res["errors"] = [l for l in logs if "PAGEERROR" in l][:5]
             await browser.close()
         ok = (res.get("pair") and res.get("dropzone") == "Drop to send to Test computer" and res.get("viewer_drop_ok")
               and res.get("computer_ft_opened") and res.get("sheet_opened") and res.get("bubble")
+              and res.get("device_cookie") and res.get("switch_list") and res.get("exit_forgets") and res.get("no_cookie_device_page")
               and res.get("window_drop_ok") and res.get("transfer_logged") and res.get("clip_to_viewer") == "auto"
               and res.get("clip_to_computer") == "copied in the browser" and not res.get("errors"))
     finally:

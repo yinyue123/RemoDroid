@@ -7,6 +7,7 @@ logged in on the login page, streaming from the phone-side C WebRTC stack
 """
 import argparse
 import asyncio
+import re
 import json
 import os
 import shutil
@@ -77,6 +78,9 @@ link = tcp:127.0.0.1:{tun_port}
             await page.fill("#user", "me")
             await page.fill("#password", "pw")
             await page.click("#go")
+            # no device chosen in this browser yet: the device page; tapping one opens it here
+            await page.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+            await page.locator('a[href^="/?device="]').first.click()
             await page.wait_for_url(f"http://127.0.0.1:{http_port}/")
             # wait for real decoded frames
             t0 = time.time()

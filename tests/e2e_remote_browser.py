@@ -17,6 +17,7 @@ it. Needs Xorg 21.1+ with xserver-xorg-video-dummy, run as root (or Xorg.wrap al
 """
 import argparse
 import asyncio
+import re
 import json
 import os
 import shutil
@@ -119,6 +120,9 @@ audio = false
             await page.fill("#user", "me")
             await page.fill("#password", "pw")
             await page.click("#go")
+            # no device chosen in this browser yet: the device page; tapping one opens it here
+            await page.wait_for_url(re.compile(r".*/panel\.html#devices$"))
+            await page.locator('a[href^="/?device="]').first.click()
             await page.wait_for_url(base + "/")
             try:
                 await page.wait_for_function("() => document.querySelector('#disc').hidden && "

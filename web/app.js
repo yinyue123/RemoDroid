@@ -15,7 +15,7 @@ const DEFAULTS = {
   mode: 'auto', preset: '720p', deskPreset: 'native', fps: 60, kbps: 8000, codec: 'auto', stats: true, touches: false,
   screenOff: true, lockOnDisc: true, grace: 10, rotation: 'auto', clipSync: true, autoPaste: false, overheat: 45,
   destDir: '/sdcard/DCIM/RemoDroid', mediaScan: true, overwrite: false, maxMb: 2048, route: 'auto', relay: false,
-  audio: true, sound: true, device: '', swapCmd: 'auto', turn: '',
+  audio: true, sound: true, swapCmd: 'auto', turn: '',
   touchCtl: 'auto', tpMove: 1, tpScroll: 1, tpNatural: true
 };
 const S = Object.assign({}, DEFAULTS);
@@ -35,7 +35,16 @@ const save = () => {
   if (v.length < 3800) /* a cookie holds 4 KB */
     document.cookie = `${PAD_COOKIE}=${v}; Max-Age=34560000; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
 };
-{ const want = new URLSearchParams(location.search).get('device'); if (want) { S.device = want; save(); history.replaceState(null, '', '/'); } }
+/* The device being controlled is a cookie: set when you choose one (the device page's link, /?device=ID,
+ * or the menu's Devices switcher) and deleted by the menu's Exit. Without it this page shows the device
+ * page instead: it never picks a device by itself. */
+const DEV_COOKIE = 'rd_device';
+const devCookie = () => { const c = document.cookie.split('; ').find(x => x.startsWith(DEV_COOKIE + '=')); return c ? decodeURIComponent(c.slice(DEV_COOKIE.length + 1)) : ''; };
+const setDevCookie = id => { document.cookie = `${DEV_COOKIE}=${encodeURIComponent(id)}; Max-Age=34560000; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`; };
+const clearDevCookie = () => { document.cookie = `${DEV_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`; };
+delete S.device; /* where the choice lived before the cookie */
+{ const want = new URLSearchParams(location.search).get('device'); if (want) { setDevCookie(want); history.replaceState(null, '', '/'); } }
+if (!DEMO && !devCookie()) location.replace('/panel.html#devices');
 let ballPos = null;
 try { ballPos = JSON.parse(localStorage.getItem(KEY + '-ball') || 'null'); } catch (e) {}
 
@@ -191,9 +200,15 @@ setInterval(() => { if (!document.hidden && st.ws && st.ws.readyState === 1 && D
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkWs(); });
 window.addEventListener('pageshow', () => checkWs());
 window.addEventListener('online', () => checkWs());
+/* the device in the cookie, online or not (it waits for that one rather than taking another); the demo has its own */
 function pickDevice() {
-  const saved = st.devices.find(d => d.id === S.device);
-  return (saved && saved.online) ? saved : st.devices.find(d => d.online) || saved || st.devices[0] || null;
+  if (DEMO) return st.devices.find(d => d.online) || st.devices[0] || null;
+  return st.devices.find(d => d.id === devCookie()) || null;
+}
+/* the cookie's device is gone (removed, or another account's): back to the device page */
+function deviceGone() {
+  if (DEMO || st.device) return false;
+  clearDevCookie(); toDevices(); return true;
 }
 function onWs(m) {
   if (m.t !== 'signal') logProto('←', 'ws', JSON.stringify(m));
@@ -203,6 +218,7 @@ function onWs(m) {
     st.listed = true;
     st.devices = d.devices || [];
     st.device = pickDevice();
+    if (deviceGone()) break;
     deviceChanged();
     maybeStart();
     break;
@@ -216,7 +232,7 @@ function onWs(m) {
   }
   case 'device.removed':
     st.devices = st.devices.filter(x => x.id !== d.id);
-    if (st.device && st.device.id === d.id) { st.device = pickDevice(); deviceChanged(); }
+    if (st.device && st.device.id === d.id) { st.device = pickDevice(); if (deviceGone()) break; deviceChanged(); }
     maybeStart();
     break;
   case 'device.event':
@@ -1019,6 +1035,29 @@ ball.addEventListener('pointerup', ballUp);
 ball.addEventListener('pointercancel', ballUp);
 ball.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#disc').hidden ? toggleMenu() : toDevices(); } });
 function toDevices() { location.href = '/panel.html#devices'; }
+/* Exit: forget the device and go back to the device page, to choose one there */
+function exitDevice() { clearDevCookie(); endSession(); toDevices(); }
+/* the quick way: another device, from the menu's Devices sheet, without leaving this page */
+function switchDevice(dv) {
+  if (!dv || (st.device && dv.id === st.device.id)) return;
+  setDevCookie(dv.id); endSession(); st.device = dv; wantSession = true; deviceChanged(); maybeStart();
+  toast(`Switching to ${dv.name || dv.id}…`);
+}
+function renderDevices() {
+  const cur = st.device ? st.device.id : '';
+  const kind = d => d.platform && d.platform !== 'android' ? ({ windows: 'Windows', macos: 'Mac', linux: 'Linux' }[d.platform] || 'Computer') : 'Phone';
+  $('#devList').innerHTML = st.devices.length ? st.devices.map(d => `<button type="button" class="turn-row dev-row" data-id="${esc(d.id)}" aria-pressed="${d.id === cur}">
+    <span class="lbl"><b>${esc(d.name || d.id)}</b><small>${kind(d)} · ${d.online ? 'online' : 'offline'}</small></span><span class="tick" aria-hidden="true"></span></button>`).join('')
+    : '<p class="note">No devices yet: add one on the device page.</p>';
+}
+$('#devList').addEventListener('click', e => {
+  const b = e.target.closest('.dev-row'); if (!b) return;
+  const dv = st.devices.find(d => d.id === b.dataset.id);
+  closeSheet();
+  if (dv && !dv.online) toast(`${dv.name || dv.id} is offline: it connects when it comes back`);
+  switchDevice(dv);
+});
+$('#devExit').addEventListener('click', () => { closeSheet(); exitDevice(); });
 window.addEventListener('resize', () => { restoreBall(); restoreChip(); if (!menu.hidden) positionMenu(); });
 function positionMenu() {
   const r = ball.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight, W = innerWidth, H = innerHeight;
@@ -1144,7 +1183,8 @@ menu.addEventListener('click', e => {
   }
   else if (a === 'reconnect') { closeMenu(); reconnectStream(); }
   else if (a === 'fullscreen') { closeMenu(); toggleFullscreen(); }
-  else if (a === 'devices') { toDevices(); }
+  else if (a === 'devices') { closeMenu(); renderDevices(); openSheet('devices'); }
+  else if (a === 'exit') { closeMenu(); exitDevice(); }
 });
 
 /* ================= sheets ================= */
@@ -2914,7 +2954,7 @@ function renderTab(id) {
     if (st.devices.length > 1) {
       add(group('Device', ...st.devices.map(dv => el('div', { class: 'row' }, lbl(dv.name, dv.online ? 'online' : 'offline'),
         el('button', { class: 'btn' + (st.device && dv.id === st.device.id ? ' primary' : ''), type: 'button', text: st.device && dv.id === st.device.id ? 'Selected' : 'Use',
-          onclick: () => { S.device = dv.id; save(); endSession(); st.device = dv; wantSession = true; maybeStart(); renderTab('conn'); } })))));
+          onclick: () => { switchDevice(dv); renderTab('conn'); } })))));
     }
     add(group('Route',
       desk() ? null : segRow('route', 'Media route', [['auto', 'Auto'], ['tunnel', 'Via router'], ['wifi', 'Phone Wi-Fi']], 'Auto picks whichever measured faster.'),

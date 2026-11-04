@@ -66,6 +66,7 @@
   <button type="button" role="menuitem" data-act="bark" id="menuBark" hidden><svg viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/><path class="off-only" d="M4 4l16 16"/></svg><span>Bark</span></button>
   <button type="button" role="menuitem" data-act="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/><path d="M4 12h2M10 12h10"/><circle cx="8" cy="12" r="2.2"/></svg>Settings</button>
   <button type="button" role="menuitem" data-act="devices"><svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>Devices</button>
+  <button type="button" role="menuitem" data-act="exit"><svg viewBox="0 0 24 24"><path d="M14 4.5H6.5v15H14"/><path d="M10.5 12h10M17 8.5l3.5 3.5-3.5 3.5"/></svg>Exit</button>
 </div>
 
 <div id="backdrop" hidden></div>
@@ -143,6 +144,14 @@
 </section>
 
 <!-- Relay: which TURN server carries the video -->
+<!-- Devices: switch to another one here, or Exit to the device page -->
+<section class="sheet" id="sheet-devices" hidden aria-labelledby="dv-title">
+  <header><h2 id="dv-title">Devices<small>Tap one to switch to it</small></h2><button class="btn" type="button" id="devExit">Exit</button><button class="x" type="button" data-close aria-label="Close">×</button></header>
+  <div class="body">
+    <div class="turn-list" id="devList"></div>
+  </div>
+</section>
+
 <section class="sheet" id="sheet-turn" hidden aria-labelledby="tu-title">
   <header><h2 id="tu-title">Relay<small id="turnSub">Auto</small></h2><button class="btn" type="button" id="turnTest">Test</button><button class="x" type="button" data-close aria-label="Close">×</button></header>
   <div class="body">
