@@ -1373,8 +1373,8 @@ function nextInputMethod() {
   fkbSend('key', { action: 'press', code: AK.space });
   fkbSend('key', { action: 'up', code: mod });
 }
-/* The computer's input method (ime.state, once a second while it changes), on the floating button and
- * the 🌐 key, as the computer's own indicator: 中 / 英 for Chinese (英: Pinyin typing letters), あ, 한,
+/* The computer's input method (ime.state, once a second while it changes), on the 🌐 key, as the
+ * computer's own indicator: 中 / 英 for Chinese (英: Pinyin typing letters), あ, 한,
  * else the language (EN, FR…). */
 function imeLabel(m) {
   if (!m || !m.name) return '';
@@ -1387,11 +1387,7 @@ function imeLabel(m) {
 }
 const imeTitle = m => m && m.name ? m.name + (m.ime && m.native === false ? ' (typing letters)' : '') : '';
 function renderIme() {
-  const lab = desk() && st.connected ? imeLabel(st.ime) : '', b = $('#ball'), tag = $('#ballIme');
-  if (!b || !tag) return;
-  tag.textContent = lab; tag.hidden = !lab;
-  b.classList.toggle('has-ime', !!lab);
-  b.title = lab ? 'Input method: ' + imeTitle(st.ime) : '';
+  const lab = desk() && st.connected ? imeLabel(st.ime) : '';
   for (const k of document.querySelectorAll('.k.globe')) {
     k.textContent = lab || '🌐';
     k.setAttribute('aria-label', lab ? `Next input method (now ${imeTitle(st.ime)})` : 'Next input method');

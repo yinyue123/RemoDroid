@@ -281,8 +281,7 @@ async def trackpad(browser, http_port, probe, logs):
     except Exception:
         pass
     out["ime_label"] = await globe.text_content()
-    out["ime_ball"] = await page.locator("#ballIme").text_content()
-    ok["ime_shown"] = bool(re.fullmatch(r"[A-Z]{1,2}", out["ime_label"] or "")) and out["ime_ball"] == out["ime_label"]
+    ok["ime_shown"] = bool(re.fullmatch(r"[A-Z]{1,2}", out["ime_label"] or ""))
     await globe.tap()
     ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keysym"] == "space", 3)
     out["globe"] = ev and {"state": ev["state"]}

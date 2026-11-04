@@ -71,11 +71,6 @@ html.lc #video,html.lc #screen{opacity:.4;outline:3px solid #ff0;outline-offset:
 #ball::before,#ball::after{content:"";position:absolute;border-radius:50%;inset:11px;border:2px solid rgba(228,233,239,.38)}
 #ball::after{inset:19px;background:rgba(228,233,239,.88);border:0}
 #ball.idle{opacity:.42}
-/* the computer's input method (中, 英, EN…) in the ring, where the dot was */
-#ball .ime{position:absolute;inset:11px;display:flex;align-items:center;justify-content:center;pointer-events:none;
-  font:600 14px/1 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:rgba(240,244,248,.95);letter-spacing:.02em}
-#ball .ime[hidden]{display:none}
-#ball.has-ime::after{display:none}
 #ball.drag{transition:none;transform:scale(1.06)}
 #ball[aria-expanded="true"]{opacity:1}
 body:has(#disc:not([hidden])) #ball{z-index:55} /* over the disconnect overlay, a way back to the list */
