@@ -13,6 +13,37 @@
 
 static NSString *str(const char *s) { return [NSString stringWithUTF8String:s ?: ""] ?: @""; }
 
+/* ---------------- permissions left from an earlier build ----------------
+ * The app is signed ad hoc, so every build has a new signature (multi-platform.md §13.4). macOS keeps the
+ * Screen Recording and Accessibility switches an earlier build was given, still on in System Settings, but
+ * they don't count for this one, and macOS won't ask again while they are there. An app can't read that
+ * list, but an entry this build doesn't get is stale by definition: so at launch, whichever permission is
+ * missing is reset. A stale entry goes and "Open Settings" can ask again; where there is none, nothing
+ * changes; a permission that works is never touched. */
+
+static void tcc_reset(NSString *service)
+{
+    NSTask *t = [[NSTask alloc] init];
+    t.executableURL = [NSURL fileURLWithPath:@"/usr/bin/tccutil"];
+    t.arguments = @[ @"reset", service, NSBundle.mainBundle.bundleIdentifier ?: @"com.remodroid.desktop" ];
+    t.standardOutput = t.standardError = [NSFileHandle fileHandleWithNullDevice];
+    NSError *e = nil;
+    if (![t launchAndReturnError:&e]) {
+        NSLog(@"RemoDroid: tccutil reset %@: %@", service, e.localizedDescription);
+        return;
+    }
+    [t waitUntilExit];
+    NSLog(@"RemoDroid: %@ is off for this build: reset any stale entry (tccutil: %d)", service, t.terminationStatus);
+}
+
+static void forget_stale_permissions(void)
+{
+    if (!CGPreflightScreenCaptureAccess())
+        tcc_reset(@"ScreenCapture");
+    if (!AXIsProcessTrusted())
+        tcc_reset(@"Accessibility");
+}
+
 static NSImage *icon_image(int style, CGFloat points)
 {
     int px = (int)(points * 2); /* drawn for Retina, shown at `points` */
@@ -503,6 +534,7 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     UNUserNotificationCenter *nc = [UNUserNotificationCenter currentNotificationCenter];
     nc.delegate = self;
     [nc requestAuthorizationWithOptions:UNAuthorizationOptionAlert | UNAuthorizationOptionSound completionHandler:^(BOOL g, NSError *e) {}];
+    forget_stale_permissions(); /* after an update: so "Open Settings" can ask again */
     self.item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
     NSMenu *m = [[NSMenu alloc] init];
     m.delegate = self;

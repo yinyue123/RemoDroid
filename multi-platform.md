@@ -678,7 +678,9 @@ regenerated after each release (as for the router packages).
 
 - **macOS**: Screen Recording and Accessibility permissions are tied to the code signature. An ad-hoc
   signature changes with every build, so **macOS asks for permission again after every update**, and
-  Gatekeeper needs right-click → Open. A Developer ID certificate plus notarization fixes both and can be
+  Gatekeeper needs right-click → Open. The old switches stay on in System Settings but count for the old
+  build, and macOS won't ask while they are there; so at launch the app resets (`tccutil reset`) whichever
+  of the two it lacks, which removes such a stale entry and lets "Open Settings" ask again. A Developer ID certificate plus notarization fixes both and can be
   added to the macos job as secrets.
 - **Windows**: unsigned binaries trigger SmartScreen warnings. Authenticode signing is optional.
 
