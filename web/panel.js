@@ -556,7 +556,7 @@ function renderServer() {
       item({ html: '<span class="txt"><b>Use Cloudflare TURN</b><small>1,000 GB a month free</small></span>', right: `<input class="sw" type="checkbox" data-k="cf" aria-label="Cloudflare TURN" ${t.cloudflare ? 'checked' : ''}>` }),
       t.cloudflare ? item({ act: 'cf_key', html: '<span class="txt"><b>TURN key ID</b></span>', val: t.key_id || 'not set' }) : '',
       t.cloudflare ? item({ act: 'cf_token', html: '<span class="txt"><b>API token</b></span>', val: t.has_token ? 'saved' : 'not set' }) : '',
-    ].filter(Boolean), 'Cloudflare dashboard → Realtime → TURN Server → Create.');
+    ].filter(Boolean), '<a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare dashboard</a> → <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>: its Turn Token ID and API Token go here.');
   }
   html += `<h2 class="gtitle">${builtinOn ? 'STUN / TURN servers' : 'Other STUN / TURN servers'}</h2><div id="ice"></div><p class="gfoot">Phones use UDP TURN; add your own coturn here, or a public STUN server such as stun.cloudflare.com.</p>`;
   html += group('AI assistants', [
@@ -620,8 +620,9 @@ function editServer(what) {
       { k: 'turn_port', label: 'Port (UDP)', type: 'number', value: cfg.turn_port || 3478 }],
       save: v => patch({ turn_enabled: true, public_ip: v.public_ip, turn_port: v.turn_port }) }),
     cf_key: () => sheet({ title: 'Cloudflare TURN', fields: [
-      { k: 'key_id', label: 'TURN key ID', value: (cfg.turn && cfg.turn.key_id) || '' },
-      { k: 'api_token', label: 'API token', type: 'password', placeholder: cfg.turn && cfg.turn.has_token ? 'unchanged' : '' }],
+      { k: 'key_id', label: 'Turn Token ID', value: (cfg.turn && cfg.turn.key_id) || '' },
+      { k: 'api_token', label: 'API Token', type: 'password', placeholder: cfg.turn && cfg.turn.has_token ? 'unchanged' : '' }],
+      note: `Where to get them: in the <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare dashboard</a>, open <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>, give the key a name and create it. Copy its <b>Turn Token ID</b> and <b>API Token</b> here. Copy the API Token right away: Cloudflare may not show it again; if it's lost, create another key. 1,000 GB a month are free.`,
       save: v => patch({ turn: { cloudflare: true, key_id: v.key_id, api_token: v.api_token } }) }),
     cf_token: () => S.cf_key(),
     logout: async () => { try { await api('POST', '/api/v1/logout'); } catch (_) {} location.href = '/'; },
