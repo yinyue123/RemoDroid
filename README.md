@@ -36,7 +36,7 @@ One panel serves any number of phones and computers. Every setup is the same thr
 
 <p align="center"><a href="https://remodroid.pages.dev/"><img src="wizard/button.svg" alt="Install RemoDroid with the wizard: remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center">For an Android phone, the install wizard walks you through every step with copy buttons.</p>
+<p align="center">The install wizard asks the same two questions and walks you through with copy buttons.</p>
 
 ## How it works
 
@@ -470,7 +470,7 @@ support, hardware decoding), and congestion control on real networks.
 | `android/java/` | Phone server: screen capture, MediaCodec, input injection, clipboard, screen power, files, logcat | Java (app_process) |
 | `web/` | iPhone client (PWA): video, sound, multi-touch, floating-ball menu, photo upload, clipboard, all settings; `panel.html` (Devices, Agents, Server tabs) and `wizard.html` (first-run setup) | HTML/CSS/JS |
 | `worker/` | The same panel on Cloudflare Workers + a Durable Object, with Cloudflare TURN | JS |
-| `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev), `install_server.sh`, `install_agent.sh`, `update.sh` | HTML, sh |
+| `wizard/` | The install site (Cloudflare Pages, remodroid.pages.dev), `install_server.sh`, `install_agent.sh`, `update.sh`; `i18n/` builds each language from the English page | HTML, sh, Python |
 | `common/` | Shared C: WebSocket framing, tunnel frames, STUN, JSON envelope, ini, utilities | C |
 | `third_party/` | Vendored libraries, linked statically: libev, inih, cJSON, picohttpparser, crypt_blowfish, mbedTLS, libsrtp2, usrsctp, minih264, libopus (computers' sound) | C |
 | `deploy/` | Example `server.ini` / `agent.ini`, systemd units, OpenRC scripts, the agent's procd script | |

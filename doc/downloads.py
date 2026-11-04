@@ -6,6 +6,7 @@ The server is for Linux and Windows servers: no OpenWrt or MIPS builds (routers 
   gh release view v0.3.4 --json assets -q '.assets[].name' | doc/downloads.py 0.3.4 - --readme README.md
                                                     rewrites the server, agent and desktop grids between
                                                     the README's <!-- downloads:PART --> markers
+  … | doc/downloads.py 0.3.4 - --readme doc/zh/README.md --lang zh    the same in a translated README
 """
 import os
 import re
@@ -150,9 +151,31 @@ def section(part, names, ver):
                       + ([note, ''] if note else []) + [checksums(ver)])
 
 
+# the grids' own words, which --lang LANG swaps for doc/downloads_i18n.py's (the translated READMEs)
+EN = {
+    'h_server': 'Download the panel for a Linux or Windows server', 'h_agent': 'Download RemoDroid for phones',
+    'h_desktop': 'Download RemoDroid for computers', 'server_hint': SERVER_HINT, 'windows_hint': WINDOWS_HINT, 'hint': HINT,
+    'desktop_hint': DESKTOP_HINT, 'merlin_head': 'Koolshare / KoolCenter offline installers: ',
+    'merlin_tail': '. RT-AC86U and RT-AX88U: choose aarch64. These hold only RemoDroid for phones, as router plugins (not OpenWrt packages).',
+    'checksums': 'Checksums: ', 'col_server': '| Server |', 'col_agent': '| Agent |', 'col_computer': '| Computer |',
+    'any_linux': 'Any Linux', 'sub_x64': 'Intel / AMD 64-bit', 'sub_arm32': '32-bit ARM', 'sub_x86': '<sub>32-bit</sub>',
+    'sub_intel': '<sub>Intel / AMD</sub>', 'sub_graviton': 'Graviton, Snapdragon…', 'sub_apple': 'Apple silicon, Snapdragon…',
+    'x11': '(X11 session)',
+}
+
+
+def localize(md, lang):
+    from downloads_i18n import T  # noqa: E402 (only the translated READMEs need it)
+    pairs = sorted(((EN[k], v) for k, v in T[lang].items()), key=lambda p: -len(p[0]))
+    for en, tr in pairs:
+        md = md.replace(en, tr)
+    return md
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
+    lang = sys.argv[sys.argv.index('--lang') + 1] if '--lang' in sys.argv else None
     ver, src = sys.argv[1].lstrip('v'), sys.argv[2]
     names = set(sys.stdin.read().split() if src == '-' else os.listdir(src))
     if '--readme' in sys.argv:
@@ -165,6 +188,8 @@ def main():
                     continue
                 sys.exit(f'{path} has no {begin} … {end} markers')
             md = section(part, names, ver)
+            if lang:
+                md = localize(md, lang)
             text = re.sub(re.escape(begin) + '.*?' + re.escape(end), lambda _: f'{begin}\n{md}\n{end}', text, flags=re.S)
         open(path, 'w').write(text)
     else:
