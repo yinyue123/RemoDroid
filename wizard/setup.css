@@ -174,3 +174,17 @@ h2{font:500 22px/1.25 var(--serif);margin:36px 0 12px}
 .small-print{text-align:center;font:13px var(--mono);color:var(--faint)}
 .small-print b{color:var(--ink-2);font-weight:600}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:10px;font-size:14px;z-index:20;max-width:calc(100vw - 32px)}
+
+/* ---------- icons and the picture of your setup (all drawn in icons.svg) ---------- */
+.ico{width:18px;height:18px;flex:none;vertical-align:-3px;margin-right:8px}
+.seg button{display:inline-flex;align-items:center}
+.seg button .ico{opacity:.75}
+.seg button[aria-selected="true"] .ico{opacity:1;color:var(--accent)}
+.btn .ico{margin-right:-2px}
+.choice .cic{width:34px;height:34px;color:var(--accent);margin:0 0 12px}
+.choice[aria-pressed="false"] .cic{color:var(--ink-2)}
+.scene{margin:26px 0 30px;max-width:680px}
+.scene svg{display:block;width:100%;height:auto;aspect-ratio:640/138;overflow:visible}
+.scene figcaption{position:relative;height:20px;margin-top:6px}
+.scene figcaption span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;font:600 13px/20px var(--sans);color:var(--ink-2)}
+@media (max-width:520px){.scene figcaption span{font-size:11px}}

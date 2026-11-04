@@ -136,3 +136,4 @@ ${phone ? `<dl class="kv"><dt>Касания</dt><dd>Мультитач идёт
 <dt>Файлы</dt><dd>Перетащите файлы на окно просмотра — они попадут в Downloads/RemoDroid на компьютере.</dd>
 <dt>Буфер обмена</dt><dd>Скопированный текст синхронизируется в обе стороны.</dd></dl>`}
 <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Открыть панель ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">Добавить ещё ${phone ? 'компьютер' : 'телефон'}</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">Читать документацию ↗</a></p>`;
+const NAMES = { iphone: 'iPhone', panel: 'Панель', router: 'Роутер', phone: 'Android', computer: 'Компьютер' };

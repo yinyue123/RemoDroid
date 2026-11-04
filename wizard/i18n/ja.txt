@@ -136,3 +136,4 @@ ${phone ? `<dl class="kv"><dt>タッチ</dt><dd>マルチタッチがそのま�
 <dt>ファイル</dt><dd>ビューアーにファイルをドロップすると、パソコンの Downloads/RemoDroid に入ります。</dd>
 <dt>クリップボード</dt><dd>コピーしたテキストが双方向に同期します。</dd></dl>`}
 <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">パネルを開く ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">${phone ? 'パソコン' : 'スマホ'}も追加</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">ドキュメントを読む ↗</a></p>`;
+const NAMES = { iphone: 'iPhone', panel: 'パネル', router: 'ルーター', phone: 'Android', computer: 'パソコン' };

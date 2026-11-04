@@ -136,3 +136,4 @@ ${phone ? `<dl class="kv"><dt>触摸</dt><dd>多点触控直接传到手机；�
 <dt>文件</dt><dd>把文件拖到查看器上，就会放到电脑的 Downloads/RemoDroid 里。</dd>
 <dt>剪贴板</dt><dd>复制的文字双向同步。</dd></dl>`}
 <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">打开你的面板 ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">再添加${phone ? '一台电脑' : '一台手机'}</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">阅读文档 ↗</a></p>`;
+const NAMES = { iphone: 'iPhone', panel: '面板', router: '路由器', phone: '安卓手机', computer: '电脑' };

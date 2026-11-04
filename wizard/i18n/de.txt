@@ -136,3 +136,4 @@ ${phone ? `<dl class="kv"><dt>Berührung</dt><dd>Multitouch geht direkt ans Hand
 <dt>Dateien</dt><dd>Dateien auf den Viewer ziehen, und sie landen in Downloads/RemoDroid auf dem Computer.</dd>
 <dt>Zwischenablage</dt><dd>Kopierter Text wird in beide Richtungen abgeglichen.</dd></dl>`}
 <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Dein Panel öffnen ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">Auch ${phone ? 'einen Computer' : 'ein Handy'} hinzufügen</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">Doku lesen ↗</a></p>`;
+const NAMES = { iphone: 'iPhone', panel: 'Panel', router: 'Router', phone: 'Android', computer: 'Computer' };

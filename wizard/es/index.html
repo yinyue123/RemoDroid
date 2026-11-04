@@ -30,7 +30,9 @@ const REPO = 'yinyue123/RemoDroid';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const main = $('#main');
-const COPY = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+/* every icon and picture is in /icons.svg, shared by all the languages */
+const ic = (k, c) => `<svg class="${c || 'ico'}" aria-hidden="true"><use href="/icons.svg#${k}"/></svg>`;
+const COPY = ic('copy', 'cp');
 const hl = s => esc(s).replace(/(\s)(--?[a-zA-Z-]+)/g, '$1<span class="f">$2</span>').replace(/(\|)/g, '<span class="f">$1</span>');
 const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="Copiar" data-copy="${esc(t)}">${COPY}</button></div>`;
 document.addEventListener('click', async e => {
@@ -91,6 +93,43 @@ function go(i) { STEPS = stepsFor(); step = i; history.replaceState(null, '', '#
 $('#back').onclick = () => go(Math.max(0, step - 1));
 $('#next').onclick = () => go(Math.min(STEPS.length - 1, step + 1));
 const eyebrow = (n, t) => `<p class="eyebrow">${String(n).padStart(2, '0')} — ${t}</p>`;
+
+/* ---------- the picture of your setup, on every step ---------- */
+const NAMES = { iphone: 'iPhone', panel: 'Panel', router: 'Router', phone: 'Android', computer: 'Ordenador' };
+/* what each page is about: [the part in focus, the link being made] */
+const FOCUS = { pageServer: ['panel'], pagePanel: ['panel', 'w1'], pageAgent: ['router'], pageConnect: ['router', 'w2'], pagePhone: ['phone', 'w3'], pageComputer: ['computer'], pagePair: ['computer', 'w2'], pageDone: ['iphone', 'video'] };
+function scene(name) {
+  const phone = S.target === 'phone', parts = ['iphone', 'panel', ...(phone ? ['router', 'phone'] : ['computer'])];
+  const xs = phone ? [70, 236, 404, 570] : [90, 320, 550], [on, link] = FOCUS[name] || [];
+  const v = { [`--s-${S.server}`]: 1 };
+  if (name === 'pageDone') {
+    parts.forEach(k => { v[`--s-${k}-c`] = v[`--s-${k}-line`] = 'var(--ok)'; v[`--s-${k}-bg`] = 'var(--ok-soft)'; });
+    Object.assign(v, { '--s-badge': 'var(--ok)', '--s-get': 0, '--s-ok': 1, '--s-w1-c': 'var(--ok)', '--s-w2-c': 'var(--ok)', '--s-w3-c': 'var(--ok)' });
+  } else if (on) {
+    parts.forEach(k => { if (k !== on) v[`--s-${k}-o`] = 0.4; });
+    ['w1', 'w2', 'w3', 'video'].forEach(k => { if (k !== link) v[`--s-${k}-o`] = 0.4; });
+    Object.assign(v, { [`--s-${on}-c`]: 'var(--accent)', [`--s-${on}-line`]: 'var(--accent)', [`--s-${on}-bg`]: 'var(--accent-soft)' });
+  }
+  if (link) Object.assign(v, { [`--s-${link}-c`]: 'var(--accent)', [`--s-${link}-i`]: 'var(--accent)' });
+  const style = Object.entries(v).map(([k, x]) => `${k}:${x}`).join(';');
+  return `<figure class="scene${link ? ' live' : ''}" style="${style}"><svg viewBox="0 0 640 138" role="img" aria-label="${parts.map(k => NAMES[k]).join(' → ')}"><use href="/icons.svg#scene-${phone ? 'phone' : 'computer'}"/></svg>`
+    + `<figcaption>${parts.map((k, i) => `<span style="left:${xs[i] / 6.4}%">${NAMES[k]}</span>`).join('')}</figcaption></figure>`;
+}
+/* pages redraw themselves (a tab, a new address, downloads arriving), so this runs after every redraw */
+function decorate() {
+  const name = STEPS[step].page.name;
+  if (!main.querySelector('.scene')) {
+    const at = name === 'pageStart' ? main.querySelector('.choices ~ .note') : main.querySelector('.lede');
+    if (at) at.insertAdjacentHTML(name === 'pageStart' ? 'beforebegin' : 'afterend', scene(name));
+  }
+  main.querySelectorAll('.choice:not(.has-ic)').forEach(b => { b.classList.add('has-ic'); b.insertAdjacentHTML('afterbegin', ic(b.dataset.t || b.dataset.s, 'cic')); });
+  main.querySelectorAll('.seg button:not(.has-ic)').forEach(b => {
+    const d = b.dataset, k = d.os || d.dos || (d.cpu || d.dcpu ? 'cpu' : '');
+    if (k) { b.classList.add('has-ic'); b.insertAdjacentHTML('afterbegin', ic(k)); }
+  });
+  main.querySelectorAll('a.btn[href*="/releases/download/"]:not(.has-ic)').forEach(b => { b.classList.add('has-ic'); b.insertAdjacentHTML('afterbegin', ic('get')); });
+}
+new MutationObserver(decorate).observe(main, { childList: true, subtree: true });
 
 /* ---------- release assets (for "download the package") ---------- */
 let assets = null;

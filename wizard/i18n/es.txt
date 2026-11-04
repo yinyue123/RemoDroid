@@ -136,3 +136,4 @@ ${phone ? `<dl class="kv"><dt>Tacto</dt><dd>El multitáctil va directo al móvil
 <dt>Archivos</dt><dd>Suelta archivos en el visor y llegan a Downloads/RemoDroid del ordenador.</dd>
 <dt>Portapapeles</dt><dd>El texto copiado se sincroniza en ambos sentidos.</dd></dl>`}
 <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Abre tu panel ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">Añade también ${phone ? 'un ordenador' : 'un móvil'}</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">Lee la documentación ↗</a></p>`;
+const NAMES = { iphone: 'iPhone', panel: 'Panel', router: 'Router', phone: 'Android', computer: 'Ordenador' };

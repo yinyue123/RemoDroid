@@ -136,3 +136,4 @@ ${phone ? `<dl class="kv"><dt>Tactile</dt><dd>Le multitouch va directement au t�
 <dt>Fichiers</dt><dd>Déposez des fichiers sur la visionneuse et ils arrivent dans Downloads/RemoDroid sur l’ordinateur.</dd>
 <dt>Presse-papiers</dt><dd>Le texte copié se synchronise dans les deux sens.</dd></dl>`}
 <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Ouvrir votre panneau ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">Ajouter aussi ${phone ? 'un ordinateur' : 'un téléphone'}</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">Lire la documentation ↗</a></p>`;
+const NAMES = { iphone: 'iPhone', panel: 'Panneau', router: 'Routeur', phone: 'Android', computer: 'Ordinateur' };

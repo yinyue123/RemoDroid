@@ -136,3 +136,4 @@ ${phone ? `<dl class="kv"><dt>터치</dt><dd>멀티터치가 그대로 휴대폰
 <dt>파일</dt><dd>뷰어에 파일을 끌어다 놓으면 컴퓨터의 Downloads/RemoDroid에 들어갑니다.</dd>
 <dt>클립보드</dt><dd>복사한 텍스트가 양방향으로 동기화됩니다.</dd></dl>`}
 <p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">패널 열기 ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">${phone ? '컴퓨터' : '휴대폰'}도 추가</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">문서 읽기 ↗</a></p>`;
+const NAMES = { iphone: 'iPhone', panel: '패널', router: '라우터', phone: '안드로이드', computer: '컴퓨터' };
