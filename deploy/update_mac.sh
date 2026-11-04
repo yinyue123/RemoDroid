@@ -99,7 +99,7 @@ identity() { # the certificate's SHA-1, as codesign takes it; empty when there i
     [ -f "$KC" ] && [ -f "$PASSF" ] || return 0
     security unlock-keychain -p "$(cat "$PASSF")" "$KC" 2>/dev/null || return 0
     # codesign looks for identities in the keychain search list: add ours, keeping the others
-    if ! security list-keychains -d user | grep -qF "$KC"; then
+    if ! security list-keychains -d user | grep -F "$KC" >/dev/null; then
         local list=() l
         while IFS= read -r l; do
             l="${l#"${l%%[![:space:]]*}"}"
@@ -119,7 +119,7 @@ if [ -z "$id" ]; then
 fi
 [ -n "$id" ] || warn "couldn't make a signing certificate: this build keeps its ad hoc signature, and macOS will ask for permissions again after each update"
 
-signed_by_us() { [ -d "$1" ] && codesign -dvv "$1" 2>&1 | grep -qF "Authority=$CN"; }
+signed_by_us() { [ -d "$1" ] && codesign -dvv "$1" 2>&1 | grep -F "Authority=$CN" >/dev/null; }
 
 # ---------------- download, or reuse what is installed ----------------
 need_install=1

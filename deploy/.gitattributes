@@ -1,0 +1,2 @@
+# cmd.exe wants CRLF line ends: keep the .bat files exactly as committed
+*.bat -text
