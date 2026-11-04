@@ -6,8 +6,8 @@
 #   server, Windows  remodroid-server.exe + the tray app RemoDroidServer.exe (x86_64, arm64), tested as a service
 #   packages         .deb, .rpm, .apk, .ipk (OpenWrt, agent only), .tar.gz, Merlin agent offline installers,
 #                    RemoDroid-Server-*-windows-*.zip,
-#                    remodroid-desktop .deb/.rpm/.tar.gz, RemoDroid-*-linux-*.AppImage, RemoDroid-*-windows-*.zip,
-#                    RemoDroid-*-macos.zip
+#                    remodroid-desktop .deb/.rpm/.tar.gz, RemoDroid-Computer-*-linux-*.AppImage,
+#                    RemoDroid-Computer-*-windows-*.zip, RemoDroid-Computer-*-macos.zip
 # A pushed tag v* publishes a GitHub release; the annotated tag's message is the release notes.
 name: build
 

@@ -82,7 +82,7 @@ else
     else API=https://api.github.com/repos/$REPO/releases/tags/v$VERSION; fi
     say "the release at $API"
     curl -fsSL "$API" | sed -n 's/.*"browser_download_url": *"\([^"]*\)".*/\1/p' > "$TMP/urls" || die "could not read $API"
-    for u in $(grep -E '/(remodroid-[0-9][^/]*-linux-x86_64\.tar\.gz|RemoDroid-[0-9][^/]*-linux-x86_64\.AppImage|remodroid-desktop_[^/]*_amd64\.deb|RemoDroid-[0-9][^/]*-windows-x86_64\.zip|SHA256SUMS)$' "$TMP/urls"); do
+    for u in $(grep -E '/(remodroid-[0-9][^/]*-linux-x86_64\.tar\.gz|RemoDroid-(Computer-)?[0-9][^/]*-linux-x86_64\.AppImage|remodroid-desktop_[^/]*_amd64\.deb|RemoDroid-(Computer-)?[0-9][^/]*-windows-x86_64\.zip|SHA256SUMS)$' "$TMP/urls"); do
         say "downloading $(basename "$u")"
         curl -fsSL -o "$PKG/$(basename "$u")" "$u" || die "could not download $u"
     done
@@ -94,8 +94,8 @@ if [ -f "$PKG/SHA256SUMS" ]; then
         [ -z "$want" ] || [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$want" ] || { echo "checksum mismatch: $f" >&2; exit 1; }
     done) || die "the packages don't match SHA256SUMS"
 fi
-pick() { # the package for a pattern, or nothing
-    for f in "$PKG"/$1; do [ -f "$f" ] && { echo "$f"; return; }; done
+pick() { # the package for the first pattern that has one, or nothing
+    for p in "$@"; do for f in "$PKG"/$p; do [ -f "$f" ] && { echo "$f"; return; }; done; done
 }
 
 # ---------------- reaching the machines ----------------
@@ -268,17 +268,17 @@ t_sx() {
 }
 t_deck() {
     need DECK || return 1
-    f=$(pick 'RemoDroid-[0-9]*-linux-x86_64.AppImage'); [ -n "$f" ] || { bad "no RemoDroid-*-linux-x86_64.AppImage"; return 1; }
+    f=$(pick 'RemoDroid-Computer-[0-9]*-linux-x86_64.AppImage' 'RemoDroid-[0-9]*-linux-x86_64.AppImage'); [ -n "$f" ] || { bad "no RemoDroid-Computer-*-linux-x86_64.AppImage"; return 1; }
     t_agent deck "$DECK" "${DECK%%@*}" "$f"
 }
 t_pc() {
     need PC || return 1
-    f=$(pick 'RemoDroid-[0-9]*-linux-x86_64.AppImage'); [ -n "$f" ] || { bad "no RemoDroid-*-linux-x86_64.AppImage"; return 1; }
+    f=$(pick 'RemoDroid-Computer-[0-9]*-linux-x86_64.AppImage' 'RemoDroid-[0-9]*-linux-x86_64.AppImage'); [ -n "$f" ] || { bad "no RemoDroid-Computer-*-linux-x86_64.AppImage"; return 1; }
     t_agent pc "$PC" "${PC_USER:-${PC%%@*}}" "$f"
 }
 t_win11() {
     need SX WIN_VM WIN_USER || return 1
-    f=$(pick 'RemoDroid-[0-9]*-windows-x86_64.zip'); [ -n "$f" ] || { bad "no RemoDroid-*-windows-x86_64.zip"; return 1; }
+    f=$(pick 'RemoDroid-Computer-[0-9]*-windows-x86_64.zip' 'RemoDroid-[0-9]*-windows-x86_64.zip'); [ -n "$f" ] || { bad "no RemoDroid-Computer-*-windows-x86_64.zip"; return 1; }
     say "win11: $(basename "$f") → the $WIN_VM VM on $SX"
     run "$SX" "$WIN_SH" "$f" "$WIN_VM" "$WIN_USER"
 }

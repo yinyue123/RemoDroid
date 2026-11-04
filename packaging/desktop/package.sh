@@ -1,8 +1,8 @@
 #!/bin/sh
 # Packages the desktop agents for download.
 #   packaging/desktop/package.sh VERSION linux ARCH DIR    .deb, .rpm, .tar.gz, .AppImage from a Linux build dir
-#   packaging/desktop/package.sh VERSION windows ARCH DIR  RemoDroid-VERSION-windows-ARCH.zip
-#   packaging/desktop/package.sh VERSION macos - DIR        RemoDroid-VERSION-macos.zip (RemoDroid.app)
+#   packaging/desktop/package.sh VERSION windows ARCH DIR  RemoDroid-Computer-VERSION-windows-ARCH.zip
+#   packaging/desktop/package.sh VERSION macos - DIR        RemoDroid-Computer-VERSION-macos.zip (RemoDroid.app)
 # Output: build/packages/.
 set -eu
 cd "$(dirname "$0")/../.."
@@ -43,16 +43,16 @@ linux)
     cp packaging/desktop/remodroid-desktop.desktop "$DIR/icons/256x256/apps/remodroid.png" "$A/"
     install -m 0755 packaging/desktop/AppRun "$A/AppRun"
     ARCH=$ARCH appimagetool --no-appstream --runtime-file "$APPIMAGE_RUNTIME/runtime-$ARCH" \
-        "$A" "$OUT/RemoDroid-$VERSION-linux-$ARCH.AppImage"
+        "$A" "$OUT/RemoDroid-Computer-$VERSION-linux-$ARCH.AppImage"
     ;;
 windows)
-    T=RemoDroid-$VERSION-windows-$ARCH
+    T=RemoDroid-Computer-$VERSION-windows-$ARCH
     rm -rf "build/$T" && mkdir -p "build/$T"
     cp "$DIR/RemoDroid.exe" "$DIR/remodroid-desktopd.exe" "$DIR/remodroid.dll" "$DIR/remodroid-input.exe" "build/$T/"
     (cd build && rm -f "$T.zip" && zip -qr "$T.zip" "$T") && mv "build/$T.zip" "$OUT/"
     ;;
 macos)
-    T=RemoDroid-$VERSION-macos
+    T=RemoDroid-Computer-$VERSION-macos
     (cd "$DIR" && rm -f "$T.zip" && ditto -c -k --sequesterRsrc --keepParent RemoDroid.app "$T.zip")
     mv "$DIR/$T.zip" "$OUT/"
     ;;

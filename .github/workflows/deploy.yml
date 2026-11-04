@@ -53,8 +53,8 @@ jobs:
           TAG: ${{ steps.which.outputs.release }}
         run: |
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D pkgs \
-            -p 'remodroid-[0-9]*-linux-x86_64.tar.gz' -p 'RemoDroid-[0-9]*-linux-x86_64.AppImage' \
-            -p 'remodroid-desktop_*_amd64.deb' -p 'RemoDroid-[0-9]*-windows-x86_64.zip' -p SHA256SUMS
+            -p 'remodroid-[0-9]*-linux-x86_64.tar.gz' -p 'RemoDroid-*-linux-x86_64.AppImage' \
+            -p 'remodroid-desktop_*_amd64.deb' -p 'RemoDroid-*-windows-x86_64.zip' -p SHA256SUMS
       - name: Fetch a build's packages
         if: steps.which.outputs.run
         uses: actions/download-artifact@v5
@@ -68,7 +68,7 @@ jobs:
           cd pkgs
           for f in *; do
             case "$f" in
-              remodroid-[0-9]*-linux-x86_64.tar.gz|RemoDroid-[0-9]*-linux-x86_64.AppImage|remodroid-desktop_*_amd64.deb|RemoDroid-[0-9]*-windows-x86_64.zip|SHA256SUMS) ;;
+              remodroid-[0-9]*-linux-x86_64.tar.gz|RemoDroid-*-linux-x86_64.AppImage|remodroid-desktop_*_amd64.deb|RemoDroid-Computer-*-windows-x86_64.zip|RemoDroid-[0-9]*-windows-x86_64.zip|SHA256SUMS) ;;
               *) rm -f "$f" ;;
             esac
           done
