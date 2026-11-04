@@ -115,12 +115,25 @@ function scene(name) {
   return `<figure class="scene${link ? ' live' : ''}" style="${style}"><svg viewBox="0 0 640 138" role="img" aria-label="${parts.map(k => NAMES[k]).join(' → ')}"><use href="/icons.svg#scene-${phone ? 'phone' : 'computer'}"/></svg>`
     + `<figcaption>${parts.map((k, i) => `<span style="left:${xs[i] / 6.4}%">${NAMES[k]}</span>`).join('')}</figcaption></figure>`;
 }
+const DEMOS = [
+  ['pageServer', 'win', '.chips', 'firewall'], ['pageServer', 'self', '#detail > p:last-child', 'firewall'],
+  ['pagePanel', 'win', 0, 'winserver'],
+  ['pagePhone', '', 0, 'android-debug'], ['pagePhone', '', 2, 'android-allow'],
+  ['pagePair', '', '#padd + p', 'panel-add'], ['pagePair', '', 1, 'pair'],
+];
 /* pages redraw themselves (a tab, a new address, downloads arriving), so this runs after every redraw */
 function decorate() {
   const name = STEPS[step].page.name;
   if (!main.querySelector('.scene')) {
     const at = name === 'pageStart' ? main.querySelector('.choices ~ .note') : main.querySelector('.lede');
     if (at) at.insertAdjacentHTML(name === 'pageStart' ? 'beforebegin' : 'afterend', scene(name));
+  }
+  /* a picture of the screen under the step it shows: [page, which panel, after this step (or element), picture] */
+  for (const [page, srv, at, pic] of DEMOS) {
+    if (page !== name || (srv && srv !== S.server) || main.querySelector(`img[src="/demo/${pic}.svg"]`)) continue;
+    let el = typeof at === 'string' ? main.querySelector(at) : main.querySelectorAll('.num')[at];
+    if (typeof at === 'number') do el = el && el.nextElementSibling; while (el && (el.tagName !== 'P' || el.id));
+    if (el) el.insertAdjacentHTML('afterend', `<img class="demo" src="/demo/${pic}.svg" alt="" loading="lazy">`);
   }
   main.querySelectorAll('.choice:not(.has-ic)').forEach(b => { b.classList.add('has-ic'); b.insertAdjacentHTML('afterbegin', ic(b.dataset.t || b.dataset.s, 'cic')); });
   main.querySelectorAll('.seg button:not(.has-ic)').forEach(b => {

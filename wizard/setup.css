@@ -188,3 +188,4 @@ h2{font:500 22px/1.25 var(--serif);margin:36px 0 12px}
 .scene figcaption{position:relative;height:20px;margin-top:6px}
 .scene figcaption span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;font:600 13px/20px var(--sans);color:var(--ink-2)}
 @media (max-width:520px){.scene figcaption span{font-size:11px}}
+.demo{display:block;width:100%;max-width:700px;height:auto;margin:6px 0 26px}
