@@ -1,0 +1,138 @@
+<title>RemoDroid 설치</title>
+<meta name="description" content="iPhone에서 Android 휴대폰이나 Windows·Mac·Linux 컴퓨터를 제어하세요: 패널(Cloudflare, Linux 서버 또는 Windows 서버)을 준비하고, 제어할 기기에 RemoDroid를 설치합니다.">
+<nav class="steps" id="steps" aria-label="설치 단계"></nav>
+<button class="back" id="back" type="button">← 이전</button>
+<button class="btn" id="next" type="button">다음 →</button>
+const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="복사" data-copy="${esc(t)}">${COPY}</button></div>`;
+const PANEL_ON = { cf: 'Cloudflare', self: 'Linux 서버', win: 'Windows 서버' };
+{ label: '시작', sub: '선택', page: pageStart },
+{ label: '패널', sub: '설치', page: pageServer },
+{ label: '패널', sub: '열기', page: pagePanel },
+? [{ label: '라우터', sub: '설치', page: pageAgent }, { label: '연결', sub: '등록', page: pageConnect }, { label: '휴대폰', sub: 'USB', page: pagePhone }]
+: [{ label: '컴퓨터', sub: '설치', page: pageComputer }, { label: '연결', sub: '페어링', page: pagePair }]),
+{ label: '완료', sub: '사용하기', page: pageDone },
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">패널 주소</label>
+<input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  또는  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+<div class="hint">여기에 기억해 두고 다음 단계에서 씁니다.</div></div></div>`;
+$('#left').textContent = left ? `${left}단계 남음${left > 1 ? '' : ''}` : '완료';
+el.innerHTML = hits.length ? hits.map(x => `<a class="btn" style="margin:0 10px 10px 0" href="${esc(x.url)}"><span>다운로드</span><small style="font:12px var(--mono);opacity:.7">${esc(x.name)} · ${MB(x.size)}</small></a>`).join('')
+: `<p class="note">${esc(a.tag || '최신 릴리스')}에는 해당 파일이 없습니다. <a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">전체 파일</a>을 보세요.</p>`;
+: `<p class="note">${esc(a.tag || '최신 릴리스')}에는 이 조합의 패키지가 없습니다. <a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">전체 파일</a>을 보세요(<code>.tar.gz</code>는 모든 Linux에서 실행됩니다).</p>`;
+main.innerHTML = `${eyebrow(1, '시작')}<h1>질문 <em>두 가지</em></h1>
+<p class="lede">RemoDroid는 두 부분으로 되어 있습니다. 로그인하는 웹 페이지인 <b>패널</b>, 그리고 <b>제어할 기기에 설치하는 RemoDroid</b>입니다. 그다음 iPhone의 Safari나 다른 브라우저에서 사용하며, 그쪽에는 아무것도 설치하지 않습니다.</p>
+<div class="num"><i>1</i>무엇을 제어하시겠어요?</div>
+<button class="choice" type="button" data-t="phone" aria-pressed="${t === 'phone'}"><small>RemoDroid 휴대폰용</small><b>Android 휴대폰</b><span>라우터(OpenWrt, ASUS Merlin 또는 아무 Linux 기기)에 USB로 연결합니다. 휴대폰에는 아무것도 설치하지 않습니다.</span></button>
+<button class="choice" type="button" data-t="computer" aria-pressed="${t === 'computer'}"><small>RemoDroid 컴퓨터용</small><b>컴퓨터</b><span>Windows 10 또는 11, Mac(macOS 13 이상), Linux PC. 컴퓨터에 작은 앱을 설치합니다.</span></button>
+<div class="num"><i>2</i>패널은 어디에서 실행할까요?</div>
+<button class="choice" type="button" data-s="cf" aria-pressed="${sv === 'cf'}"><small>서버 필요 없음</small><b>Cloudflare</b><span>무료: Cloudflare가 페이지를 호스팅하고, 네트워크가 직접 연결을 막으면 영상을 중계합니다. 브라우저에서 몇 분이면 됩니다.</span></button>
+<button class="choice" type="button" data-s="self" aria-pressed="${sv === 'self'}"><small>직접 호스팅</small><b>Linux 서버</b><span>공인 IP가 있는 VPS, 가능하면 집 가까이. 명령 하나면 되고 TURN 중계도 내장되어 있습니다.</span></button>
+<button class="choice" type="button" data-s="win" aria-pressed="${sv === 'win'}"><small>직접 호스팅</small><b>Windows 서버</b><span>Windows Server 2019 이상, 또는 공인 IP가 있는 Windows 10/11. 압축을 풀고 Install을 클릭합니다.</span></button>
+<p class="note">내 계획: 패널은 <b>${PANEL_ON[sv]}</b>에, 다음으로 <b>${t === 'phone' ? '라우터에 RemoDroid 휴대폰용' : '컴퓨터에 RemoDroid 컴퓨터용'}</b>, 마지막으로 iPhone에서 엽니다. 패널 하나로 휴대폰과 컴퓨터를 몇 대든 다룰 수 있으니, 다른 종류는 나중에 여기서 추가하세요.</p>`;
+const change = () => `<p class="note">패널: <b>${PANEL_ON[S.server]}</b>. <a href="#step1" data-go="0">변경</a></p>`;
+main.innerHTML = `${eyebrow(2, '패널')}<h1><em>패널</em> 설치</h1>
+<p class="lede">패널은 ${S.target === 'phone' ? '라우터' : '컴퓨터'}와 iPhone이 만나는 곳, 로그인이 있는 웹 페이지입니다.</p>
+d.innerHTML = `<div class="num"><i>1</i>다운로드</div>
+<div id="wdl"><p class="note">최신 릴리스를 확인하는 중…</p></div>
+<div class="num"><i>2</i>설치하고 시작</div>
+<p>계속 둘 폴더에 압축을 풀고 <b>RemoDroidServer.exe</b>를 실행한 뒤 <b>Install and start</b>를 고릅니다. 패널은 Windows 서비스로 실행되어 로그인 여부와 상관없이 Windows와 함께 시작되고, Windows 방화벽도 통과시킵니다. 아이콘은 시계 옆에 남습니다.</p>
+<p class="note">명령 프롬프트에서는(관리자로): <code>remodroid-server install</code></p>
+<div class="chips"><small>클라우드 방화벽에서 열기</small><span class="chip">TCP 80 · 443(도메인)</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>`;
+d.innerHTML = `<div class="num"><i>1</i>한 줄 — 어떤 Linux든</div>
+<p class="bullet">다운로드, 설치, 시작까지 한 번에 합니다.</p>
+<div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ remodroid-server_…_amd64.deb 다운로드 중</div><div class="d">▸ 서비스 시작 중</div><div class="k">✓ 서버가 실행 중입니다. 설정 마법사를 여세요:</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
+<p class="note">출력된 링크를 보관하세요. 다음 단계에서 엽니다.</p>
+<div class="num"><i class="alt">2</i>또는 패키지로 설치</div>
+<div id="sdl"><p class="note">최신 릴리스를 확인하는 중…</p></div>
+<div class="num"><i class="alt">3</i>시작</div>
+<p class="bullet">패키지는 설치만 합니다. 시작하고, 재부팅 후에도 다시 시작되게 하세요:</p>
+<p>그다음 <code>http://&lt;서버-IP&gt;:5580/wizard.html</code>을 엽니다. 설정 코드는 <code>/var/lib/remodroid/setup-token</code>에 있고, 포트는 <code>/etc/remodroid/server.ini</code>의 <code>listen</code>입니다.</p>`;
+d.innerHTML = `<div class="num"><i>1</i>TURN 키 만들기</div>
+<p>네트워크가 직접 연결을 막으면 Cloudflare가 영상을 중계합니다(매월 1,000 GB 무료). <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">대시보드</a>에서 <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>. <b>Turn Token ID</b>와 <b>API Token</b>을 다음 단계를 위해 보관하세요.</p>
+<div class="num"><i>2</i>Worker 배포</div>
+<p class="bullet">Node.js가 있는 컴퓨터에서. 처음 한 번 Cloudflare 로그인을 요청합니다.</p>
+<div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ remodroid 업로드 완료(웹 파일, Durable Object "Hub")</div><div class="k">✓ 배포됨: https://remodroid.&lt;사용자&gt;.workers.dev</div></div>
+<p class="note">터미널 없이도 됩니다: <a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a>를 fork한 뒤 대시보드에서 <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → fork 선택 → <b>Root directory: worker</b> → Deploy. 이후 fork에 push할 때마다 패널이 자동으로 업데이트됩니다. 저장소(Durable Object의 데이터베이스)는 자동으로 만들어집니다.</p>`;
+main.innerHTML = `${eyebrow(3, '패널')}<h1><em>패널</em> 열기</h1>
+<p class="lede">Windows 기기의 RemoDroid Server 창에서 패널을 설정합니다. 그 뒤로는 어디서든 로그인하는 웹 페이지입니다.</p>
+<div class="num"><i>1</i>창에서 설정</div>
+<p><b>RemoDroidServer.exe</b>에서 <b>관리자</b> 로그인, <b>웹 포트</b>, Let's Encrypt 무료 HTTPS용 <b>도메인</b>(선택), <b>STUN/TURN</b>을 설정합니다. 같은 창에서 패널을 시작·중지하고 로그를 볼 수 있습니다.</p>
+<div class="num"><i>2</i>열기</div>
+<p>어디서든: <code>https://&lt;내 도메인&gt;</code>, 도메인이 없으면 <code>http://&lt;서버-IP&gt;:&lt;웹 포트&gt;</code>.</p>
+<div class="num"><i class="alt">3</i>지금 어디에 있나요?</div>
+<p class="lede">서버가 곧 패널입니다. 서버의 웹 페이지에서 로그인하고 제어할 기기를 추가합니다.</p>
+<div class="num"><i>1</i>서버 실행</div>
+<p class="bullet">한 줄 설치 프로그램이 이미 시작했습니다. 패키지를 직접 설치했다면 지금 시작하세요:</p>
+<p class="note">Alpine: <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · 확인: <code>systemctl status remodroid-server</code>(Alpine: <code>rc-service remodroid-server status</code>)</p>
+<div class="num"><i>2</i>웹 페이지 열기</div>
+<p>설치 프로그램이 출력한 링크를 엽니다: <code>http://&lt;서버-IP&gt;:5580/wizard.html?token=…</code>. <b>token</b>은 서버가 내 것임을 증명합니다. 링크를 잃어버렸다면 서버에서 token을 읽으세요:</p>
+<div class="chips"><small>먼저 열기</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443(도메인)</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+<div class="num"><i>3</i>설정 마법사 마치기</div>
+<p><b>도메인</b>(Let's Encrypt 무료 HTTPS, 자동 갱신), <b>로그인</b>, <b>STUN/TURN 포트</b>를 묻고 <code>/etc/remodroid/server.ini</code>에 기록한 뒤 해당 주소로 서버를 다시 시작합니다. 나중에 같은 페이지(비밀번호 필요)에서 설정을 바꿀 수 있습니다.</p>
+<div class="num"><i class="alt">4</i>지금 어디에 있나요?</div>
+<p class="lede">Worker가 곧 패널입니다. 로그인하고 제어할 기기를 추가하는 웹 페이지입니다.</p>
+<div class="num"><i>1</i>Worker 열기</div>
+<p>주소는 <code>wrangler deploy</code>가 출력하며, 대시보드의 <b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b>에서도 볼 수 있습니다. 보통 <code>https://remodroid.&lt;사용자&gt;.workers.dev</code>입니다.</p>
+<div class="num"><i>2</i>설정 마법사 마치기</div>
+<p><b>로그인</b>과 이전 단계의 <b>TURN 키</b>(또는 다른 STUN/TURN 서버)를 묻습니다. 내 주소를 쓰고 싶다면 Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → 사용자 지정 도메인 추가.</p>
+<div class="callout">배포 직후 바로 진행하세요. 그 전까지는 첫 방문자가 로그인을 정할 수 있습니다. 안전하게, 먼저 Worker에 secret <code>SETUP_TOKEN</code>을 추가하세요(Settings → Variables and Secrets → Add, 유형은 <b>Secret</b>. 일반 변수는 다음 배포 때 사라집니다). 그러면 설정 페이지가 이 값을 묻습니다.</div>
+<div class="num"><i class="alt">3</i>어디에 있나요?</div>
+const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))} 열기 ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(4, '라우터')}<h1>RemoDroid <em>휴대폰용</em></h1>
+<p class="lede">휴대폰을 연결한 라우터(또는 USB 포트가 있는 아무 Linux 기기)에서 실행되며 스스로 패널에 접속합니다. 포트를 열 필요도, 공인 주소도 필요 없고, 휴대폰 자체에는 아무것도 설치하지 않습니다.</p>
+<div class="num"><i>1</i>명령 하나</div>
+<p class="bullet">다운로드, 설치, 시작까지 한 번에 합니다. 라우터에서(SSH) 실행하세요.</p>
+<div class="term"><div><span class="p">$</span> ${esc(o.agent)}</div><div class="d">▸ remodroid-agent_…_${S.os === 'openwrt' ? 'mipsel_24kc.ipk' : 'amd64.deb'} 다운로드 중</div><div class="d">▸ 서비스 시작 중</div><div class="k">✓ 실행 중입니다</div></div>
+<div class="num"><i class="alt">2</i>또는 패키지 다운로드</div>
+<div id="adl"><p class="note">최신 릴리스를 확인하는 중…</p></div>
+<p class="bullet">패키지는 설치만 합니다. 시작하고, 재부팅 후에도 다시 시작되게 하세요:</p>
+<p class="note">그다음 패널에 연결합니다: 다음 단계.</p>
+<div class="chips"><small>필요한 것</small><span class="chip">USB 포트</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle(함께 설치됨)' : 'ca-certificates'}</span><span class="chip">정확한 시계(HTTPS)</span></div>
+<p class="note">Koolshare가 있는 ASUS Merlin: <a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">최신 릴리스</a>에서 <code>remodroid-…-merlin-….tar.gz</code>를 받아 소프트웨어 센터 → 수동 설치에서 설치하세요.</p>`;
+main.innerHTML = `${eyebrow(5, '연결')}<h1><em>라우터</em> 등록</h1>
+<p class="lede">라우터는 내 패널만 만들 수 있는 일회용 코드로 패널에 합류합니다.</p>
+<div class="num"><i>1</i>패널의 에이전트 탭 열기</div>
+<div class="num"><i>2</i>에이전트 추가</div>
+<p>이 링크는 <b>에이전트 추가 → 연결</b>을 엽니다(직접 클릭해도 됩니다). 패널에 <code>X5SX-K3M7</code> 같은 코드가 나옵니다: 한 번만, <b>10분</b> 동안 유효합니다. 그 페이지에 복사 버튼이 있는 전체 명령이 있으며, 여기에 코드를 입력해도 됩니다.</p>
+<div class="form"><div class="field"><label for="code">패널의 코드</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+<div class="num"><i>3</i>라우터에서 실행</div>
+<p class="note"><b>bound</b>가 나오면 패널 페이지도 초록색이 됩니다. 그 뒤로 라우터의 영상·휴대폰·클립보드 설정은 패널의 에이전트 탭에서 바꾸며, ini를 편집할 필요가 없습니다.</p>`;
+$('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html 열기 ↗</a>`
+: '위에 패널 주소를 넣거나, 직접 패널을 열어 <b>에이전트 → 추가</b>로 가세요.';
+$('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? '위에 패널의 코드를 입력하세요.' : '패널 주소와 코드를 입력하세요.'}</p>`;
+$('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ 패널 ${esc(p)}에 연결 중…</div><div class="d">▸ "OpenWrt"(openwrt)로 등록, /etc/remodroid/agent.ini에 저장</div><div class="k">✓ bound — 이 라우터가 온라인입니다</div>`;
+main.innerHTML = `${eyebrow(6, '휴대폰')}<h1><em>휴대폰</em> 연결</h1>
+<p class="lede">휴대폰마다 한 번. Android 8 이상. 하드웨어 H.265 인코더가 있으면 좋지만 필수는 아닙니다.</p>
+<div class="num"><i>1</i>USB 디버깅 켜기</div>
+<p>설정 → 휴대전화 정보 → <b>빌드 번호</b>를 일곱 번 탭. 그다음 설정 → 시스템 → <b>개발자 옵션</b> → <b>USB 디버깅</b>.</p>
+<div class="num"><i>2</i>라우터의 USB 포트에 연결</div>
+<p>충전 전용이 아닌 데이터 케이블로. 라우터의 RemoDroid가 휴대폰을 스스로 찾아 작은 도우미를 실행합니다(Play 스토어에서 받을 것은 없습니다).</p>
+<div class="num"><i>3</i>라우터 허용</div>
+<p>휴대폰에 <b>“USB 디버깅을 허용하시겠습니까?”</b>가 뜹니다. <b>이 컴퓨터에서 항상 허용</b>을 체크하고 <b>허용</b>. ${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">패널의 에이전트 탭</a>` : '패널의 에이전트 탭'}에 휴대폰이 준비됨으로 표시됩니다.</p>`;
+steps: '원하는 곳에 압축을 풀고(파일은 함께 두세요) <b>RemoDroid.exe</b>를 실행합니다. 아이콘이 시계 옆에 나타납니다. Windows 10 1809 이상. 관리자로 실행되는 프로그램도 제어하려면 메뉴에서 <b>Control administrator windows…</b>를 한 번 고르세요.' },
+steps: '압축을 풀고 <b>RemoDroid.app</b>을 응용 프로그램으로 옮겨 엽니다(처음에는 오른쪽 클릭 → <b>열기</b>). 메뉴 막대에 머뭅니다. 요청하면 <b>화면 기록</b>과 <b>손쉬운 사용</b>을 허용하고 <b>종료 후 다시 열기</b>를 누르세요. macOS 13 이상, Apple 실리콘과 Intel 모두 지원.' },
+steps: '<code>.deb</code>나 <code>.rpm</code>을 설치하고 앱 메뉴에서 <b>RemoDroid</b>를 시작합니다. 다른 배포판에서는 <code>.AppImage</code>에 실행 권한을 주고 실행하세요. X11 세션이 필요합니다(GNOME은 로그인 때 “GNOME on Xorg”).' },
+main.innerHTML = `${eyebrow(4, '컴퓨터')}<h1>RemoDroid <em>컴퓨터용</em></h1>
+<p class="lede">제어할 컴퓨터에 설치하는 작은 앱입니다. 스스로 패널에 접속하므로 포트를 열 필요도, 공인 주소도 필요 없습니다.</p>
+<div class="num"><i>1</i>다운로드</div>
+<div id="ddl"><p class="note">최신 릴리스를 확인하는 중…</p></div>
+<div class="num"><i>2</i>설치하고 시작</div>
+<p class="note">그다음 패널에 연결합니다: 다음 단계.</p>`;
+main.innerHTML = `${eyebrow(5, '연결')}<h1><em>컴퓨터</em> 페어링</h1>
+<p class="lede">컴퓨터는 내 패널만 만들 수 있는 일회용 한 줄로 패널에 합류합니다.</p>
+<div class="num"><i>1</i>패널에서 한 줄 만들기</div>
+<p>패널에서 <b>에이전트</b> → <b>추가</b> → <b>컴퓨터</b>. 일회용 코드가 든 한 줄이 <b>10분</b> 동안 유효하며 복사 버튼과 함께 표시됩니다.</p>
+<div class="num"><i>2</i>컴퓨터에 붙여넣기</div>
+<p>RemoDroid 아이콘(시계 옆, 또는 Mac의 메뉴 막대) → <b>Pair with a panel…</b>을 열고 한 줄 전체를 붙여넣은 뒤 <b>Pair</b>를 클릭합니다. <b>Paired</b>가 나오면 패널에 컴퓨터가 온라인으로 표시됩니다.</p>
+<p class="note">화면이나 트레이가 없나요? 대신 터미널에서 그 한 줄을 실행하세요: <code>remodroid-desktopd pair --panel … --code …</code>, 그다음 <code>remodroid-desktopd</code>.</p>`;
+const link = () => { $('#padd').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/panel.html#agents/add" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))} → 추가 열기 ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(STEPS.length, '완료')}<h1>이제 <em>${phone ? '플레이' : '연결'}</em>하세요</h1>
+<p class="lede">iPhone의 Safari에서 패널을 열고 로그인한 뒤 <b>공유</b> → <b>홈 화면에 추가</b>로 전체 화면으로 쓰세요. ${phone ? '휴대폰' : '컴퓨터'}을 탭하면 연결됩니다.</p>
+${phone ? `<dl class="kv"><dt>터치</dt><dd>멀티터치가 그대로 휴대폰으로 갑니다. 떠 있는 공을 누르면 메뉴가 열립니다.</dd>
+<dt>화질</dt><dd>메뉴 → 설정: 해상도, 프레임레이트, 비트레이트, H.265 또는 H.264.</dd>
+<dt>사진</dt><dd>메뉴 → 사진: iPhone에서 휴대폰 갤러리로.</dd>
+<dt>클립보드</dt><dd>텍스트를 양방향으로. HTTPS에서는 한 번 탭.</dd></dl>`
+: `<dl class="kv"><dt>마우스</dt><dd>탭하면 클릭, 또는 메뉴에서 트랙패드를 켜면 노트북처럼 포인터가 움직입니다.</dd>
+<dt>키보드</dt><dd>메뉴 → 키보드. 🌐로 컴퓨터의 입력기(한국어 등)를 바꿉니다.</dd>
+<dt>파일</dt><dd>뷰어에 파일을 끌어다 놓으면 컴퓨터의 Downloads/RemoDroid에 들어갑니다.</dd>
+<dt>클립보드</dt><dd>복사한 텍스트가 양방향으로 동기화됩니다.</dd></dl>`}
+<p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">패널 열기 ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">${phone ? '컴퓨터' : '휴대폰'}도 추가</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">문서 읽기 ↗</a></p>`;

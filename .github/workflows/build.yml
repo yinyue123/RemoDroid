@@ -75,6 +75,8 @@ jobs:
           node tests/worker.mjs build/host
       - name: Install site uses the panel's stylesheet
         run: cmp web/setup.css wizard/setup.css
+      - name: Install site translations match the English page
+        run: python3 wizard/i18n/build.py --check
 
   binaries:
     name: binaries (${{ matrix.arch }})

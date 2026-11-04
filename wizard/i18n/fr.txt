@@ -1,0 +1,138 @@
+<title>Installer RemoDroid</title>
+<meta name="description" content="Contrôlez un téléphone Android ou un ordinateur Windows, Mac ou Linux depuis votre iPhone : installez un panneau (sur Cloudflare, un serveur Linux ou un serveur Windows), puis RemoDroid sur ce que vous voulez contrôler.">
+<nav class="steps" id="steps" aria-label="Étapes d’installation"></nav>
+<button class="back" id="back" type="button">← Retour</button>
+<button class="btn" id="next" type="button">Suivant →</button>
+const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="Copier" data-copy="${esc(t)}">${COPY}</button></div>`;
+const PANEL_ON = { cf: 'Cloudflare', self: 'un serveur Linux', win: 'un serveur Windows' };
+{ label: 'Début', sub: 'Choisir', page: pageStart },
+{ label: 'Panneau', sub: 'Installer', page: pageServer },
+{ label: 'Panneau', sub: 'Ouvrir', page: pagePanel },
+? [{ label: 'Routeur', sub: 'Installer', page: pageAgent }, { label: 'Connexion', sub: 'Inscrire', page: pageConnect }, { label: 'Téléphone', sub: 'USB', page: pagePhone }]
+: [{ label: 'Ordinateur', sub: 'Installer', page: pageComputer }, { label: 'Connexion', sub: 'Appairer', page: pagePair }]),
+{ label: 'Terminé', sub: 'Utiliser', page: pageDone },
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">L’adresse de votre panneau</label>
+<input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  ou  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+<div class="hint">Mémorisée ici pour les étapes suivantes.</div></div></div>`;
+$('#left').textContent = left ? `encore ${left} étape${left > 1 ? 's' : ''}` : 'tout est prêt';
+el.innerHTML = hits.length ? hits.map(x => `<a class="btn" style="margin:0 10px 10px 0" href="${esc(x.url)}"><span>Télécharger</span><small style="font:12px var(--mono);opacity:.7">${esc(x.name)} · ${MB(x.size)}</small></a>`).join('')
+: `<p class="note">Rien pour cela dans ${esc(a.tag || 'la dernière version')}. Voir <a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">tous les fichiers</a>.</p>`;
+: `<p class="note">Aucun paquet pour cette combinaison dans ${esc(a.tag || 'la dernière version')}. Voir <a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">tous les fichiers</a> (le <code>.tar.gz</code> fonctionne sur tout Linux).</p>`;
+main.innerHTML = `${eyebrow(1, 'début')}<h1>Deux <em>questions</em></h1>
+<p class="lede">RemoDroid, ce sont deux pièces : un <b>panneau</b>, la page web où vous vous connectez, et <b>RemoDroid sur ce que vous contrôlez</b>. Vous l’utilisez ensuite depuis Safari sur votre iPhone, ou n’importe quel navigateur, sans rien y installer.</p>
+<div class="num"><i>1</i>Que voulez-vous contrôler ?</div>
+<button class="choice" type="button" data-t="phone" aria-pressed="${t === 'phone'}"><small>RemoDroid pour téléphones</small><b>Un téléphone Android</b><span>Branché en USB sur votre routeur (OpenWrt, ASUS Merlin ou toute machine Linux). Rien n’est installé sur le téléphone.</span></button>
+<button class="choice" type="button" data-t="computer" aria-pressed="${t === 'computer'}"><small>RemoDroid pour ordinateurs</small><b>Un ordinateur</b><span>Windows 10 ou 11, un Mac (macOS 13+) ou un PC Linux. Une petite app sur l’ordinateur lui-même.</span></button>
+<div class="num"><i>2</i>Où doit tourner le panneau ?</div>
+<button class="choice" type="button" data-s="cf" aria-pressed="${sv === 'cf'}"><small>Sans serveur</small><b>Cloudflare</b><span>Gratuit : Cloudflare héberge la page et relaie la vidéo quand un réseau bloque la connexion directe. Quelques minutes dans le navigateur.</span></button>
+<button class="choice" type="button" data-s="self" aria-pressed="${sv === 'self'}"><small>Auto-hébergé</small><b>Un serveur Linux</b><span>Un VPS avec une IP publique, idéalement près de chez vous. Une commande ; son propre relais TURN.</span></button>
+<button class="choice" type="button" data-s="win" aria-pressed="${sv === 'win'}"><small>Auto-hébergé</small><b>Un serveur Windows</b><span>Windows Server 2019+, ou Windows 10/11 avec une IP publique. Décompressez et cliquez sur Install.</span></button>
+<p class="note">Votre plan : le panneau sur <b>${PANEL_ON[sv]}</b>, puis <b>${t === 'phone' ? 'RemoDroid pour téléphones sur votre routeur' : 'RemoDroid pour ordinateurs sur votre ordinateur'}</b>, puis ouvrez-le sur votre iPhone. Un panneau gère autant de téléphones et d’ordinateurs que vous voulez : revenez ici pour ajouter l’autre type.</p>`;
+const change = () => `<p class="note">Panneau sur <b>${PANEL_ON[S.server]}</b>. <a href="#step1" data-go="0">Changer</a></p>`;
+main.innerHTML = `${eyebrow(2, 'panneau')}<h1>Installer le <em>panneau</em></h1>
+<p class="lede">Le panneau est l’endroit où vos ${S.target === 'phone' ? 'routeurs' : 'ordinateurs'} et votre iPhone se retrouvent : une page web avec votre identifiant.</p>
+d.innerHTML = `<div class="num"><i>1</i>Téléchargez-le</div>
+<div id="wdl"><p class="note">Recherche de la dernière version…</p></div>
+<div class="num"><i>2</i>Installez et démarrez</div>
+<p>Décompressez-le dans un dossier où il peut rester, lancez <b>RemoDroidServer.exe</b> et choisissez <b>Install and start</b>. Il fait tourner le panneau comme service Windows, qui démarre avec Windows que quelqu’un soit connecté ou non, et l’autorise dans le pare-feu Windows. Son icône reste près de l’horloge.</p>
+<p class="note">Depuis une invite de commandes (en administrateur) : <code>remodroid-server install</code></p>
+<div class="chips"><small>Ouvrez dans le pare-feu de votre cloud</small><span class="chip">TCP 80 · 443 (domaine)</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>`;
+d.innerHTML = `<div class="num"><i>1</i>Une ligne — sur tout Linux</div>
+<p class="bullet">Télécharge, installe et démarre le serveur, tout en un.</p>
+<div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ téléchargement de remodroid-server_…_amd64.deb</div><div class="d">▸ démarrage du service</div><div class="k">✓ le serveur tourne. Ouvrez l’assistant :</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
+<p class="note">Gardez le lien affiché : l’étape suivante l’ouvre.</p>
+<div class="num"><i class="alt">2</i>Ou installez un paquet</div>
+<div id="sdl"><p class="note">Recherche de la dernière version…</p></div>
+<div class="num"><i class="alt">3</i>Démarrez-le</div>
+<p class="bullet">Un paquet installe seulement le serveur. Démarrez-le, et faites-le redémarrer après un reboot :</p>
+<p>Ouvrez ensuite <code>http://&lt;ip-du-serveur&gt;:5580/wizard.html</code>. Le code de configuration est dans <code>/var/lib/remodroid/setup-token</code> ; le port est <code>listen</code> dans <code>/etc/remodroid/server.ini</code>.</p>`;
+d.innerHTML = `<div class="num"><i>1</i>Créez une clé TURN</div>
+<p>Cloudflare relaie la vidéo quand un réseau bloque les connexions directes (1 000 Go par mois gratuits). Dans le <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">tableau de bord</a> : <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>. Gardez le <b>Turn Token ID</b> et l’<b>API Token</b> pour l’étape suivante.</p>
+<div class="num"><i>2</i>Déployez le Worker</div>
+<p class="bullet">Depuis un ordinateur avec Node.js — il vous demande une fois de vous connecter à Cloudflare.</p>
+<div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ remodroid envoyé (fichiers web, Durable Object "Hub")</div><div class="k">✓ Déployé : https://remodroid.&lt;vous&gt;.workers.dev</div></div>
+<p class="note">Ou sans terminal : forkez <a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a>, puis dans le tableau de bord <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → choisissez votre fork → <b>Root directory: worker</b> → Deploy. Ensuite chaque push sur votre fork met le panneau à jour tout seul. Le stockage (la base de données du Durable Object) se crée tout seul.</p>`;
+main.innerHTML = `${eyebrow(3, 'panneau')}<h1>Ouvrez votre <em>panneau</em></h1>
+<p class="lede">La fenêtre de RemoDroid Server sur la machine Windows configure le panneau ; ensuite c’est une page web où vous vous connectez de partout.</p>
+<div class="num"><i>1</i>Configurez-le dans la fenêtre</div>
+<p>Dans <b>RemoDroidServer.exe</b> : l’identifiant <b>administrateur</b>, le <b>port web</b>, un <b>domaine</b> pour le HTTPS gratuit de Let's Encrypt (facultatif) et <b>STUN/TURN</b>. La même fenêtre démarre et arrête le panneau et affiche son journal.</p>
+<div class="num"><i>2</i>Ouvrez-le</div>
+<p>De partout : <code>https://&lt;votre domaine&gt;</code>, ou <code>http://&lt;ip-du-serveur&gt;:&lt;port web&gt;</code> sans domaine.</p>
+<div class="num"><i class="alt">3</i>Où est-il maintenant ?</div>
+<p class="lede">Le serveur est le panneau : une page web sur votre serveur où vous vous connectez et ajoutez ce que vous contrôlez.</p>
+<div class="num"><i>1</i>Lancez le serveur</div>
+<p class="bullet">L’installeur en une ligne l’a déjà démarré. Vous avez installé un paquet vous-même ? Démarrez-le maintenant :</p>
+<p class="note">Alpine : <code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · vérifiez : <code>systemctl status remodroid-server</code> (Alpine : <code>rc-service remodroid-server status</code>)</p>
+<div class="num"><i>2</i>Ouvrez sa page web</div>
+<p>Ouvrez le lien affiché par l’installeur : <code>http://&lt;ip-du-serveur&gt;:5580/wizard.html?token=…</code>. Le <b>token</b> prouve que le serveur est à vous. Lien perdu ? Lisez le token sur le serveur :</p>
+<div class="chips"><small>Ouvrez d’abord</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443 (domaine)</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+<div class="num"><i>3</i>Terminez l’assistant</div>
+<p>Il demande <b>un domaine</b> (HTTPS gratuit de Let's Encrypt, renouvelé tout seul), <b>votre identifiant</b> et le <b>port STUN/TURN</b>, écrit <code>/etc/remodroid/server.ini</code> et redémarre le serveur sur votre adresse. Plus tard, la même page, derrière votre mot de passe, modifie les réglages.</p>
+<div class="num"><i class="alt">4</i>Où est-il maintenant ?</div>
+<p class="lede">Votre Worker est le panneau : une page web où vous vous connectez et ajoutez ce que vous contrôlez.</p>
+<div class="num"><i>1</i>Ouvrez votre Worker</div>
+<p>Son adresse est affichée par <code>wrangler deploy</code>, et dans le tableau de bord : <b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b>. En général <code>https://remodroid.&lt;vous&gt;.workers.dev</code>.</p>
+<div class="num"><i>2</i>Terminez l’assistant</div>
+<p>Il demande <b>votre identifiant</b> et la <b>clé TURN</b> de l’étape précédente (ou d’autres serveurs STUN/TURN). Vous voulez votre propre adresse ? Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → ajoutez un domaine personnalisé.</p>
+<div class="callout">Faites-le juste après le déploiement : d’ici là, le premier visiteur choisit l’identifiant. Par précaution, donnez d’abord au Worker un secret <code>SETUP_TOKEN</code> (Settings → Variables and Secrets → Add, type <b>Secret</b> ; une variable ordinaire est perdue au déploiement suivant) ; la page de configuration le demandera.</div>
+<div class="num"><i class="alt">3</i>Où est-il ?</div>
+const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Ouvrir ${esc(S.panel.replace(/^https?:\/\//, ''))} ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(4, 'routeur')}<h1>RemoDroid pour <em>téléphones</em></h1>
+<p class="lede">Il tourne sur le routeur où le téléphone est branché (ou toute machine Linux avec un port USB) et se connecte de lui-même à votre panneau. Aucun port ouvert, aucune adresse publique ; rien ne va sur le téléphone lui-même.</p>
+<div class="num"><i>1</i>Une commande</div>
+<p class="bullet">Télécharge, installe et démarre, tout en un. À lancer sur le routeur (SSH).</p>
+<div class="term"><div><span class="p">$</span> ${esc(o.agent)}</div><div class="d">▸ téléchargement de remodroid-agent_…_${S.os === 'openwrt' ? 'mipsel_24kc.ipk' : 'amd64.deb'}</div><div class="d">▸ démarrage du service</div><div class="k">✓ il tourne</div></div>
+<div class="num"><i class="alt">2</i>Ou téléchargez le paquet</div>
+<div id="adl"><p class="note">Recherche de la dernière version…</p></div>
+<p class="bullet">Un paquet l’installe seulement. Démarrez-le, et faites-le redémarrer après un reboot :</p>
+<p class="note">Connectez-le ensuite à votre panneau : l’étape suivante.</p>
+<div class="chips"><small>Il faut</small><span class="chip">un port USB</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle (installé avec)' : 'ca-certificates'}</span><span class="chip">la bonne heure (HTTPS)</span></div>
+<p class="note">ASUS Merlin avec Koolshare : prenez le <code>remodroid-…-merlin-….tar.gz</code> dans <a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">la dernière version</a> et installez-le dans Software Center → Manual installation.</p>`;
+main.innerHTML = `${eyebrow(5, 'connexion')}<h1>Inscrivez <em>le routeur</em></h1>
+<p class="lede">Le routeur rejoint votre panneau avec un code à usage unique que seul votre panneau peut créer.</p>
+<div class="num"><i>1</i>Ouvrez l’onglet Agents de votre panneau</div>
+<div class="num"><i>2</i>Ajoutez un agent</div>
+<p>Ce lien ouvre <b>Ajouter un agent → Connexion</b> (ou cliquez vous-même). Votre panneau affiche un code comme <code>X5SX-K3M7</code> : à usage unique, valable <b>10 minutes</b>. La page y donne la commande complète avec un bouton de copie ; ou tapez le code ici.</p>
+<div class="form"><div class="field"><label for="code">Code de votre panneau</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+<div class="num"><i>3</i>Lancez-la sur le routeur</div>
+<p class="note">Quand il affiche <b>bound</b>, la page de votre panneau passe aussi au vert. Dès lors, les réglages vidéo, téléphone et presse-papiers du routeur se trouvent dans l’onglet Agents du panneau — pas de fichier ini à modifier.</p>`;
+$('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">Ouvrir ${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html ↗</a>`
+: 'Saisissez ci-dessus l’adresse de votre panneau, ou ouvrez-le vous-même et allez dans <b>Agents → Ajouter</b>.';
+$('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? 'Tapez ci-dessus le code de votre panneau.' : 'Saisissez l’adresse de votre panneau et le code.'}</p>`;
+$('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ contact du panneau ${esc(p)}…</div><div class="d">▸ inscrit comme "OpenWrt" (openwrt) ; enregistré dans /etc/remodroid/agent.ini</div><div class="k">✓ bound — ce routeur est en ligne</div>`;
+main.innerHTML = `${eyebrow(6, 'téléphone')}<h1>Branchez <em>le téléphone</em></h1>
+<p class="lede">Une fois par téléphone. Android 8 ou plus récent ; un encodeur H.265 matériel aide mais n’est pas indispensable.</p>
+<div class="num"><i>1</i>Activez le débogage USB</div>
+<p>Paramètres → À propos du téléphone → touchez <b>Numéro de build</b> sept fois. Puis Paramètres → Système → <b>Options pour les développeurs</b> → <b>Débogage USB</b>.</p>
+<div class="num"><i>2</i>Branchez-le sur le port USB du routeur</div>
+<p>Un câble de données, pas un câble de charge seule. RemoDroid sur le routeur trouve le téléphone de lui-même et y lance un petit assistant (rien du Play Store).</p>
+<div class="num"><i>3</i>Autorisez le routeur</div>
+<p>Le téléphone demande <b>« Autoriser le débogage USB ? »</b>. Cochez <b>Toujours autoriser cet ordinateur</b>, puis <b>Autoriser</b>. ${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">L’onglet Agents du panneau</a>` : 'L’onglet Agents du panneau'} affiche le téléphone comme prêt.</p>`;
+steps: 'Décompressez-le n’importe où (gardez les fichiers ensemble) et lancez <b>RemoDroid.exe</b>. Son icône apparaît près de l’horloge. Windows 10 1809 ou plus récent. Pour contrôler aussi les programmes qui tournent en administrateur, choisissez une fois <b>Control administrator windows…</b> dans son menu.' },
+steps: 'Décompressez-le, déplacez <b>RemoDroid.app</b> dans Applications et ouvrez-le (la première fois : clic droit → <b>Ouvrir</b>). Il vit dans la barre des menus. Autorisez <b>Enregistrement de l’écran</b> et <b>Accessibilité</b> quand il le demande, puis <b>Quitter et rouvrir</b>. macOS 13 ou plus récent, Apple silicon ou Intel.' },
+steps: 'Installez le <code>.deb</code> ou le <code>.rpm</code> et lancez <b>RemoDroid</b> depuis le menu des applications ; sur d’autres distributions, rendez le <code>.AppImage</code> exécutable et lancez-le. Il faut une session X11 (sous GNOME : « GNOME on Xorg » à la connexion).' },
+main.innerHTML = `${eyebrow(4, 'ordinateur')}<h1>RemoDroid pour <em>ordinateurs</em></h1>
+<p class="lede">Une petite app sur l’ordinateur que vous voulez contrôler. Elle se connecte d’elle-même à votre panneau : aucun port ouvert, aucune adresse publique.</p>
+<div class="num"><i>1</i>Téléchargez-la</div>
+<div id="ddl"><p class="note">Recherche de la dernière version…</p></div>
+<div class="num"><i>2</i>Installez-la et démarrez-la</div>
+<p class="note">Connectez-la ensuite à votre panneau : l’étape suivante.</p>`;
+main.innerHTML = `${eyebrow(5, 'connexion')}<h1>Appairez <em>l’ordinateur</em></h1>
+<p class="lede">L’ordinateur rejoint votre panneau avec une ligne à usage unique que seul votre panneau peut créer.</p>
+<div class="num"><i>1</i>Créez la ligne sur votre panneau</div>
+<p>Dans le panneau : <b>Agents</b> → <b>Ajouter</b> → <b>Ordinateur</b>. Il affiche une ligne avec un code à usage unique, valable <b>10 minutes</b>, et un bouton de copie.</p>
+<div class="num"><i>2</i>Collez-la sur l’ordinateur</div>
+<p>Cliquez sur l’icône RemoDroid (près de l’horloge, ou dans la barre des menus du Mac) → <b>Pair with a panel…</b>, collez toute la ligne et cliquez sur <b>Pair</b>. Quand il affiche <b>Paired</b>, le panneau montre l’ordinateur en ligne.</p>
+<p class="note">Pas d’écran ou pas de zone de notification ? Lancez plutôt la ligne dans un terminal : <code>remodroid-desktopd pair --panel … --code …</code>, puis <code>remodroid-desktopd</code>.</p>`;
+const link = () => { $('#padd').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/panel.html#agents/add" target="_blank" rel="noopener">Ouvrir ${esc(S.panel.replace(/^https?:\/\//, ''))} → Ajouter ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(STEPS.length, 'terminé')}<h1>À vous de <em>${phone ? 'jouer' : 'vous connecter'}</em></h1>
+<p class="lede">Ouvrez votre panneau dans Safari sur l’iPhone, connectez-vous, puis <b>Partager</b> → <b>Sur l’écran d’accueil</b> pour le plein écran. Touchez votre ${phone ? 'téléphone' : 'ordinateur'} pour vous connecter.</p>
+${phone ? `<dl class="kv"><dt>Tactile</dt><dd>Le multitouch va directement au téléphone ; la boule flottante ouvre le menu.</dd>
+<dt>Qualité</dt><dd>Menu → Réglages : résolution, fréquence d’images, débit, H.265 ou H.264.</dd>
+<dt>Photos</dt><dd>Menu → Photo : de l’iPhone vers la Galerie du téléphone.</dd>
+<dt>Presse-papiers</dt><dd>Texte dans les deux sens ; une touche en HTTPS.</dd></dl>`
+: `<dl class="kv"><dt>Souris</dt><dd>Touchez pour cliquer, ou activez le trackpad dans le menu : le pointeur bouge comme sur un portable.</dd>
+<dt>Clavier</dt><dd>Menu → Clavier ; 🌐 change la méthode de saisie de l’ordinateur (chinois et autres).</dd>
+<dt>Fichiers</dt><dd>Déposez des fichiers sur la visionneuse et ils arrivent dans Downloads/RemoDroid sur l’ordinateur.</dd>
+<dt>Presse-papiers</dt><dd>Le texte copié se synchronise dans les deux sens.</dd></dl>`}
+<p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">Ouvrir votre panneau ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">Ajouter aussi ${phone ? 'un ordinateur' : 'un téléphone'}</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">Lire la documentation ↗</a></p>`;

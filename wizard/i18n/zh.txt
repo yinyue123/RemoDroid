@@ -1,0 +1,138 @@
+<title>安装 RemoDroid</title>
+<meta name="description" content="在 iPhone 上控制安卓手机，或 Windows、Mac、Linux 电脑：先准备一个面板（放在 Cloudflare、Linux 服务器或 Windows 服务器上），再在要控制的设备上装 RemoDroid。">
+<nav class="steps" id="steps" aria-label="安装步骤"></nav>
+<button class="back" id="back" type="button">← 上一步</button>
+<button class="btn" id="next" type="button">下一步 →</button>
+const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="复制" data-copy="${esc(t)}">${COPY}</button></div>`;
+const PANEL_ON = { cf: 'Cloudflare', self: 'Linux 服务器', win: 'Windows 服务器' };
+{ label: '开始', sub: '选择', page: pageStart },
+{ label: '面板', sub: '安装', page: pageServer },
+{ label: '面板', sub: '打开', page: pagePanel },
+? [{ label: '路由器', sub: '安装', page: pageAgent }, { label: '连接', sub: '绑定', page: pageConnect }, { label: '手机', sub: 'USB', page: pagePhone }]
+: [{ label: '电脑', sub: '安装', page: pageComputer }, { label: '连接', sub: '配对', page: pagePair }]),
+{ label: '完成', sub: '开始用', page: pageDone },
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">你的面板地址</label>
+<input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  或  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+<div class="hint">会记在这里，后面的步骤直接使用。</div></div></div>`;
+$('#left').textContent = left ? `还剩 ${left} 步${left > 1 ? '' : ''}` : '全部完成';
+el.innerHTML = hits.length ? hits.map(x => `<a class="btn" style="margin:0 10px 10px 0" href="${esc(x.url)}"><span>下载</span><small style="font:12px var(--mono);opacity:.7">${esc(x.name)} · ${MB(x.size)}</small></a>`).join('')
+: `<p class="note">${esc(a.tag || '最新版本')} 里没有这一项。请看<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">全部文件</a>。</p>`;
+: `<p class="note">${esc(a.tag || '最新版本')} 里没有这个组合的安装包。请看<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">全部文件</a>（<code>.tar.gz</code> 可在任何 Linux 上运行）。</p>`;
+main.innerHTML = `${eyebrow(1, '开始')}<h1>两个<em>问题</em></h1>
+<p class="lede">RemoDroid 由两部分组成：一个<b>面板</b>（你登录的网页），以及<b>装在被控设备上的 RemoDroid</b>。之后在 iPhone 的 Safari 或任何浏览器里使用，那一端什么都不用装。</p>
+<div class="num"><i>1</i>你想控制什么？</div>
+<button class="choice" type="button" data-t="phone" aria-pressed="${t === 'phone'}"><small>RemoDroid 手机版</small><b>一台安卓手机</b><span>用 USB 插在你的路由器上（OpenWrt、华硕梅林或任何 Linux 设备）。手机上什么都不用装。</span></button>
+<button class="choice" type="button" data-t="computer" aria-pressed="${t === 'computer'}"><small>RemoDroid 电脑版</small><b>一台电脑</b><span>Windows 10 或 11、Mac（macOS 13 以上）或 Linux 电脑。在电脑上装一个小应用。</span></button>
+<div class="num"><i>2</i>面板放在哪里？</div>
+<button class="choice" type="button" data-s="cf" aria-pressed="${sv === 'cf'}"><small>不需要服务器</small><b>Cloudflare</b><span>免费：Cloudflare 托管网页，网络挡住直连时替你中转画面。在浏览器里几分钟搞定。</span></button>
+<button class="choice" type="button" data-s="self" aria-pressed="${sv === 'self'}"><small>自建</small><b>Linux 服务器</b><span>一台有公网 IP 的 VPS，最好离家近。一条命令安装，自带 TURN 中转。</span></button>
+<button class="choice" type="button" data-s="win" aria-pressed="${sv === 'win'}"><small>自建</small><b>Windows 服务器</b><span>Windows Server 2019 以上，或有公网 IP 的 Windows 10/11。解压后点“安装”。</span></button>
+<p class="note">你的方案：面板放在 <b>${PANEL_ON[sv]}</b>，然后<b>${t === 'phone' ? '在路由器上装 RemoDroid 手机版' : '在电脑上装 RemoDroid 电脑版'}</b>，最后在 iPhone 上打开。一个面板可以管任意多台手机和电脑：之后回到这里添加另一种。</p>`;
+const change = () => `<p class="note">面板放在 <b>${PANEL_ON[S.server]}</b>。<a href="#step1" data-go="0">更改</a></p>`;
+main.innerHTML = `${eyebrow(2, '面板')}<h1>安装<em>面板</em></h1>
+<p class="lede">面板是你的${S.target === 'phone' ? '路由器' : '电脑'}和 iPhone 会合的地方：一个需要登录的网页。</p>
+d.innerHTML = `<div class="num"><i>1</i>下载</div>
+<div id="wdl"><p class="note">正在查询最新版本…</p></div>
+<div class="num"><i>2</i>安装并启动</div>
+<p>解压到一个会一直保留的文件夹，运行 <b>RemoDroidServer.exe</b>，选择 <b>Install and start</b>。它把面板装成 Windows 服务，随 Windows 启动（不论有没有人登录），并在 Windows 防火墙里放行。它的图标留在时钟旁边。</p>
+<p class="note">也可以在命令提示符里（以管理员身份）运行：<code>remodroid-server install</code></p>
+<div class="chips"><small>在云服务商的防火墙里放行</small><span class="chip">TCP 80 · 443（域名）</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>`;
+d.innerHTML = `<div class="num"><i>1</i>一条命令，任何 Linux 都行</div>
+<p class="bullet">下载、安装、启动，一步完成。</p>
+<div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ 正在下载 remodroid-server_…_amd64.deb</div><div class="d">▸ 正在启动服务</div><div class="k">✓ 服务已运行。打开设置向导：</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
+<p class="note">记下它输出的链接：下一步要打开它。</p>
+<div class="num"><i class="alt">2</i>或者装安装包</div>
+<div id="sdl"><p class="note">正在查询最新版本…</p></div>
+<div class="num"><i class="alt">3</i>启动</div>
+<p class="bullet">安装包只负责安装。启动它，并设为开机自启：</p>
+<p>然后打开 <code>http://&lt;服务器IP&gt;:5580/wizard.html</code>。设置码在 <code>/var/lib/remodroid/setup-token</code>；端口是 <code>/etc/remodroid/server.ini</code> 里的 <code>listen</code>。</p>`;
+d.innerHTML = `<div class="num"><i>1</i>创建 TURN 密钥</div>
+<p>网络挡住直连时，Cloudflare 替你中转画面（每月 1,000 GB 免费）。在<a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">控制台</a>里：<b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>。记下 <b>Turn Token ID</b> 和 <b>API Token</b>，下一步要用。</p>
+<div class="num"><i>2</i>部署 Worker</div>
+<p class="bullet">在装有 Node.js 的电脑上运行，第一次会让你登录 Cloudflare。</p>
+<div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ 已上传 remodroid（网页文件、Durable Object "Hub"）</div><div class="k">✓ 已部署：https://remodroid.&lt;你&gt;.workers.dev</div></div>
+<p class="note">不用终端也行：fork <a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a>，然后在控制台 <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → 选你的 fork → <b>Root directory: worker</b> → Deploy。之后每次推送到你的 fork，面板都会自动更新。存储（Durable Object 的数据库）会自动创建。</p>`;
+main.innerHTML = `${eyebrow(3, '面板')}<h1>打开你的<em>面板</em></h1>
+<p class="lede">在 Windows 机器上的 RemoDroid Server 窗口里设置好面板，之后它就是一个能在任何地方登录的网页。</p>
+<div class="num"><i>1</i>在窗口里设置</div>
+<p>在 <b>RemoDroidServer.exe</b> 里设置：<b>管理员</b>账号、<b>网页端口</b>、用于 Let's Encrypt 免费 HTTPS 的<b>域名</b>（可选）和 <b>STUN/TURN</b>。同一个窗口还能启动、停止面板并查看日志。</p>
+<div class="num"><i>2</i>打开它</div>
+<p>在任何地方打开：<code>https://&lt;你的域名&gt;</code>，没有域名时用 <code>http://&lt;服务器IP&gt;:&lt;网页端口&gt;</code>。</p>
+<div class="num"><i class="alt">3</i>它现在在哪？</div>
+<p class="lede">服务器就是面板：服务器上的一个网页，你在这里登录并添加要控制的设备。</p>
+<div class="num"><i>1</i>运行服务器</div>
+<p class="bullet">一键安装脚本已经启动了它。自己装的安装包？现在启动：</p>
+<p class="note">Alpine：<code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · 查看状态：<code>systemctl status remodroid-server</code>（Alpine：<code>rc-service remodroid-server status</code>）</p>
+<div class="num"><i>2</i>打开它的网页</div>
+<p>打开安装脚本输出的链接：<code>http://&lt;服务器IP&gt;:5580/wizard.html?token=…</code>。<b>token</b> 证明服务器是你的。链接丢了？在服务器上读出 token：</p>
+<div class="chips"><small>先放行</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443（域名）</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+<div class="num"><i>3</i>完成设置向导</div>
+<p>它会问<b>域名</b>（Let's Encrypt 免费 HTTPS，自动续期）、<b>你的账号</b>和 <b>STUN/TURN 端口</b>，写入 <code>/etc/remodroid/server.ini</code>，并在你的地址上重启服务器。之后同一个页面（需要密码）可以修改设置。</p>
+<div class="num"><i class="alt">4</i>它现在在哪？</div>
+<p class="lede">你的 Worker 就是面板：一个网页，你在这里登录并添加要控制的设备。</p>
+<div class="num"><i>1</i>打开你的 Worker</div>
+<p>地址由 <code>wrangler deploy</code> 输出，也可以在控制台查看：<b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b>。通常是 <code>https://remodroid.&lt;你&gt;.workers.dev</code>。</p>
+<div class="num"><i>2</i>完成设置向导</div>
+<p>它会问<b>你的账号</b>和上一步的 <b>TURN 密钥</b>（或其他 STUN/TURN 服务器）。想用自己的域名？Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → 添加自定义域名。</p>
+<div class="callout">部署后马上完成这一步：在那之前，第一个访问的人可以设定登录账号。保险起见，先给 Worker 加一个 secret <code>SETUP_TOKEN</code>（Settings → Variables and Secrets → Add，类型选 <b>Secret</b>；普通变量会在下次部署时丢失），设置页面就会要求输入它。</div>
+<div class="num"><i class="alt">3</i>它在哪？</div>
+const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">打开 ${esc(S.panel.replace(/^https?:\/\//, ''))} ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(4, '路由器')}<h1>RemoDroid <em>手机版</em></h1>
+<p class="lede">它运行在插着手机的路由器上（或任何带 USB 口的 Linux 设备），主动连到你的面板。不用开端口，不用公网地址；手机上什么都不装。</p>
+<div class="num"><i>1</i>一条命令</div>
+<p class="bullet">下载、安装、启动，一步完成。在路由器上运行（SSH）。</p>
+<div class="term"><div><span class="p">$</span> ${esc(o.agent)}</div><div class="d">▸ 正在下载 remodroid-agent_…_${S.os === 'openwrt' ? 'mipsel_24kc.ipk' : 'amd64.deb'}</div><div class="d">▸ 正在启动服务</div><div class="k">✓ 已在运行</div></div>
+<div class="num"><i class="alt">2</i>或者下载安装包</div>
+<div id="adl"><p class="note">正在查询最新版本…</p></div>
+<p class="bullet">安装包只负责安装。启动它，并设为开机自启：</p>
+<p class="note">然后把它连到你的面板：下一步。</p>
+<div class="chips"><small>需要</small><span class="chip">一个 USB 口</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle（会一起装上）' : 'ca-certificates'}</span><span class="chip">正确的时间（HTTPS）</span></div>
+<p class="note">装了 Koolshare 的华硕梅林：从<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">最新版本</a>下载 <code>remodroid-…-merlin-….tar.gz</code>，在软件中心 → 离线安装里安装。</p>`;
+main.innerHTML = `${eyebrow(5, '连接')}<h1>绑定<em>路由器</em></h1>
+<p class="lede">路由器用一个一次性代码加入你的面板，这个代码只有你的面板能生成。</p>
+<div class="num"><i>1</i>打开面板的“代理”页</div>
+<div class="num"><i>2</i>添加代理</div>
+<p>这个链接会打开<b>添加代理 → 连接</b>（也可以自己点进去）。面板会显示一个代码，例如 <code>X5SX-K3M7</code>：只能用一次，<b>10 分钟</b>内有效。那个页面有带复制按钮的完整命令；也可以在这里输入代码。</p>
+<div class="form"><div class="field"><label for="code">面板上的代码</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+<div class="num"><i>3</i>在路由器上运行</div>
+<p class="note">显示 <b>bound</b> 后，面板页面也会变绿。之后路由器的画面、手机和剪贴板设置都在面板的“代理”页里修改，不用编辑 ini 文件。</p>`;
+$('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">打开 ${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html ↗</a>`
+: '在上面填入面板地址，或者自己打开面板，进入<b>代理 → 添加</b>。';
+$('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? '在上面输入面板上的代码。' : '填入面板地址和代码。'}</p>`;
+$('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ 正在联系面板 ${esc(p)}…</div><div class="d">▸ 已绑定为 "OpenWrt"（openwrt）；保存在 /etc/remodroid/agent.ini</div><div class="k">✓ bound — 这台路由器已在线</div>`;
+main.innerHTML = `${eyebrow(6, '手机')}<h1>插上<em>手机</em></h1>
+<p class="lede">每台手机做一次。需要 Android 8 或更新；有硬件 H.265 编码器更好，但不是必须。</p>
+<div class="num"><i>1</i>打开 USB 调试</div>
+<p>设置 → 关于手机 → 连点 <b>版本号</b> 七次。然后 设置 → 系统 → <b>开发者选项</b> → <b>USB 调试</b>。</p>
+<div class="num"><i>2</i>插到路由器的 USB 口</div>
+<p>用数据线，不要用只能充电的线。路由器上的 RemoDroid 会自己找到手机，并在手机上启动一个小助手（不用从应用商店装任何东西）。</p>
+<div class="num"><i>3</i>允许这台路由器</div>
+<p>手机会弹出<b>“允许 USB 调试吗？”</b>。勾选<b>始终允许使用这台计算机进行调试</b>，再点<b>允许</b>。${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">面板的“代理”页</a>` : '面板的“代理”页'}会显示手机已就绪。</p>`;
+steps: '解压到任意位置（文件放在一起），运行 <b>RemoDroid.exe</b>。它的图标出现在时钟旁边。需要 Windows 10 1809 或更新。如果还想控制以管理员身份运行的程序，在它的菜单里选一次 <b>Control administrator windows…</b>。' },
+steps: '解压，把 <b>RemoDroid.app</b> 移到“应用程序”并打开（第一次：右键 → <b>打开</b>）。它在菜单栏里。按提示允许<b>屏幕录制</b>和<b>辅助功能</b>，然后点<b>退出并重新打开</b>。需要 macOS 13 或更新，Apple 芯片和 Intel 都可以。' },
+steps: '安装 <code>.deb</code> 或 <code>.rpm</code>，然后从应用菜单启动 <b>RemoDroid</b>；其他发行版把 <code>.AppImage</code> 设为可执行后运行。需要 X11 会话（GNOME 上：登录时选“GNOME on Xorg”）。' },
+main.innerHTML = `${eyebrow(4, '电脑')}<h1>RemoDroid <em>电脑版</em></h1>
+<p class="lede">装在你要控制的电脑上的小应用。它主动连到你的面板：不用开端口，不用公网地址。</p>
+<div class="num"><i>1</i>下载</div>
+<div id="ddl"><p class="note">正在查询最新版本…</p></div>
+<div class="num"><i>2</i>安装并启动</div>
+<p class="note">然后把它连到你的面板：下一步。</p>`;
+main.innerHTML = `${eyebrow(5, '连接')}<h1>配对<em>电脑</em></h1>
+<p class="lede">电脑用一行一次性命令加入你的面板，这行命令只有你的面板能生成。</p>
+<div class="num"><i>1</i>在面板上生成这一行</div>
+<p>在面板里：<b>代理</b> → <b>添加</b> → <b>电脑</b>。它会显示一行带一次性代码的命令，<b>10 分钟</b>内有效，旁边有复制按钮。</p>
+<div class="num"><i>2</i>粘贴到电脑上</div>
+<p>点 RemoDroid 图标（时钟旁边，或 Mac 的菜单栏里）→ <b>Pair with a panel…</b>，粘贴整行，点 <b>Pair</b>。显示 <b>Paired</b> 后，面板上会显示这台电脑在线。</p>
+<p class="note">没有屏幕或托盘？改在终端里运行这一行：<code>remodroid-desktopd pair --panel … --code …</code>，然后运行 <code>remodroid-desktopd</code>。</p>`;
+const link = () => { $('#padd').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/panel.html#agents/add" target="_blank" rel="noopener">打开 ${esc(S.panel.replace(/^https?:\/\//, ''))} → 添加 ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(STEPS.length, '完成')}<h1>可以<em>${phone ? '开玩' : '连接'}</em>了</h1>
+<p class="lede">在 iPhone 的 Safari 里打开你的面板并登录，然后点<b>分享</b> → <b>添加到主屏幕</b>即可全屏使用。点你的${phone ? '手机' : '电脑'}开始连接。</p>
+${phone ? `<dl class="kv"><dt>触摸</dt><dd>多点触控直接传到手机；悬浮球打开菜单。</dd>
+<dt>画质</dt><dd>菜单 → 设置：分辨率、帧率、码率、H.265 或 H.264。</dd>
+<dt>照片</dt><dd>菜单 → 照片：从 iPhone 传到手机相册。</dd>
+<dt>剪贴板</dt><dd>文字双向同步；HTTPS 下一键完成。</dd></dl>`
+: `<dl class="kv"><dt>鼠标</dt><dd>点一下就是点击，或在菜单里打开触控板：指针像笔记本一样移动。</dd>
+<dt>键盘</dt><dd>菜单 → 键盘；🌐 切换电脑的输入法（中文等）。</dd>
+<dt>文件</dt><dd>把文件拖到查看器上，就会放到电脑的 Downloads/RemoDroid 里。</dd>
+<dt>剪贴板</dt><dd>复制的文字双向同步。</dd></dl>`}
+<p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">打开你的面板 ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">再添加${phone ? '一台电脑' : '一台手机'}</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">阅读文档 ↗</a></p>`;

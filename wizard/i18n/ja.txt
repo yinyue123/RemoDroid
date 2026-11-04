@@ -1,0 +1,138 @@
+<title>RemoDroid をインストール</title>
+<meta name="description" content="iPhone から Android スマホや Windows・Mac・Linux のパソコンを操作：パネル（Cloudflare、Linux サーバー、Windows サーバーのどれか）を用意し、操作したい機器に RemoDroid を入れます。">
+<nav class="steps" id="steps" aria-label="インストールの手順"></nav>
+<button class="back" id="back" type="button">← 戻る</button>
+<button class="btn" id="next" type="button">次へ →</button>
+const cmd = t => `<div class="cmd"><code>${hl(t)}</code><button type="button" aria-label="コピー" data-copy="${esc(t)}">${COPY}</button></div>`;
+const PANEL_ON = { cf: 'Cloudflare', self: 'Linux サーバー', win: 'Windows サーバー' };
+{ label: 'はじめに', sub: '選ぶ', page: pageStart },
+{ label: 'パネル', sub: 'インストール', page: pageServer },
+{ label: 'パネル', sub: '開く', page: pagePanel },
+? [{ label: 'ルーター', sub: 'インストール', page: pageAgent }, { label: '接続', sub: '登録', page: pageConnect }, { label: 'スマホ', sub: 'USB', page: pagePhone }]
+: [{ label: 'パソコン', sub: 'インストール', page: pageComputer }, { label: '接続', sub: 'ペアリング', page: pagePair }]),
+{ label: '完了', sub: '使う', page: pageDone },
+const panelField = id => `<div class="form" style="margin-top:6px"><div class="field"><label for="${id}">パネルのアドレス</label>
+<input id="${id}" type="text" inputmode="url" spellcheck="false" autocomplete="url" placeholder="https://remodroid.example.com  または  http://203.0.113.10:5580" value="${esc(S.panel || '')}">
+<div class="hint">ここに記憶され、次の手順で使います。</div></div></div>`;
+$('#left').textContent = left ? `残り ${left} ステップ${left > 1 ? '' : ''}` : '完了';
+el.innerHTML = hits.length ? hits.map(x => `<a class="btn" style="margin:0 10px 10px 0" href="${esc(x.url)}"><span>ダウンロード</span><small style="font:12px var(--mono);opacity:.7">${esc(x.name)} · ${MB(x.size)}</small></a>`).join('')
+: `<p class="note">${esc(a.tag || '最新リリース')} にはありません。<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">すべてのファイル</a>を見てください。</p>`;
+: `<p class="note">${esc(a.tag || '最新リリース')} にはこの組み合わせのパッケージがありません。<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">すべてのファイル</a>を見てください（<code>.tar.gz</code> はどの Linux でも動きます）。</p>`;
+main.innerHTML = `${eyebrow(1, 'はじめに')}<h1>2 つの<em>質問</em></h1>
+<p class="lede">RemoDroid は 2 つでできています。ログインする Web ページである<b>パネル</b>と、<b>操作したい機器に入れる RemoDroid</b> です。あとは iPhone の Safari やほかのブラウザーから使うだけで、そちらには何も入れません。</p>
+<div class="num"><i>1</i>何を操作しますか？</div>
+<button class="choice" type="button" data-t="phone" aria-pressed="${t === 'phone'}"><small>RemoDroid（スマホ用）</small><b>Android スマホ</b><span>ルーター（OpenWrt、ASUS Merlin、または任意の Linux 機）に USB でつなぎます。スマホには何も入れません。</span></button>
+<button class="choice" type="button" data-t="computer" aria-pressed="${t === 'computer'}"><small>RemoDroid（パソコン用）</small><b>パソコン</b><span>Windows 10 / 11、Mac（macOS 13 以降）、Linux パソコン。パソコンに小さなアプリを入れます。</span></button>
+<div class="num"><i>2</i>パネルをどこで動かしますか？</div>
+<button class="choice" type="button" data-s="cf" aria-pressed="${sv === 'cf'}"><small>サーバー不要</small><b>Cloudflare</b><span>無料：Cloudflare がページを置き、直接つながらないネットワークでは映像を中継します。ブラウザーで数分。</span></button>
+<button class="choice" type="button" data-s="self" aria-pressed="${sv === 'self'}"><small>セルフホスト</small><b>Linux サーバー</b><span>グローバル IP のある VPS（自宅の近くが理想）。コマンド 1 つで、TURN 中継も内蔵。</span></button>
+<button class="choice" type="button" data-s="win" aria-pressed="${sv === 'win'}"><small>セルフホスト</small><b>Windows サーバー</b><span>Windows Server 2019 以降、またはグローバル IP のある Windows 10/11。展開して「Install」をクリック。</span></button>
+<p class="note">あなたのプラン：パネルは <b>${PANEL_ON[sv]}</b>、次に<b>${t === 'phone' ? 'ルーターに RemoDroid（スマホ用）' : 'パソコンに RemoDroid（パソコン用）'}</b>、最後に iPhone で開きます。1 つのパネルでスマホもパソコンもいくつでも扱えます。もう一方はあとでここから追加できます。</p>`;
+const change = () => `<p class="note">パネルは <b>${PANEL_ON[S.server]}</b>。<a href="#step1" data-go="0">変更</a></p>`;
+main.innerHTML = `${eyebrow(2, 'パネル')}<h1><em>パネル</em>をインストール</h1>
+<p class="lede">パネルは${S.target === 'phone' ? 'ルーター' : 'パソコン'}と iPhone が出会う場所、ログイン付きの Web ページです。</p>
+d.innerHTML = `<div class="num"><i>1</i>ダウンロード</div>
+<div id="wdl"><p class="note">最新リリースを確認しています…</p></div>
+<div class="num"><i>2</i>インストールして起動</div>
+<p>置いたままにできるフォルダーに展開し、<b>RemoDroidServer.exe</b> を実行して <b>Install and start</b> を選びます。パネルは Windows サービスとして動き、サインインの有無に関係なく Windows と一緒に起動し、Windows ファイアウォールも通します。アイコンは時計の横に残ります。</p>
+<p class="note">コマンドプロンプトなら（管理者として）：<code>remodroid-server install</code></p>
+<div class="chips"><small>クラウドのファイアウォールで開ける</small><span class="chip">TCP 80 · 443（ドメイン）</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>`;
+d.innerHTML = `<div class="num"><i>1</i>1 行で — どの Linux でも</div>
+<p class="bullet">ダウンロード、インストール、起動までまとめて行います。</p>
+<div class="term"><div><span class="p">$</span> ${esc(one)}</div><div class="d">▸ remodroid-server_…_amd64.deb をダウンロード中</div><div class="d">▸ サービスを起動中</div><div class="k">✓ サーバーが動いています。セットアップウィザードを開いてください：</div><div>    http://203.0.113.10:5580/wizard.html?token=d93kss5mrwsc</div></div>
+<p class="note">表示されたリンクを控えておいてください。次の手順で開きます。</p>
+<div class="num"><i class="alt">2</i>またはパッケージで</div>
+<div id="sdl"><p class="note">最新リリースを確認しています…</p></div>
+<div class="num"><i class="alt">3</i>起動する</div>
+<p class="bullet">パッケージはインストールするだけです。起動し、再起動後も自動で起動するようにします：</p>
+<p>次に <code>http://&lt;サーバーIP&gt;:5580/wizard.html</code> を開きます。セットアップコードは <code>/var/lib/remodroid/setup-token</code>、ポートは <code>/etc/remodroid/server.ini</code> の <code>listen</code> です。</p>`;
+d.innerHTML = `<div class="num"><i>1</i>TURN キーを作る</div>
+<p>直接つながらないネットワークでは Cloudflare が映像を中継します（月 1,000 GB まで無料）。<a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">ダッシュボード</a>で <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>。<b>Turn Token ID</b> と <b>API Token</b> を次の手順のために控えます。</p>
+<div class="num"><i>2</i>Worker をデプロイ</div>
+<p class="bullet">Node.js のあるパソコンで。最初に一度だけ Cloudflare へのログインを求められます。</p>
+<div class="term"><div><span class="p">$</span> npx wrangler deploy</div><div class="d">▸ remodroid をアップロード（Web ファイル、Durable Object "Hub"）</div><div class="k">✓ デプロイ完了：https://remodroid.&lt;あなた&gt;.workers.dev</div></div>
+<p class="note">ターミナルなしでも：<a href="https://github.com/${REPO}" target="_blank" rel="noopener">${REPO}</a> を fork し、ダッシュボードで <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Import a repository</b> → fork を選ぶ → <b>Root directory: worker</b> → Deploy。以後 fork に push するたびにパネルが自動で更新されます。ストレージ（Durable Object のデータベース）は自動で作られます。</p>`;
+main.innerHTML = `${eyebrow(3, 'パネル')}<h1><em>パネル</em>を開く</h1>
+<p class="lede">Windows マシンの RemoDroid Server ウィンドウでパネルを設定します。その後はどこからでもログインできる Web ページです。</p>
+<div class="num"><i>1</i>ウィンドウで設定</div>
+<p><b>RemoDroidServer.exe</b> で、<b>管理者</b>のログイン、<b>Web ポート</b>、Let's Encrypt の無料 HTTPS 用の<b>ドメイン</b>（任意）、<b>STUN/TURN</b> を設定します。同じウィンドウでパネルの起動・停止とログ表示もできます。</p>
+<div class="num"><i>2</i>開く</div>
+<p>どこからでも：<code>https://&lt;あなたのドメイン&gt;</code>、ドメインがなければ <code>http://&lt;サーバーIP&gt;:&lt;Web ポート&gt;</code>。</p>
+<div class="num"><i class="alt">3</i>今どこにありますか？</div>
+<p class="lede">サーバーがパネルです。サーバー上の Web ページで、ログインして操作したい機器を追加します。</p>
+<div class="num"><i>1</i>サーバーを動かす</div>
+<p class="bullet">1 行インストーラーはもう起動しています。自分でパッケージを入れた場合は、今起動します：</p>
+<p class="note">Alpine：<code>rc-update add remodroid-server &amp;&amp; rc-service remodroid-server start</code> · 確認：<code>systemctl status remodroid-server</code>（Alpine：<code>rc-service remodroid-server status</code>）</p>
+<div class="num"><i>2</i>Web ページを開く</div>
+<p>インストーラーが表示したリンクを開きます：<code>http://&lt;サーバーIP&gt;:5580/wizard.html?token=…</code>。<b>token</b> はあなたがサーバーの持ち主である証明です。リンクをなくしたら、サーバーで token を読みます：</p>
+<div class="chips"><small>先に開ける</small><span class="chip">TCP 5580</span><span class="chip">TCP 80 · 443（ドメイン）</span><span class="chip">UDP 3478</span><span class="chip">UDP 49152–49252</span></div>
+<div class="num"><i>3</i>セットアップウィザードを完了</div>
+<p><b>ドメイン</b>（Let's Encrypt の無料 HTTPS、自動更新）、<b>ログイン</b>、<b>STUN/TURN ポート</b>を聞かれ、<code>/etc/remodroid/server.ini</code> に書き込んでサーバーをそのアドレスで再起動します。あとから同じページ（パスワード付き）で設定を変えられます。</p>
+<div class="num"><i class="alt">4</i>今どこにありますか？</div>
+<p class="lede">Worker がパネルです。ログインして操作したい機器を追加する Web ページです。</p>
+<div class="num"><i>1</i>Worker を開く</div>
+<p>アドレスは <code>wrangler deploy</code> が表示します。ダッシュボードでは <b>Workers &amp; Pages</b> → <b>remodroid</b> → <b>Visit</b>。たいてい <code>https://remodroid.&lt;あなた&gt;.workers.dev</code> です。</p>
+<div class="num"><i>2</i>セットアップウィザードを完了</div>
+<p><b>ログイン</b>と前の手順の <b>TURN キー</b>（またはほかの STUN/TURN サーバー）を聞かれます。独自のアドレスにしたい場合は Worker → <b>Settings</b> → <b>Domains &amp; Routes</b> → カスタムドメインを追加。</p>
+<div class="callout">デプロイしたらすぐに行ってください。それまでは最初に来た人がログインを決められます。念のため、先に Worker に secret <code>SETUP_TOKEN</code> を追加してください（Settings → Variables and Secrets → Add、種類は <b>Secret</b>。普通の変数は次のデプロイで消えます）。セットアップページがその値を聞きます。</div>
+<div class="num"><i class="alt">3</i>どこにありますか？</div>
+const open = () => { $('#open').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))} を開く ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(4, 'ルーター')}<h1>RemoDroid <em>スマホ用</em></h1>
+<p class="lede">スマホをつなぐルーター（または USB ポートのある任意の Linux 機）で動き、自分からパネルに接続します。ポート開放もグローバルアドレスも不要。スマホ本体には何も入れません。</p>
+<div class="num"><i>1</i>コマンド 1 つ</div>
+<p class="bullet">ダウンロード、インストール、起動までまとめて行います。ルーターで（SSH）実行します。</p>
+<div class="term"><div><span class="p">$</span> ${esc(o.agent)}</div><div class="d">▸ remodroid-agent_…_${S.os === 'openwrt' ? 'mipsel_24kc.ipk' : 'amd64.deb'} をダウンロード中</div><div class="d">▸ サービスを起動中</div><div class="k">✓ 動いています</div></div>
+<div class="num"><i class="alt">2</i>またはパッケージをダウンロード</div>
+<div id="adl"><p class="note">最新リリースを確認しています…</p></div>
+<p class="bullet">パッケージはインストールするだけです。起動し、再起動後も自動で起動するようにします：</p>
+<p class="note">次にパネルへ接続します：次の手順。</p>
+<div class="chips"><small>必要なもの</small><span class="chip">USB ポート</span><span class="chip">${S.os === 'openwrt' ? 'ca-bundle（一緒に入ります）' : 'ca-certificates'}</span><span class="chip">正しい時刻（HTTPS）</span></div>
+<p class="note">Koolshare 入りの ASUS Merlin：<a href="https://github.com/${REPO}/releases/latest" target="_blank" rel="noopener">最新リリース</a>から <code>remodroid-…-merlin-….tar.gz</code> を取り、ソフトウェアセンター → 手動インストールで入れます。</p>`;
+main.innerHTML = `${eyebrow(5, '接続')}<h1><em>ルーター</em>を登録</h1>
+<p class="lede">ルーターは、あなたのパネルだけが作れるワンタイムコードでパネルに加わります。</p>
+<div class="num"><i>1</i>パネルの「エージェント」タブを開く</div>
+<div class="num"><i>2</i>エージェントを追加</div>
+<p>このリンクで<b>エージェントを追加 → 接続</b>が開きます（自分でクリックしても OK）。パネルに <code>X5SX-K3M7</code> のようなコードが出ます：1 回限り、<b>10 分間</b>有効。そのページにはコピーボタン付きのコマンド全体があります。ここにコードを入力しても構いません。</p>
+<div class="form"><div class="field"><label for="code">パネルのコード</label><input id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="9" style="font-family:var(--mono);letter-spacing:.08em"></div></div>
+<div class="num"><i>3</i>ルーターで実行</div>
+<p class="note"><b>bound</b> と出たら、パネルのページも緑になります。以後、ルーターの映像・スマホ・クリップボードの設定はパネルの「エージェント」タブで変えられ、ini を編集する必要はありません。</p>`;
+$('#routers').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/agent.html#connect" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))}/agent.html を開く ↗</a>`
+: '上にパネルのアドレスを入れるか、自分でパネルを開いて<b>エージェント → 追加</b>へ進んでください。';
+$('#enroll').innerHTML = c && S.panel ? cmd(line) : `<div class="cmd"><code style="color:var(--faint)">${esc(line)}</code></div><p class="note">${S.panel ? '上にパネルのコードを入力してください。' : 'パネルのアドレスとコードを入力してください。'}</p>`;
+$('#term').innerHTML = `<div><span class="p">$</span> ${esc(line)}</div><div class="d">▸ パネル ${esc(p)} に接続中…</div><div class="d">▸ "OpenWrt"（openwrt）として登録、/etc/remodroid/agent.ini に保存</div><div class="k">✓ bound — このルーターはオンラインです</div>`;
+main.innerHTML = `${eyebrow(6, 'スマホ')}<h1><em>スマホ</em>をつなぐ</h1>
+<p class="lede">スマホごとに一度だけ。Android 8 以降。ハードウェア H.265 エンコーダーがあると良いですが、必須ではありません。</p>
+<div class="num"><i>1</i>USB デバッグをオン</div>
+<p>設定 → デバイス情報 → <b>ビルド番号</b>を 7 回タップ。次に 設定 → システム → <b>開発者向けオプション</b> → <b>USB デバッグ</b>。</p>
+<div class="num"><i>2</i>ルーターの USB ポートにつなぐ</div>
+<p>充電専用ではなくデータ用のケーブルで。ルーターの RemoDroid がスマホを自動で見つけ、小さなヘルパーを起動します（Play ストアからは何も入れません）。</p>
+<div class="num"><i>3</i>ルーターを許可</div>
+<p>スマホに<b>「USB デバッグを許可しますか？」</b>と出ます。<b>このパソコンからのデバッグを常に許可</b>にチェックして<b>許可</b>。${S.panel ? `<a href="${esc(S.panel)}/agent.html" target="_blank" rel="noopener">パネルの「エージェント」タブ</a>` : 'パネルの「エージェント」タブ'}にスマホが準備完了と表示されます。</p>`;
+steps: '好きな場所に展開し（ファイルはまとめたまま）、<b>RemoDroid.exe</b> を実行します。アイコンが時計の横に出ます。Windows 10 1809 以降。管理者として動くプログラムも操作したい場合は、メニューで一度 <b>Control administrator windows…</b> を選びます。' },
+steps: '展開して <b>RemoDroid.app</b> をアプリケーションに移し、開きます（初回は右クリック → <b>開く</b>）。メニューバーに常駐します。求められたら<b>画面収録</b>と<b>アクセシビリティ</b>を許可し、<b>終了して再度開く</b>を押します。macOS 13 以降、Apple シリコンと Intel の両方に対応。' },
+steps: '<code>.deb</code> か <code>.rpm</code> を入れ、アプリメニューから <b>RemoDroid</b> を起動します。ほかのディストリビューションでは <code>.AppImage</code> に実行権限を付けて実行します。X11 セッションが必要です（GNOME ならログイン時に「GNOME on Xorg」）。' },
+main.innerHTML = `${eyebrow(4, 'パソコン')}<h1>RemoDroid <em>パソコン用</em></h1>
+<p class="lede">操作したいパソコンに入れる小さなアプリです。自分からパネルに接続するので、ポート開放もグローバルアドレスも不要です。</p>
+<div class="num"><i>1</i>ダウンロード</div>
+<div id="ddl"><p class="note">最新リリースを確認しています…</p></div>
+<div class="num"><i>2</i>インストールして起動</div>
+<p class="note">次にパネルへ接続します：次の手順。</p>`;
+main.innerHTML = `${eyebrow(5, '接続')}<h1><em>パソコン</em>をペアリング</h1>
+<p class="lede">パソコンは、あなたのパネルだけが作れるワンタイムの 1 行でパネルに加わります。</p>
+<div class="num"><i>1</i>パネルで 1 行を作る</div>
+<p>パネルで <b>エージェント</b> → <b>追加</b> → <b>パソコン</b>。ワンタイムコード入りの 1 行（<b>10 分間</b>有効）がコピーボタン付きで表示されます。</p>
+<div class="num"><i>2</i>パソコンに貼り付ける</div>
+<p>RemoDroid のアイコン（時計の横、または Mac のメニューバー）→ <b>Pair with a panel…</b> を開き、1 行全体を貼り付けて <b>Pair</b> をクリック。<b>Paired</b> と出たら、パネルでパソコンがオンラインになります。</p>
+<p class="note">画面やトレイがない場合は、その 1 行をターミナルで実行します：<code>remodroid-desktopd pair --panel … --code …</code>、続けて <code>remodroid-desktopd</code>。</p>`;
+const link = () => { $('#padd').innerHTML = S.panel ? `<a class="btn" href="${esc(S.panel)}/panel.html#agents/add" target="_blank" rel="noopener">${esc(S.panel.replace(/^https?:\/\//, ''))} → 追加を開く ↗</a>` : ''; };
+main.innerHTML = `${eyebrow(STEPS.length, '完了')}<h1>さあ<em>${phone ? '遊びましょう' : 'つなぎましょう'}</em></h1>
+<p class="lede">iPhone の Safari でパネルを開いてログインし、<b>共有</b> → <b>ホーム画面に追加</b>で全画面になります。${phone ? 'スマホ' : 'パソコン'}をタップすると接続します。</p>
+${phone ? `<dl class="kv"><dt>タッチ</dt><dd>マルチタッチがそのままスマホへ。フローティングボールでメニューが開きます。</dd>
+<dt>画質</dt><dd>メニュー → 設定：解像度、フレームレート、ビットレート、H.265 か H.264。</dd>
+<dt>写真</dt><dd>メニュー → 写真：iPhone からスマホのギャラリーへ。</dd>
+<dt>クリップボード</dt><dd>テキストを双方向に。HTTPS ならワンタップ。</dd></dl>`
+: `<dl class="kv"><dt>マウス</dt><dd>タップでクリック、またはメニューでトラックパッドをオン：ノートパソコンのようにポインターが動きます。</dd>
+<dt>キーボード</dt><dd>メニュー → キーボード。🌐 でパソコンの入力方式（日本語など）を切り替えます。</dd>
+<dt>ファイル</dt><dd>ビューアーにファイルをドロップすると、パソコンの Downloads/RemoDroid に入ります。</dd>
+<dt>クリップボード</dt><dd>コピーしたテキストが双方向に同期します。</dd></dl>`}
+<p style="margin-top:26px">${S.panel ? `<a class="btn" href="${esc(S.panel)}/" target="_blank" rel="noopener">パネルを開く ↗</a> ` : ''}<a class="btn ghost" href="#step1" id="another">${phone ? 'パソコン' : 'スマホ'}も追加</a> <a class="btn ghost" href="https://github.com/${REPO}#readme" target="_blank" rel="noopener">ドキュメントを読む ↗</a></p>`;
