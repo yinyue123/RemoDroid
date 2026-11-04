@@ -4,7 +4,8 @@
 
   - a file dropped on the viewer lands in the computer's ~/Downloads/RemoDroid
   - a file dragged onto the RemoDroid window (a real XDND drop from another GTK window, the way a file
-    manager drags) is downloaded by the browser; the file is outside the home folder on purpose
+    manager drags) lands in the browser's File Transfer, and clicking it there saves it; the file is
+    outside the home folder on purpose
   - the clipboard syncs both ways by itself: the computer copies → the browser's clipboard; the browser
     copies and the viewer gets the focus → the computer's clipboard
 
@@ -142,7 +143,9 @@ async def run(args):
                 await page.wait_for_timeout(100)
             res["viewer_drop_ok"] = os.path.exists(dest) and open(dest).read() == "hello from the browser\n"
 
-            # 2. a file dragged onto the RemoDroid window → downloaded by the browser
+            # 2. a file dragged onto the RemoDroid window → in the browser's File Transfer, saved with a click
+            await page.locator("#ball").click()
+            await page.locator('#menu button[data-act="files"]').click()
             src = f"{d}/outside home.txt"
             open(src, "w").write("hello from linux\n")
             target = await window_of(env, "^RemoDroid$")
@@ -155,22 +158,30 @@ async def run(args):
             if target and source:
                 tx, ty = target["X"] + target["WIDTH"] // 2, target["Y"] + target["HEIGHT"] // 2
                 try:
-                    async with page.expect_download(timeout=20000) as dl:
-                        xdo(env, "mousemove", str(source["X"] + 60), str(source["Y"] + 50))
-                        xdo(env, "mousedown", "1")
-                        for i in range(1, 21): # XDND needs real motion to the target
-                            x = source["X"] + 60 + (tx - source["X"] - 60) * i // 20
-                            y = source["Y"] + 50 + (ty - source["Y"] - 50) * i // 20
-                            xdo(env, "mousemove", str(x), str(y))
-                            await asyncio.sleep(0.03)
-                        await asyncio.sleep(0.3)
-                        xdo(env, "mouseup", "1")
+                    xdo(env, "mousemove", str(source["X"] + 60), str(source["Y"] + 50))
+                    xdo(env, "mousedown", "1")
+                    for i in range(1, 21): # XDND needs real motion to the target
+                        x = source["X"] + 60 + (tx - source["X"] - 60) * i // 20
+                        y = source["Y"] + 50 + (ty - source["Y"] - 50) * i // 20
+                        xdo(env, "mousemove", str(x), str(y))
+                        await asyncio.sleep(0.03)
+                    await asyncio.sleep(0.3)
+                    xdo(env, "mouseup", "1")
+                    bubble = page.locator("#ftLog .ft-row.in .ft-b", has_text="outside home.txt")
+                    await page.wait_for_function("() => [...document.querySelectorAll('#ftLog .ft-row.in .ft-b')].some(b =>"
+                                                 " b.textContent.includes('outside home.txt') && !/receiving|%|failed/"
+                                                 ".test(b.querySelector('.meta').textContent))", timeout=20000)
+                    async with page.expect_download(timeout=5000) as dl:
+                        await bubble.click()
                     got = await dl.value
                     path = await got.path()
                     res["download"] = {"name": got.suggested_filename, "ok": open(path).read() == "hello from linux\n"}
                 except Exception as e:
                     res["download"] = {"error": str(e).splitlines()[0]}
             res["window_drop_ok"] = res.get("download", {}).get("ok") and res["download"]["name"] == "outside home.txt"
+            logs = [os.path.join(r, "transfers.log") for r, _, fs in os.walk(d) if "transfers.log" in fs]
+            res["transfer_logged"] = bool(logs) and f"\tout\t17\t{src}\n" in open(logs[0]).read()
+            await page.locator("#sheet-files button[data-close]").click()
 
             # 3. the computer copies → this clipboard, without a tap (or the Copy bar where writing isn't allowed)
             probe.send("setclip copied on linux")
@@ -200,7 +211,7 @@ async def run(args):
             res["errors"] = [l for l in logs if "PAGEERROR" in l][:5]
             await browser.close()
         ok = (res.get("pair") and res.get("dropzone") == "Drop to send to Test computer" and res.get("viewer_drop_ok")
-              and res.get("window_drop_ok") and res.get("clip_to_viewer") == "auto"
+              and res.get("window_drop_ok") and res.get("transfer_logged") and res.get("clip_to_viewer") == "auto"
               and res.get("clip_to_computer") == "copied in the browser" and not res.get("errors"))
     finally:
         for pr in procs[::-1]:
