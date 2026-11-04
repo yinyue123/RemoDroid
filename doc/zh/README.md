@@ -36,6 +36,8 @@
 
 <p align="center"><img src="architecture.svg" alt="RemoDroid 的工作原理：iPhone 上的 Safari 登录面板；家中路由器上的 RemoDroid 手机版通过 USB 操控安卓手机；视频、声音和触控通过 WebRTC 在 Safari 与路由器之间传输，UDP 直连受阻时通过 TURN 中继" width="100%"></p>
 
+<p align="center"><img src="architecture-desktop.svg" alt="RemoDroid 电脑版的工作方式：手机、平板或笔记本上的浏览器登录面板；Windows、macOS 或 Linux 电脑上的 RemoDroid 主动连接服务器；画面、声音、鼠标、键盘、文件和剪贴板通过 WebRTC 在浏览器和电脑之间传输，直连 UDP 被阻断时经由 TURN" width="100%"></p>
+
 **面板**提供网页、你的登录和连接建立。家中路由器上的 **RemoDroid 手机版**用自带的 ADB（不需要 `adb`）通过 USB 与手机通信，并在手机上启动一个小助手。助手捕获屏幕、用硬件编码，再通过 WebRTC 直接发给 Safari，你的触控沿同一路径传回。路由器只转发数据包，中间不做任何解码。**RemoDroid 电脑版**在电脑本身上做同样的事：捕获屏幕、用 GPU 编码，并接收鼠标和键盘。
 
 <details>

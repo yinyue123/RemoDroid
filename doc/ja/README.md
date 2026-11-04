@@ -36,6 +36,8 @@ iPhone の Safari（またはどのブラウザーでも）から、Android ス�
 
 <p align="center"><img src="architecture.svg" alt="RemoDroid のしくみ：iPhone の Safari がパネルにログインし、自宅ルーターの RemoDroid（スマホ用）が USB 経由で Android スマホを操作します。映像・音声・タッチは Safari とルーターの間を WebRTC で流れ、UDP の直接接続が遮断される場合は TURN を経由します" width="100%"></p>
 
+<p align="center"><img src="architecture-desktop.svg" alt="RemoDroid（パソコン用）のしくみ：スマホ・タブレット・ノートPCのブラウザがパネルにログインし、Windows・macOS・Linux パソコンの RemoDroid がサーバーへ接続します。画面・音声・マウス・キーボード・ファイル・クリップボードはブラウザとパソコンの間を WebRTC で流れ、UDP の直接接続が遮断される場合は TURN を経由します" width="100%"></p>
+
 **パネル**は Web ページ、ログイン、接続の確立を受け持ちます。自宅ルーターの **RemoDroid（スマホ用）** は内蔵の ADB（`adb` 不要）で USB 越しにスマホと話し、スマホ上で小さなヘルパーを起動します。ヘルパーは画面をキャプチャしてハードウェアでエンコードし、WebRTC で Safari へ直接送ります。タッチは同じ経路で戻ります。ルーターはパケットを中継するだけで、途中では何もデコードしません。**RemoDroid（パソコン用）** はパソコン自身で同じことをします：画面をキャプチャし、GPU でエンコードし、マウスとキーボードを受け取ります。
 
 <details>

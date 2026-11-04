@@ -36,6 +36,8 @@ Ein Panel bedient beliebig viele Handys und Computer. Jede Einrichtung sind dies
 
 <p align="center"><img src="architecture.svg" alt="So funktioniert RemoDroid: Safari auf dem iPhone meldet sich am Panel an; RemoDroid für Handys auf dem Router zu Hause steuert das Android-Handy über USB; Video, Ton und Berührungen fließen per WebRTC zwischen Safari und dem Router, über TURN, wenn direktes UDP blockiert ist" width="100%"></p>
 
+<p align="center"><img src="architecture-desktop.svg" alt="So funktioniert RemoDroid für Computer: Ein Browser auf Handy, Tablet oder Laptop meldet sich am Panel an; RemoDroid auf dem Windows-, macOS- oder Linux-Computer verbindet sich mit dem Server; Bildschirm, Ton, Maus, Tastatur, Dateien und Zwischenablage fließen per WebRTC zwischen Browser und Computer, über TURN, wenn direktes UDP blockiert ist" width="100%"></p>
+
 Das **Panel** liefert die Webseite, deinen Login und den Verbindungsaufbau. **RemoDroid für Handys** auf deinem Router zu Hause spricht mit eingebautem ADB (kein `adb` nötig) über USB mit dem Handy und startet dort einen kleinen Helfer. Der Helfer nimmt den Bildschirm auf, kodiert ihn in Hardware und schickt ihn per WebRTC direkt an Safari; deine Berührungen gehen denselben Weg zurück. Der Router leitet nur Pakete weiter; dazwischen wird nichts dekodiert. **RemoDroid für Computer** tut dasselbe vom Computer selbst aus: Es nimmt den Bildschirm auf, kodiert ihn auf der GPU und nimmt Maus und Tastatur entgegen.
 
 <details>

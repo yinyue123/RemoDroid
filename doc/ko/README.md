@@ -36,6 +36,8 @@ iPhone의 Safari(또는 어떤 브라우저든)에서 Android 휴대폰이나 Wi
 
 <p align="center"><img src="architecture.svg" alt="RemoDroid 작동 방식: iPhone의 Safari가 패널에 로그인하고, 집 라우터의 RemoDroid 휴대폰용이 USB로 Android 휴대폰을 제어합니다. 영상·소리·터치는 Safari와 라우터 사이를 WebRTC로 오가며, UDP 직접 연결이 막히면 TURN을 거칩니다" width="100%"></p>
 
+<p align="center"><img src="architecture-desktop.svg" alt="컴퓨터용 RemoDroid의 작동 방식: 휴대폰, 태블릿, 노트북의 브라우저가 패널에 로그인하고, Windows·macOS·Linux 컴퓨터의 RemoDroid가 서버에 연결합니다. 화면, 소리, 마우스, 키보드, 파일, 클립보드가 브라우저와 컴퓨터 사이를 WebRTC로 오가며, 직접 UDP가 막히면 TURN을 거칩니다" width="100%"></p>
+
 **패널**은 웹 페이지, 로그인, 연결 설정을 맡습니다. 집 라우터의 **RemoDroid 휴대폰용**은 내장 ADB(`adb` 불필요)로 USB를 통해 휴대폰과 통신하고, 휴대폰에서 작은 도우미를 실행합니다. 도우미는 화면을 캡처해 하드웨어로 인코딩하고 WebRTC로 Safari에 바로 보내며, 터치는 같은 길로 돌아옵니다. 라우터는 패킷만 전달하고 중간에서 아무것도 디코딩하지 않습니다. **RemoDroid 컴퓨터용**은 컴퓨터 자체에서 같은 일을 합니다: 화면을 캡처하고, GPU로 인코딩하고, 마우스와 키보드를 받습니다.
 
 <details>

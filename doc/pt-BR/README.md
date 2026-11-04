@@ -36,6 +36,8 @@ Um painel atende quantos celulares e computadores você quiser. Toda instalaçã
 
 <p align="center"><img src="architecture.svg" alt="Como o RemoDroid funciona: o Safari no iPhone faz login no painel; o RemoDroid para celulares no roteador de casa controla o celular Android por USB; vídeo, som e toques vão por WebRTC entre o Safari e o roteador, via TURN quando o UDP direto está bloqueado" width="100%"></p>
 
+<p align="center"><img src="architecture-desktop.svg" alt="Como funciona o RemoDroid para computadores: um navegador no celular, tablet ou notebook entra no painel; o RemoDroid no computador Windows, macOS ou Linux se conecta ao servidor; tela, som, mouse, teclado, arquivos e área de transferência passam por WebRTC entre o navegador e o computador, via TURN quando o UDP direto está bloqueado" width="100%"></p>
+
 O **painel** hospeda a página web, o seu login e o estabelecimento da conexão. O **RemoDroid para celulares**, no roteador de casa, fala com o celular por USB com o próprio ADB embutido (sem precisar de `adb`) e inicia um pequeno ajudante no celular. O ajudante captura a tela, codifica por hardware e envia via WebRTC direto ao Safari, com seus toques voltando pelo mesmo caminho. O roteador só repassa pacotes; nada é decodificado no meio. O **RemoDroid para computadores** faz o mesmo a partir do próprio computador: captura a tela, codifica na GPU e recebe mouse e teclado.
 
 <details>

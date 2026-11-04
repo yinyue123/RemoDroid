@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="800" viewBox="0 0 1240 800" role="img" aria-labelledby="title desc">
+  <title id="title">RemoDroid: your computer, in any browser</title>
+  <desc id="desc">A browser on a phone, tablet or laptop logs in to the control server. RemoDroid for computers, on a Windows, macOS or Linux computer, connects out to the server over a WebSocket. WebRTC carries the screen and its sound one way and the mouse, keyboard, gamepads, clipboard and files the other, directly between the browser and the computer, or through the server's TURN relay when direct UDP is blocked. The computer captures its screen and encodes it on the GPU: DXGI and Media Foundation on Windows, ScreenCaptureKit and VideoToolbox on macOS, X11 and VA-API on Linux. A session goes from signing in and picking the computer, through negotiating the connection, to using it.</desc>
+  <defs>
+    <marker id="blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#4865c7"/></marker>
+    <marker id="green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#14846b"/></marker>
+    <marker id="amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 9 5 1 9Z" fill="#b56a1d"/></marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #21324b; }
+      .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2px; fill: #62728c; }
+      .heading { font-size: 30px; font-weight: 750; }
+      .sub { font-size: 16px; fill: #566781; }
+      .name { font-size: 21px; font-weight: 700; }
+      .body { font-size: 14px; fill: #566781; }
+      .small { font-size: 13px; fill: #566781; }
+      .mono { font-family: ui-monospace, 'DejaVu Sans Mono', monospace; font-size: 12px; fill: #4865c7; }
+      .label { font-size: 13px; font-weight: 650; }
+      .step { font-size: 16px; font-weight: 700; }
+    </style>
+  </defs>
+  <rect x="1" y="1" width="1238" height="798" rx="24" fill="#f5f7fb" stroke="#dce3ed"/>
+  <text x="32" y="38" class="eyebrow">REMOTELY SEE. CLICK. TYPE.</text>
+  <text x="32" y="78" class="heading">Your computer, in any browser.</text>
+  <text x="32" y="108" class="sub">Windows, macOS or Linux at home or at work. A browser on your phone, tablet or laptop.</text>
+
+  <!-- Control links -->
+  <path d="M300 236H364" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <path d="M632 236H696" fill="none" stroke="#4865c7" stroke-width="2.5" marker-start="url(#blue)" marker-end="url(#blue)"/>
+  <text x="332" y="210" text-anchor="middle" class="label" fill="#4865c7">HTTPS</text>
+  <text x="332" y="270" text-anchor="middle" class="body">login</text>
+  <text x="664" y="210" text-anchor="middle" class="label" fill="#4865c7">WS</text>
+  <text x="664" y="270" text-anchor="middle" class="body">control</text>
+
+  <!-- Viewer -->
+  <rect x="32" y="144" width="268" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="52" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <rect x="64" y="170" width="13" height="23" rx="3" fill="none" stroke="#4865c7" stroke-width="2"/>
+  <path d="M68 189h5" stroke="#4865c7" stroke-width="1.5"/>
+  <text x="100" y="187" class="eyebrow">VIEWER</text>
+  <text x="52" y="232" class="name">Any browser</text>
+  <text x="52" y="262" class="body">iPhone, iPad, Mac or PC</text>
+  <text x="52" y="284" class="body">See the screen, hear its sound</text>
+  <text x="52" y="320" class="mono">Trackpad · keyboard · gamepad</text>
+
+  <!-- Server -->
+  <rect x="364" y="144" width="268" height="202" rx="16" fill="#fff" stroke="#ced9ee"/>
+  <rect x="384" y="164" width="36" height="36" rx="10" fill="#eaf0ff"/>
+  <path d="M392 175h20v6h-20z M392 184h20v6h-20z" fill="none" stroke="#4865c7" stroke-width="1.6"/>
+  <text x="432" y="187" class="eyebrow">CONTROL SERVER</text>
+  <text x="384" y="232" class="name">Public server</text>
+  <text x="384" y="262" class="body">Panel, login and signaling</text>
+  <text x="384" y="284" class="body">Built-in STUN / TURN relay</text>
+  <text x="384" y="320" class="mono">remodroid-server</text>
+
+  <!-- Computer -->
+  <rect x="696" y="144" width="512" height="202" rx="16" fill="#fff" stroke="#bfe0d2"/>
+  <rect x="716" y="164" width="36" height="36" rx="10" fill="#edf7f2"/>
+  <rect x="723" y="172" width="22" height="15" rx="2" fill="none" stroke="#14846b" stroke-width="1.8"/>
+  <path d="M730 192h8 M734 187v5" stroke="#14846b" stroke-width="1.8"/>
+  <text x="764" y="187" class="eyebrow">COMPUTER AT HOME OR WORK</text>
+  <text x="716" y="232" class="name">Windows · macOS · Linux</text>
+  <text x="716" y="262" class="body">Captures the screen and its sound; encodes on the GPU</text>
+  <text x="716" y="284" class="body">Takes your mouse, keyboard and gamepads</text>
+  <text x="716" y="306" class="body">Clipboard and File Transfer, both ways</text>
+  <text x="716" y="330" class="mono">RemoDroid for computers · tray / menu bar app</text>
+
+  <!-- TURN fallback through the server -->
+  <path d="M134 349V408H498V349 M498 408H900V349" fill="none" stroke="#b56a1d" stroke-width="2.5" stroke-dasharray="7 6" marker-start="url(#amber)" marker-end="url(#amber)"/>
+  <rect x="295" y="392" width="407" height="31" rx="15" fill="#fff4e6"/>
+  <text x="498" y="412" text-anchor="middle" class="label" style="fill:#935215">TURN fallback · when direct UDP is blocked</text>
+
+  <!-- Direct WebRTC between the browser and the computer -->
+  <path d="M174 349V496H860V349" fill="none" stroke="#14846b" stroke-width="3" marker-start="url(#green)" marker-end="url(#green)"/>
+  <rect x="240" y="479" width="516" height="34" rx="17" fill="#e4f4ed"/>
+  <text x="498" y="501" text-anchor="middle" class="label" style="fill:#146f5a">Direct WebRTC · screen + sound ↔ mouse, keys, files</text>
+  <text x="498" y="539" text-anchor="middle" class="body">The computer connects out to the server: no port to open at home.</text>
+
+  <!-- What each system uses -->
+  <rect x="920" y="379" width="288" height="174" rx="14" fill="#eef1f8"/>
+  <text x="940" y="406" class="label">Under the hood</text>
+  <text x="940" y="431" class="label" style="font-size:12px">Windows</text>
+  <text x="940" y="449" class="small">DXGI capture · Media Foundation</text>
+  <text x="940" y="474" class="label" style="font-size:12px">macOS</text>
+  <text x="940" y="492" class="small">ScreenCaptureKit · VideoToolbox</text>
+  <text x="940" y="517" class="label" style="font-size:12px">Linux</text>
+  <text x="940" y="535" class="small">X11 capture · VA-API</text>
+
+  <path d="M32 580H1208" stroke="#dce3ed"/>
+  <text x="32" y="616" class="eyebrow">FROM LOGIN TO LIVE CONTROL</text>
+  <circle cx="52" cy="659" r="19" fill="#4865c7"/><text x="52" y="665" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">1</text>
+  <text x="84" y="656" class="step">Sign in and pick the computer</text>
+  <text x="84" y="681" class="body">The panel asks RemoDroid on it to connect.</text>
+  <path d="M397 661h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="461" cy="659" r="19" fill="#4865c7"/><text x="461" y="665" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">2</text>
+  <text x="493" y="656" class="step">Negotiate the connection</text>
+  <text x="493" y="681" class="body">Signaling and ICE choose direct UDP or TURN.</text>
+  <path d="M806 661h28" stroke="#b6c1d3" stroke-width="2" marker-end="url(#blue)"/>
+  <circle cx="870" cy="659" r="19" fill="#14846b"/><text x="870" y="665" text-anchor="middle" font-size="17" font-weight="700" style="fill:#fff">3</text>
+  <text x="902" y="656" class="step">Use it</text>
+  <text x="902" y="681" class="body">Click, type, drop files, copy and paste.</text>
+  <rect x="32" y="714" width="1176" height="60" rx="12" fill="#21324b"/>
+  <text x="56" y="749" class="eyebrow" style="fill:#aebbd0">SET IT UP</text>
+  <circle cx="189" cy="744" r="13" fill="#fff"/><text x="189" y="749" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">1</text>
+  <text x="210" y="749" class="label" style="fill:#fff">Server</text>
+  <path d="M290 744h26" stroke="#aebbd0" stroke-width="2"/><path d="M312 739l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="347" cy="744" r="13" fill="#fff"/><text x="347" y="749" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">2</text>
+  <text x="368" y="749" class="label" style="fill:#fff">Install RemoDroid on the computer</text>
+  <path d="M636 744h26" stroke="#aebbd0" stroke-width="2"/><path d="M658 739l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="693" cy="744" r="13" fill="#fff"/><text x="693" y="749" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">3</text>
+  <text x="714" y="749" class="label" style="fill:#fff">Pair it with a code</text>
+  <path d="M866 744h26" stroke="#aebbd0" stroke-width="2"/><path d="M888 739l6 5-6 5" fill="none" stroke="#aebbd0" stroke-width="2"/>
+  <circle cx="923" cy="744" r="13" fill="#fff"/><text x="923" y="749" text-anchor="middle" font-size="13" font-weight="700" style="fill:#21324b">4</text>
+  <text x="944" y="749" class="label" style="fill:#fff">Open in any browser</text>
+</svg>

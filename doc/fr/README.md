@@ -36,6 +36,8 @@ Un panneau gère autant de téléphones et d’ordinateurs que vous voulez. Chaq
 
 <p align="center"><img src="architecture.svg" alt="Fonctionnement de RemoDroid : Safari sur l’iPhone se connecte au panneau ; RemoDroid pour téléphones sur le routeur de la maison pilote le téléphone Android en USB ; vidéo, son et toucher passent par WebRTC entre Safari et le routeur, via TURN quand l’UDP direct est bloqué" width="100%"></p>
 
+<p align="center"><img src="architecture-desktop.svg" alt="Fonctionnement de RemoDroid pour ordinateurs : un navigateur sur téléphone, tablette ou portable se connecte au panneau ; RemoDroid sur l'ordinateur Windows, macOS ou Linux se connecte au serveur ; écran, son, souris, clavier, fichiers et presse-papiers passent par WebRTC entre le navigateur et l'ordinateur, via TURN quand l'UDP direct est bloqué" width="100%"></p>
+
 Le **panneau** sert la page web, votre connexion et l’établissement de la liaison. **RemoDroid pour téléphones**, sur le routeur de la maison, parle au téléphone en USB avec son propre ADB intégré (pas besoin d’`adb`) et lance un petit assistant sur le téléphone. L’assistant capture l’écran, l’encode en matériel et l’envoie en WebRTC directement à Safari ; vos touchers reviennent par le même chemin. Le routeur ne fait que relayer des paquets ; rien n’est décodé en route. **RemoDroid pour ordinateurs** fait la même chose depuis l’ordinateur lui-même : il capture l’écran, l’encode sur le GPU et reçoit la souris et le clavier.
 
 <details>
