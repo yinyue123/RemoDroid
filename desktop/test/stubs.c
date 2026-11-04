@@ -61,6 +61,14 @@ int dsk_char_key(unsigned cp, int *hid, int *shift) /* a US layout's letters */
         return *hid = 0x04 + (int)(cp - 'A'), *shift = 1, 0;
     return -1;
 }
+int dsk_ime(dsk_ime_t *out)
+{
+    memset(out, 0, sizeof *out);
+    snprintf(out->name, sizeof out->name, "ABC");
+    snprintf(out->lang, sizeof out->lang, "en");
+    out->native = -1;
+    return 0;
+}
 
 unsigned long dsk_clip_seq(void) { return 0; }
 char *dsk_clip_get(void) { return NULL; }

@@ -18,6 +18,7 @@ static struct {
     int target_kbps;
     unsigned long clip_seq;
     char *clip_sent, *clip_set;
+    dsk_ime_t ime; /* as last sent; name "" = nothing sent yet */
 } S;
 
 int session_active(void) { return S.active; }
@@ -599,12 +600,31 @@ static void check_clipboard(void)
     S.clip_sent = c;
 }
 
+/* the input method, shown on the viewer's 🌐 key and floating button */
+static void check_ime(void)
+{
+    dsk_ime_t now;
+    memset(&now, 0, sizeof now);
+    if (dsk_ime(&now) < 0 || !*now.name || !memcmp(&now, &S.ime, sizeof now))
+        return;
+    S.ime = now;
+    cJSON *m = msg_new("ime.state", 0, NULL);
+    cJSON *d = msg_d(m);
+    cJSON_AddStringToObject(d, "name", now.name);
+    cJSON_AddStringToObject(d, "lang", now.lang);
+    cJSON_AddBoolToObject(d, "ime", now.ime);
+    if (now.native >= 0)
+        cJSON_AddBoolToObject(d, "native", now.native);
+    session_send(m);
+}
+
 void session_tick(void)
 {
     if (!S.active || !S.ctrl_open)
         return;
     check_screen_size();
     check_clipboard();
+    check_ime();
     char st[1024];
     rd_rtc_stats(st, sizeof st);
     cJSON *s = cJSON_Parse(st);

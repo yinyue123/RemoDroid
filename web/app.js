@@ -360,7 +360,8 @@ function preferCodecs(pc, sdp) {
 }
 function closePeer() {
   if (st.pc) { try { st.pc.close(); } catch (_) {} }
-  st.pc = null; st.ch = {}; st.connected = false; st.ready = null;
+  st.pc = null; st.ch = {}; st.connected = false; st.ready = null; st.ime = null;
+  renderIme();
 }
 function sessionEnded(reason) {
   closePeer();
@@ -446,6 +447,7 @@ function onChannel(label, data) {
   case 'stats': st.phoneStats = d; st.panel = d.panel || st.panel; break;
   case 'screen.state': st.panel = d.panel; st.locked = d.locked; syncMenuStates(); break;
   case 'clip.changed': androidCopied(d.text || ''); break;
+  case 'ime.state': st.ime = d; renderIme(); break;
   case 'logcat.lines': { const s = st.logStreams.get(d.stream); if (s) s(d.lines || []); break; }
   case 'file.progress': { const u = uploads.get(d.xfer); if (u) u.phoneBytes = d.bytes; break; }
   case 'file.done': { const p = st.pulls.get(d.xfer); if (p) finishPull(d.xfer); break; }
@@ -1371,6 +1373,30 @@ function nextInputMethod() {
   fkbSend('key', { action: 'press', code: AK.space });
   fkbSend('key', { action: 'up', code: mod });
 }
+/* The computer's input method (ime.state, once a second while it changes), on the floating button and
+ * the 🌐 key, as the computer's own indicator: 中 / 英 for Chinese (英: Pinyin typing letters), あ, 한,
+ * else the language (EN, FR…). */
+function imeLabel(m) {
+  if (!m || !m.name) return '';
+  const lang = String(m.lang || '').toLowerCase().split(/[-_]/)[0];
+  if (m.ime && m.native === false) return lang === 'zh' ? '英' : 'A';
+  const own = m.ime && { zh: '中', ja: 'あ', ko: '한' }[lang];
+  if (own) return own;
+  if (lang) return lang.slice(0, 2).toUpperCase();
+  return [...m.name.replace(/[^\p{L}]/gu, '')].slice(0, 2).join('').toUpperCase();
+}
+const imeTitle = m => m && m.name ? m.name + (m.ime && m.native === false ? ' (typing letters)' : '') : '';
+function renderIme() {
+  const lab = desk() && st.connected ? imeLabel(st.ime) : '', b = $('#ball'), tag = $('#ballIme');
+  if (!b || !tag) return;
+  tag.textContent = lab; tag.hidden = !lab;
+  b.classList.toggle('has-ime', !!lab);
+  b.title = lab ? 'Input method: ' + imeTitle(st.ime) : '';
+  for (const k of document.querySelectorAll('.k.globe')) {
+    k.textContent = lab || '🌐';
+    k.setAttribute('aria-label', lab ? `Next input method (now ${imeTitle(st.ime)})` : 'Next input method');
+  }
+}
 /* the key a character sits on, for Ctrl+character */
 function charKey(ch) {
   const c = ch.toLowerCase();
@@ -1442,7 +1468,7 @@ function renderFkb() {
     kr('', fkbBtn('esc', () => fkbKey(AK.esc)), fkbBtn('tab', () => fkbKey(AK.tab)), fkbBtn('.', () => fkbChar('.')),
       fkbBtn('←', () => fkbKey(AK.left), { repeat: 1, title: 'Left' }), fkbBtn('↓', () => fkbKey(AK.down), { repeat: 1, title: 'Down' }),
       fkbBtn('↑', () => fkbKey(AK.up), { repeat: 1, title: 'Up' }), fkbBtn('→', () => fkbKey(AK.right), { repeat: 1, title: 'Right' }),
-      fkbBtn('🌐', nextInputMethod, { title: 'Next input method' }),
+      Object.assign(fkbBtn('🌐', nextInputMethod, { title: 'Next input method' }), { className: 'k globe' }),
       ...(docked ? [] : [fkbBtn('⌄', hideFkb, { title: 'Hide keyboard' })])),
     kr('', ...chars(rows[0])),
     kr(abc ? 'inset' : '', ...chars(rows[1])),
@@ -1455,6 +1481,7 @@ function renderFkb() {
         latch('meta', mac ? '⌘' : win ? 'win' : '❖', mac ? 'Command, for the next key' : win ? 'Windows key, for the next key' : 'Super, for the next key')] : []),
       fkbBtn('␣', () => fkbChar(' '), { grow: docked ? 3 : 4, title: 'Space' }), fkbBtn('/', () => fkbChar('/')),
       fkbBtn('↵', () => fkbKey(AK.enter), { grow: 1.4, title: 'Enter' })));
+  renderIme();
 }
 function placeFkb(x, y) {
   const r = fkb.el.getBoundingClientRect();

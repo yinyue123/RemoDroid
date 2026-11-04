@@ -92,6 +92,15 @@ void dsk_text(const char *utf8);                                   /* as text: n
  * and whether it needs Shift, or -1 when no plain or shifted key types it (or the platform's dsk_text
  * already types keys, as on Linux). */
 int  dsk_char_key(unsigned cp, int *hid, int *shift);
+/* The input method or keyboard layout typing now (the focused window's, where that differs), for the
+ * viewer to show: its name, BCP 47 language ("" when unknown), whether it is an input method (pinyin,
+ * kana…) rather than a plain layout, and whether it types its own script now (1) or Latin letters (0),
+ * -1 when the platform doesn't tell. 0, or -1 when it can't be read. */
+typedef struct {
+    char name[96], lang[24];
+    int ime, native;
+} dsk_ime_t;
+int  dsk_ime(dsk_ime_t *out);
 
 /* ---- touch screen: real multi-touch, for viewers that send every finger (agent thread); optional ---- */
 /* spec names the backend, e.g. "inputtest:/run/rd-touch.sock" (Linux: browser/agent/touch_inputtest.c);

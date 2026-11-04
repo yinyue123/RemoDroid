@@ -3,6 +3,7 @@
  * so monitor rectangles are physical pixels in virtual-desktop coordinates. */
 #include "plat.h"
 
+#include <imm.h>
 #include <shlobj.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -182,3 +183,39 @@ int dsk_touch_open(const char *spec, int points, char *err, size_t cap)
 int dsk_touch_points(void) { return 0; }
 void dsk_touch(const dsk_screen_t *s, int id, int action, double nx, double ny) {}
 void dsk_touch_reset(void) {}
+
+/* The focused window's keyboard layout, and its IME's state: Microsoft Pinyin's 中/英 (Shift) is the
+ * conversion mode, asked of the window's default IME window as Windows' own indicator does. A CJK
+ * layout whose IME is closed types Latin letters. */
+#ifndef IMC_GETCONVERSIONMODE
+#define IMC_GETCONVERSIONMODE 0x0001
+#endif
+#ifndef IMC_GETOPENSTATUS
+#define IMC_GETOPENSTATUS 0x0005
+#endif
+int dsk_ime(dsk_ime_t *o)
+{
+    memset(o, 0, sizeof *o);
+    o->native = -1;
+    HWND fg = GetForegroundWindow();
+    HKL hkl = GetKeyboardLayout(fg ? GetWindowThreadProcessId(fg, NULL) : 0);
+    LANGID lang = LOWORD((ULONG_PTR)hkl);
+    LCID lcid = MAKELCID(lang, SORT_DEFAULT);
+    wchar_t w[128];
+    if (LCIDToLocaleName(lcid, w, LOCALE_NAME_MAX_LENGTH, 0))
+        win_to_utf8(w, o->lang, sizeof o->lang);
+    if (GetLocaleInfoW(lcid, LOCALE_SLOCALIZEDDISPLAYNAME, w, 128))
+        win_to_utf8(w, o->name, sizeof o->name);
+    int cjk = PRIMARYLANGID(lang) == LANG_CHINESE || PRIMARYLANGID(lang) == LANG_JAPANESE || PRIMARYLANGID(lang) == LANG_KOREAN;
+    HWND imw = fg ? ImmGetDefaultIMEWnd(fg) : NULL;
+    DWORD_PTR open = 0, mode = 0;
+    if (imw && SendMessageTimeoutW(imw, WM_IME_CONTROL, IMC_GETOPENSTATUS, 0, SMTO_ABORTIFHUNG, 100, &open) && open) {
+        o->ime = 1;
+        if (SendMessageTimeoutW(imw, WM_IME_CONTROL, IMC_GETCONVERSIONMODE, 0, SMTO_ABORTIFHUNG, 100, &mode))
+            o->native = (mode & IME_CMODE_NATIVE) != 0;
+    } else if (cjk) {
+        o->ime = 1;
+        o->native = 0;
+    }
+    return *o->name ? 0 : -1;
+}

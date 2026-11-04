@@ -1,6 +1,7 @@
 /* X11 input with XTest, on the agent thread's own connection. Keys are
  * physical (X keycode = Linux evdev code + 8); text that no key types is sent by
  * mapping its keysym onto a spare keycode (what xdotool does). */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -187,3 +188,25 @@ void dsk_text(const char *utf8)
 
 /* dsk_text above already types each character with the key that makes it, so the input method sees keys */
 int dsk_char_key(unsigned cp, int *hid, int *shift) { return -1; }
+
+/* The keyboard group in use ("English (US)", "Chinese"…). An input method framework (IBus, Fcitx) keeps
+ * its own state, which X doesn't see. */
+int dsk_ime(dsk_ime_t *o)
+{
+    memset(o, 0, sizeof *o);
+    o->native = -1;
+    Display *d = conn();
+    XkbStateRec st;
+    XkbDescPtr kb;
+    if (!d || XkbGetState(d, XkbUseCoreKbd, &st) != Success || !(kb = XkbAllocKeyboard()))
+        return -1;
+    if (XkbGetNames(d, XkbGroupNamesMask, kb) == Success && kb->names && st.group < XkbNumKbdGroups && kb->names->groups[st.group]) {
+        char *n = XGetAtomName(d, kb->names->groups[st.group]);
+        if (n) {
+            snprintf(o->name, sizeof o->name, "%s", n);
+            XFree(n);
+        }
+    }
+    XkbFreeKeyboard(kb, 0, True);
+    return *o->name ? 0 : -1;
+}

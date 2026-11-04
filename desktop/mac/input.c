@@ -146,6 +146,29 @@ void dsk_text(const char *utf8)
 static pthread_mutex_t layout_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct { UniChar ch; uint16_t key; uint8_t shift; } layout[LAYOUT_MAX];
 static int layout_n;
+static dsk_ime_t ime_now; /* the input source, read with the layout (main thread) */
+
+static void cfstr(CFStringRef s, char *out, size_t cap)
+{
+    if (!s || CFGetTypeID(s) != CFStringGetTypeID() || !CFStringGetCString(s, out, (CFIndex)cap, kCFStringEncodingUTF8))
+        *out = 0;
+}
+
+static void ime_read(dsk_ime_t *o)
+{
+    memset(o, 0, sizeof *o);
+    o->native = -1; /* Pinyin's Shift-to-English isn't an input source change */
+    TISInputSourceRef s = TISCopyCurrentKeyboardInputSource();
+    if (!s)
+        return;
+    cfstr((CFStringRef)TISGetInputSourceProperty(s, kTISPropertyLocalizedName), o->name, sizeof o->name);
+    CFArrayRef langs = (CFArrayRef)TISGetInputSourceProperty(s, kTISPropertyInputSourceLanguages);
+    if (langs && CFArrayGetCount(langs) > 0)
+        cfstr((CFStringRef)CFArrayGetValueAtIndex(langs, 0), o->lang, sizeof o->lang);
+    CFStringRef type = (CFStringRef)TISGetInputSourceProperty(s, kTISPropertyInputSourceType);
+    o->ime = type && CFStringCompare(type, kTISTypeKeyboardLayout, 0) != kCFCompareEqualTo;
+    CFRelease(s);
+}
 
 static void layout_build(void *unused)
 {
@@ -176,9 +199,12 @@ static void layout_build(void *unused)
     }
     if (src)
         CFRelease(src);
+    dsk_ime_t im;
+    ime_read(&im);
     pthread_mutex_lock(&layout_mu);
     memcpy(layout, t, sizeof t[0] * (size_t)n);
     layout_n = n;
+    ime_now = im;
     pthread_mutex_unlock(&layout_mu);
 }
 
@@ -221,4 +247,12 @@ int dsk_char_key(unsigned cp, int *hid, int *shift)
         }
     }
     return -1;
+}
+
+int dsk_ime(dsk_ime_t *out)
+{
+    pthread_mutex_lock(&layout_mu);
+    *out = ime_now;
+    pthread_mutex_unlock(&layout_mu);
+    return *out->name ? 0 : -1;
 }
