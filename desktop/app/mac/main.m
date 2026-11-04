@@ -83,6 +83,10 @@ static NSImage *icon_image(int style, CGFloat points)
 @property(strong) id ftList;
 @property(strong) NSTimer *ftTimer;
 @property(assign) unsigned ftSeq;
+@property(assign) unsigned rxSeq; /* rd_agent_received_seq() last seen */
+@property(strong) NSScrollView *ftScroll;
+@property(strong) NSView *ftLive;        /* files under way, under the list */
+@property(strong) NSString *ftLiveText;  /* rd_agent_transfers_active() as shown */
 @property(assign) rd_status_t st;
 @property(assign) BOOL pairing;
 @property(strong) NSString *pairMsg;
@@ -666,6 +670,16 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
 
 /* ---------------- the File Transfer window ---------------- */
 
+/* a file from the browser: File Transfer opens with it, as a chat would */
+- (void)rxTick
+{
+    unsigned r = rd_agent_received_seq();
+    if (r != self.rxSeq) {
+        self.rxSeq = r;
+        [self showFiles:nil];
+    }
+}
+
 - (void)showFiles:(id)sender
 {
     if (!self.ftWindow) {
@@ -700,10 +714,16 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
         send.autoresizingMask = NSViewMinXMargin;
         send.bezelColor = NSColor.controlAccentColor;
         button(@"Clear", v, NSMakeRect(W - 94, 10, 80, 30), self, @selector(ftClear:)).autoresizingMask = NSViewMinXMargin;
+        NSView *live = [[NSView alloc] initWithFrame:NSMakeRect(0, BAR, W, 0)];
+        live.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
+        [v addSubview:live];
+        self.ftLive = live;
+        self.ftScroll = sv;
         self.ftList = list;
         self.ftWindow = w;
         [w center];
     }
+    self.ftLiveText = nil; /* the rows again, as they are now */
     self.ftSeq = rd_agent_transfers_seq() - 1; /* fill it now */
     [self ftTick];
     if (!self.ftTimer)
@@ -712,8 +732,57 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     [self.ftWindow makeKeyAndOrderFront:nil];
 }
 
+/* Files under way: a row each under the list, the name and how much of how much and how fast over a
+ * progress bar; the list gives them room. */
+- (void)ftLiveTick
+{
+    char *t = rd_agent_transfers_active();
+    NSString *s = str(t);
+    free(t);
+    if (self.ftLiveText && [s isEqualToString:self.ftLiveText])
+        return;
+    self.ftLiveText = s;
+    char *copy = strdup(s.UTF8String);
+    rd_xfer_live_t v[16];
+    int n = rd_xfers_live_parse(copy, v, 16);
+    for (NSView *x in [self.ftLive.subviews copy])
+        [x removeFromSuperview];
+    const CGFloat ROW = 46, PAD = 10, BAR = 50, INFO = 170;
+    NSRect b = self.ftWindow.contentView.bounds;
+    CGFloat W = b.size.width, live = n ? n * ROW + PAD : 0;
+    self.ftLive.frame = NSMakeRect(0, BAR, W, live);
+    self.ftScroll.frame = NSMakeRect(0, BAR + live, W, b.size.height - BAR - live);
+    for (int i = 0; i < n; i++) {
+        CGFloat y = live - PAD / 2 - (i + 1) * ROW;
+        char how[120];
+        rd_xfer_live_text(&v[i], how, sizeof how);
+        NSTextField *name = [NSTextField labelWithString:[NSString stringWithFormat:@"%@ %@", v[i].in ? @"↓" : @"↑", str(v[i].name)]];
+        name.frame = NSMakeRect(14, y + 22, W - 28 - INFO, 18);
+        name.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        name.autoresizingMask = NSViewWidthSizable;
+        NSTextField *info = [NSTextField labelWithString:str(how)];
+        info.frame = NSMakeRect(W - 14 - INFO, y + 22, INFO, 18);
+        info.alignment = NSTextAlignmentRight;
+        info.font = [NSFont systemFontOfSize:11];
+        info.textColor = NSColor.secondaryLabelColor;
+        info.autoresizingMask = NSViewMinXMargin;
+        NSProgressIndicator *bar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(14, y + 4, W - 28, 14)];
+        bar.style = NSProgressIndicatorStyleBar;
+        bar.indeterminate = NO;
+        bar.minValue = 0;
+        bar.maxValue = 1;
+        bar.doubleValue = rd_xfer_live_frac(&v[i]);
+        bar.autoresizingMask = NSViewWidthSizable;
+        [self.ftLive addSubview:name];
+        [self.ftLive addSubview:info];
+        [self.ftLive addSubview:bar];
+    }
+    free(copy);
+}
+
 - (void)ftTick
 {
+    [self ftLiveTick];
     unsigned seq = rd_agent_transfers_seq();
     if (seq == self.ftSeq)
         return;
@@ -890,6 +959,8 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     rd_agent_status(&s);
     self.st = s;
     [self refreshItem];
+    self.rxSeq = rd_agent_received_seq();
+    [NSTimer scheduledTimerWithTimeInterval:0.7 target:self selector:@selector(rxTick) userInfo:nil repeats:YES];
     BOOL background = [args containsObject:@"--background"];
     if (!background || s.state == RD_UNPAIRED || !CGPreflightScreenCaptureAccess())
         [self showWindow:nil];

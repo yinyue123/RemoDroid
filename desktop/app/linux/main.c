@@ -28,8 +28,9 @@ static struct {
     GtkWidget *log_win, *log_view;
     unsigned log_seq;
     guint log_timer;
-    GtkWidget *ft_win, *ft_list, *ft_scroll, *ft_empty;
-    unsigned ft_seq;
+    GtkWidget *ft_win, *ft_list, *ft_scroll, *ft_empty, *ft_live;
+    char *ft_live_text; /* rd_agent_transfers_active() as last shown */
+    unsigned ft_seq, rx_seq;
     guint ft_timer;
 } U;
 
@@ -681,8 +682,47 @@ static gboolean ft_to_end(gpointer ud)
     return G_SOURCE_REMOVE;
 }
 
+/* Files under way: a row each under the list, the name over a progress bar with how much and how fast. */
+static void ft_live(void)
+{
+    char *text = rd_agent_transfers_active();
+    if (!text || (U.ft_live_text && !strcmp(text, U.ft_live_text))) {
+        free(text);
+        return;
+    }
+    free(U.ft_live_text);
+    U.ft_live_text = text;
+    GList *kids = gtk_container_get_children(GTK_CONTAINER(U.ft_live));
+    for (GList *k = kids; k; k = k->next)
+        gtk_widget_destroy(k->data);
+    g_list_free(kids);
+    char *copy = g_strdup(text);
+    rd_xfer_live_t v[16];
+    int n = rd_xfers_live_parse(copy, v, 16);
+    for (int i = 0; i < n; i++) {
+        char what[600], how[120];
+        snprintf(what, sizeof what, "%s %s", v[i].in ? "\xE2\x86\x93" : "\xE2\x86\x91", v[i].name); /* ↓ coming, ↑ going */
+        rd_xfer_live_text(&v[i], how, sizeof how);
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+        GtkWidget *name = gtk_label_new(what);
+        gtk_label_set_xalign(GTK_LABEL(name), 0);
+        gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_MIDDLE);
+        GtkWidget *bar = gtk_progress_bar_new();
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(bar), rd_xfer_live_frac(&v[i]));
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(bar), how);
+        gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(bar), TRUE);
+        gtk_box_pack_start(GTK_BOX(row), name, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(row), bar, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(U.ft_live), row, FALSE, FALSE, 0);
+    }
+    g_free(copy);
+    gtk_widget_show_all(U.ft_live);
+    gtk_widget_set_visible(U.ft_live, n > 0);
+}
+
 static gboolean ft_tick(gpointer ud)
 {
+    ft_live();
     unsigned seq = rd_agent_transfers_seq();
     if (seq == U.ft_seq)
         return G_SOURCE_CONTINUE;
@@ -793,6 +833,9 @@ static void show_files(void)
         gtk_box_pack_start(GTK_BOX(inner), U.ft_list, FALSE, FALSE, 0);
         gtk_container_add(GTK_CONTAINER(U.ft_scroll), inner);
         gtk_box_pack_start(GTK_BOX(box), U.ft_scroll, TRUE, TRUE, 0);
+        U.ft_live = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        gtk_container_set_border_width(GTK_CONTAINER(U.ft_live), 12);
+        gtk_box_pack_start(GTK_BOX(box), U.ft_live, FALSE, FALSE, 0);
         GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         gtk_container_set_border_width(GTK_CONTAINER(bar), 10);
         GtkWidget *hint = gtk_label_new("Drop files here to send them");
@@ -810,12 +853,26 @@ static void show_files(void)
         gtk_box_pack_start(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
         gtk_box_pack_start(GTK_BOX(box), bar, FALSE, FALSE, 0);
         gtk_widget_show_all(box);
+        gtk_widget_hide(U.ft_live);
     }
+    free(U.ft_live_text); /* the rows again, as they are now */
+    U.ft_live_text = NULL;
     U.ft_seq = rd_agent_transfers_seq() - 1; /* fill it now */
     ft_tick(NULL);
     if (!U.ft_timer)
         U.ft_timer = g_timeout_add(700, ft_tick, NULL);
     gtk_window_present(GTK_WINDOW(U.ft_win));
+}
+
+/* A file from the browser: File Transfer opens with it, as a chat would. */
+static gboolean rx_tick(gpointer ud)
+{
+    unsigned r = rd_agent_received_seq();
+    if (r != U.rx_seq) {
+        U.rx_seq = r;
+        show_files();
+    }
+    return G_SOURCE_CONTINUE;
 }
 
 static void build_window(void)
@@ -990,6 +1047,8 @@ static void on_startup(GApplication *a, gpointer ud)
     }
     rd_agent_status(&U.st);
     refresh();
+    U.rx_seq = rd_agent_received_seq();
+    g_timeout_add(700, rx_tick, NULL);
     if (wayland_session())
         g_idle_add(offer_x11, NULL);
 }

@@ -199,6 +199,7 @@ void   files_pump(void);       /* sends pulled chunks while the channel has room
 
 /* transfers.c: the File Transfer list (rd_agent_transfers) */
 void transfers_init(void);
+char *files_live(void); /* files.c: rd_agent_transfers_active()'s text; caller frees */
 void transfers_add(const char *dir, const char *path, long long size); /* dir: "in" (from the viewer) or "out" */
 /* Files the person at the computer sends to the viewer: they may be pulled from anywhere until the
  * session ends. Returns the file.offer list ({path, name, size}), NULL if none is a file. */

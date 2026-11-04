@@ -21,4 +21,16 @@ void rd_xfer_when(long long ms, char *out, size_t cap);    /* "17:50" today, "10
 void rd_xfer_badge(const char *name, char *ext, size_t cap, unsigned *rgb);
 int  rd_xfer_is_image(const char *name);                   /* shown as a picture rather than a badge */
 
+/* A file under way (rd_agent_transfers_active()), shown as a row with a progress bar. */
+typedef struct {
+    int in;                 /* 1: coming from the viewer's browser; 0: going to it */
+    long long size, got, bps;
+    const char *path, *name; /* inside the text given to rd_xfers_live_parse */
+} rd_xfer_live_t;
+
+/* Parses rd_agent_transfers_active() text in place into out (up to max); returns the count. */
+int    rd_xfers_live_parse(char *text, rd_xfer_live_t *out, int max);
+double rd_xfer_live_frac(const rd_xfer_live_t *x);                          /* 0..1 */
+void   rd_xfer_live_text(const rd_xfer_live_t *x, char *out, size_t cap);  /* "3.2 MB of 10.0 MB · 1.5 MB/s" */
+
 #endif

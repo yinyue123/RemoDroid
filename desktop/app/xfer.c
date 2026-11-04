@@ -134,3 +134,56 @@ void rd_xfer_badge(const char *name, char *ext, size_t cap, unsigned *rgb)
         ext[i] = (char)toupper((unsigned char)e[i]);
     ext[i] = 0;
 }
+
+int rd_xfers_live_parse(char *text, rd_xfer_live_t *out, int max)
+{
+    int n = 0;
+    for (char *line = text; line && *line && n < max;) {
+        char *nl = strchr(line, '\n');
+        if (nl)
+            *nl = 0;
+        char *f[5];
+        int k = 0;
+        for (char *p = line; k < 5; k++) {
+            f[k] = p;
+            char *t = k < 4 ? strchr(p, '\t') : NULL;
+            if (k < 4 && !t)
+                break;
+            if (t)
+                *t = 0, p = t + 1;
+        }
+        if (k == 5 && *f[4]) {
+            rd_xfer_live_t *x = &out[n++];
+            x->in = !strcmp(f[0], "in");
+            x->size = atoll(f[1]);
+            x->got = atoll(f[2]);
+            x->bps = atoll(f[3]);
+            x->path = x->name = f[4];
+            for (const char *s = f[4]; *s; s++)
+                if (*s == '/' || *s == '\\')
+                    x->name = s + 1;
+        }
+        line = nl ? nl + 1 : NULL;
+    }
+    return n;
+}
+
+double rd_xfer_live_frac(const rd_xfer_live_t *x)
+{
+    if (x->size <= 0)
+        return 0;
+    double f = (double)x->got / (double)x->size;
+    return f < 0 ? 0 : f > 1 ? 1 : f;
+}
+
+void rd_xfer_live_text(const rd_xfer_live_t *x, char *out, size_t cap)
+{
+    char got[32], size[32], speed[32] = "";
+    rd_xfer_size(x->got, got, sizeof got);
+    rd_xfer_size(x->size, size, sizeof size);
+    if (x->bps > 0) {
+        rd_xfer_size(x->bps, speed, sizeof speed);
+        strncat(speed, "/s", sizeof speed - strlen(speed) - 1);
+    }
+    snprintf(out, cap, "%s of %s%s%s", got, size, *speed ? " \xC2\xB7 " : "", speed);
+}

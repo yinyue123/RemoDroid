@@ -647,7 +647,12 @@ static char *g_ft_text;
 static ft_item_t *g_fti;
 static int g_ftn, g_ft_pos, g_ft_total, g_ft_dragging;
 static unsigned g_ft_seq;
+static unsigned g_rx_seq; /* rd_agent_received_seq() last seen: a new file from the browser opens File Transfer */
 static HFONT g_ft_name, g_ft_small, g_ft_badge;
+/* files under way, drawn under the list: rd_agent_transfers_active() as shown, and parsed */
+static char *g_live_text, *g_live_buf;
+static rd_xfer_live_t g_live[16];
+static int g_liven;
 
 /* {bcc18b79-ba16-442f-80c4-8a59c30c463b} */
 static const IID IID_ImageFactory = { 0xbcc18b79, 0xba16, 0x442f, { 0x80, 0xc4, 0x8a, 0x59, 0xc3, 0x0c, 0x46, 0x3b } };
@@ -1007,12 +1012,15 @@ static LRESULT CALLBACK ft_list_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProcW(h, msg, wp, lp);
 }
 
+static int ft_live_h(void) { return g_liven ? g_liven * ft_px(46) + ft_px(10) : 0; }
+
 static void ft_bar_layout(HWND h)
 {
     RECT r;
     GetClientRect(h, &r);
     int m = ft_px(10), bh = ft_px(30), bar = bh + 2 * m, y = r.bottom - bar + m;
-    MoveWindow(g_ft_list, 0, 0, r.right, r.bottom - bar, TRUE);
+    MoveWindow(g_ft_list, 0, 0, r.right, r.bottom - bar - ft_live_h(), TRUE);
+    InvalidateRect(h, NULL, TRUE);
     MoveWindow(GetDlgItem(h, IDC_FTCLEAR), r.right - m - ft_px(70), y, ft_px(70), bh, TRUE);
     MoveWindow(GetDlgItem(h, IDC_FTSEND), r.right - 2 * m - ft_px(170), y, ft_px(100), bh, TRUE);
     MoveWindow(GetDlgItem(h, IDC_FTHINT), m, y + ft_px(7), r.right - 4 * m - ft_px(170), bh - ft_px(7), TRUE);
@@ -1044,6 +1052,67 @@ static void ft_choose(HWND h)
     free(buf);
 }
 
+/* Files under way: when the list of them changes, the rows under the list are drawn again. */
+static void ft_live_refresh(void)
+{
+    char *t = rd_agent_transfers_active();
+    if (!g_ft || !t || (g_live_text && !strcmp(t, g_live_text))) {
+        free(t);
+        return;
+    }
+    int was = g_liven;
+    free(g_live_text);
+    free(g_live_buf);
+    g_live_text = t;
+    size_t n = strlen(t) + 1;
+    g_live_buf = malloc(n);
+    memcpy(g_live_buf, t, n);
+    g_liven = rd_xfers_live_parse(g_live_buf, g_live, 16);
+    if (g_liven != was)
+        ft_bar_layout(g_ft);
+    else
+        InvalidateRect(g_ft, NULL, TRUE);
+}
+
+/* each: ↓ or ↑ and the name, how much of how much and how fast on the right, a bar under them */
+static void ft_live_paint(HWND h)
+{
+    PAINTSTRUCT ps;
+    HDC dc = BeginPaint(h, &ps);
+    RECT r;
+    GetClientRect(h, &r);
+    int m = ft_px(10), bar = ft_px(30) + 2 * m, y = r.bottom - bar - ft_live_h() + ft_px(8);
+    SetBkMode(dc, TRANSPARENT);
+    HFONT of = SelectObject(dc, g_ft_small);
+    for (int i = 0; i < g_liven; i++, y += ft_px(46)) {
+        rd_xfer_live_t *x = &g_live[i];
+        char how[120], *label = malloc(strlen(x->name) + 8);
+        rd_xfer_live_text(x, how, sizeof how);
+        sprintf(label, "%s %s", x->in ? "\xE2\x86\x93" : "\xE2\x86\x91", x->name); /* ↓ coming, ↑ going */
+        wchar_t *wl = wide(label), *wh = wide(how);
+        SIZE hs = { 0 };
+        GetTextExtentPoint32W(dc, wh, (int)wcslen(wh), &hs);
+        RECT tr = { m, y, r.right - m, y + ft_px(20) };
+        SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+        DrawTextW(dc, wh, -1, &tr, DT_SINGLELINE | DT_RIGHT | DT_NOPREFIX);
+        tr.right -= hs.cx + m;
+        SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+        DrawTextW(dc, wl, -1, &tr, DT_SINGLELINE | DT_LEFT | DT_END_ELLIPSIS | DT_NOPREFIX);
+        RECT pb = { m, y + ft_px(24), r.right - m, y + ft_px(30) };
+        HBRUSH back = CreateSolidBrush(RGB(0xDD, 0xDD, 0xDD)), fill = CreateSolidBrush(RGB(0x07, 0xC1, 0x60));
+        FillRect(dc, &pb, back);
+        pb.right = pb.left + (LONG)((pb.right - pb.left) * rd_xfer_live_frac(x));
+        FillRect(dc, &pb, fill);
+        DeleteObject(back);
+        DeleteObject(fill);
+        free(label);
+        free(wl);
+        free(wh);
+    }
+    SelectObject(dc, of);
+    EndPaint(h, &ps);
+}
+
 static LRESULT CALLBACK ft_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
@@ -1071,7 +1140,11 @@ static LRESULT CALLBACK ft_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         ft_bar_layout(h);
         return 0;
     }
-    case WM_TIMER: ft_refresh(0); return 0;
+    case WM_TIMER:
+        ft_refresh(0);
+        ft_live_refresh();
+        return 0;
+    case WM_PAINT: ft_live_paint(h); return 0;
     case WM_CTLCOLORSTATIC:
         SetBkMode((HDC)wp, TRANSPARENT);
         SetTextColor((HDC)wp, GetSysColor(COLOR_GRAYTEXT));
@@ -1099,6 +1172,10 @@ static LRESULT CALLBACK ft_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_DESTROY:
         ft_free();
+        free(g_live_text);
+        free(g_live_buf);
+        g_live_text = g_live_buf = NULL;
+        g_liven = 0;
         g_ft = g_ft_list = NULL;
         return 0;
     }
@@ -1116,6 +1193,7 @@ static void show_files(void)
     }
     ShowWindow(g_ft, SW_SHOWNORMAL);
     ft_refresh(1);
+    ft_live_refresh();
     SetTimer(g_ft, 1, 700, NULL);
     SetForegroundWindow(g_ft);
 }
@@ -1288,6 +1366,14 @@ static LRESULT CALLBACK tray_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SHOWWIN:
         show_window();
         return 0;
+    case WM_TIMER: { /* a file from the browser: File Transfer opens with it, as a chat would */
+        unsigned r = rd_agent_received_seq();
+        if (r != g_rx_seq) {
+            g_rx_seq = r;
+            show_files();
+        }
+        return 0;
+    }
     case WM_CLOSE:
         rd_agent_stop();
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
@@ -1358,6 +1444,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     }
     rd_agent_status(&g_st);
     tray_update(0);
+    g_rx_seq = rd_agent_received_seq();
+    SetTimer(g_tray, 1, 700, NULL);
     if (!background || g_st.state == RD_UNPAIRED)
         show_window();
     MSG m;

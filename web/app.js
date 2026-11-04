@@ -2456,8 +2456,19 @@ function ftShow(it) {
   const m = it._meta, f = it._fill;
   if (!m) return;
   const size = fmtSize(it.size), pct = it.got != null && it.size ? Math.round(it.got / it.size * 100) + '%' : '';
+  /* the speed while it moves: bytes over the last half second or more, smoothed */
+  let speed = '';
+  if (['sending', 'receiving'].includes(it.state) && it.got != null) {
+    const t = now();
+    if (it._rt == null) { it._rt = t; it._rb = it.got; }
+    else if (t - it._rt >= 500) {
+      const bps = (it.got - it._rb) * 1000 / (t - it._rt);
+      it._bps = it._bps ? (it._bps + bps) / 2 : bps; it._rt = t; it._rb = it.got;
+    }
+    if (it._bps > 0) speed = ` · ${fmtSize(it._bps)}/s`;
+  }
   m.textContent = {
-    queued: `${size} · waiting`, hashing: `${size} · checking`, sending: `${size} · ${pct || 'sending'}`, receiving: `${size} · ${pct || 'receiving'}`,
+    queued: `${size} · waiting`, hashing: `${size} · checking`, sending: `${size} · ${pct || 'sending'}${speed}`, receiving: `${size} · ${pct || 'receiving'}${speed}`,
     failed: `${size} · ${it.err || 'failed'}`,
   }[it.state] || (it.dir === 'out' ? `${size} · ${it.gallery ? 'in Gallery' : 'sent'}` : size + (it.kept === false ? ' · not kept' : ''));
   it._b.classList.toggle('bad', it.state === 'failed');
@@ -2654,6 +2665,7 @@ function receiveOffer(files) {
   if (!files.length) return;
   const n = files.length, who = (st.device && st.device.name) || 'the computer';
   toast(n === 1 ? `Receiving ${files[0].name} from ${who}` : `Receiving ${n} files from ${who}`);
+  if (openId !== 'files') openSheet('files'); /* where they show up, with their progress */
   offerQ.push(...files);
   pumpOffers();
 }
@@ -2661,7 +2673,7 @@ function pumpOffers() {
   while (offerBusy < 3 && offerQ.length) {
     const f = offerQ.shift();
     offerBusy++;
-    pull(f.path, f.name, { size: f.size, done: () => { offerBusy--; pumpOffers(); } });
+    pull(f.path, f.name, { size: f.size, save: true, done: () => { offerBusy--; pumpOffers(); } }); /* downloaded once here */
   }
 }
 

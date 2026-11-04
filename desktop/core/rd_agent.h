@@ -79,6 +79,11 @@ RD_AGENT_API int  rd_agent_send_files(const char *const *paths, int n);
 RD_AGENT_API char *rd_agent_transfers(void);
 /* Grows whenever the list changes: a File Transfer window refreshes when it does. */
 RD_AGENT_API unsigned rd_agent_transfers_seq(void);
+/* Files under way, for File Transfer's progress rows, one per line:
+ * "<in|out>\t<size>\t<bytes so far>\t<bytes per second>\t<path>"; "" when none. Caller frees. */
+RD_AGENT_API char *rd_agent_transfers_active(void);
+/* Grows with every file the browser sends here: the apps open File Transfer when it does. */
+RD_AGENT_API unsigned rd_agent_received_seq(void);
 /* Empties the list (the files themselves stay). */
 RD_AGENT_API void rd_agent_transfers_clear(void);
 /* Changes a [desktop] / [video] / [files] setting ("desktop.view_only", "true") and saves it. */

@@ -38,6 +38,10 @@ typedef struct {
     /* pull: a chunk the channel didn't take yet */
     uint8_t *pending;
     size_t pending_len;
+    /* speed, for File Transfer's progress rows: bytes at rate_at, smoothed bytes per second */
+    uint64_t rate_at;
+    long long rate_got;
+    double bps;
 } xfer_t;
 
 static xfer_t X[MAX_XFERS];
@@ -48,6 +52,15 @@ static char offered[MAX_OFFERED][1024];
 static int noffered;
 static ev_timer pump_timer;
 static int pump_inited;
+
+/* Files under way, as the apps' File Transfer windows show them (rd_agent_transfers_active): a copy
+ * made on the agent thread, read on the UI's */
+static rd_mutex_t live_mu;
+static int live_inited;
+static char live_text[MAX_XFERS * 1100];
+static uint64_t live_at;
+
+static void publish(int force);
 
 /* ---------------- paths ---------------- */
 
@@ -232,6 +245,7 @@ static xfer_t *alloc_xfer(int xfer)
             memset(&X[i], 0, sizeof X[i]);
             X[i].used = 1;
             X[i].xfer = xfer;
+            X[i].rate_at = rd_now_ms();
             return &X[i];
         }
     return NULL;
@@ -249,6 +263,55 @@ static void close_xfer(xfer_t *x, int drop_tmp)
     }
     free(x->pending);
     memset(x, 0, sizeof *x);
+    publish(1);
+}
+
+/* "<in|out>\t<size>\t<bytes so far>\t<bytes per second>\t<path>" per transfer: every 250 ms while
+ * bytes move, at once when one starts or ends */
+static void publish(int force)
+{
+    uint64_t now = rd_now_ms();
+    if (!force && now - live_at < 250)
+        return;
+    live_at = now;
+    char buf[sizeof live_text];
+    size_t n = 0;
+    buf[0] = 0;
+    for (int i = 0; i < MAX_XFERS; i++) {
+        xfer_t *x = &X[i];
+        if (!x->used || !x->dest[0])
+            continue;
+        if (now - x->rate_at >= 500) {
+            double bps = (double)(x->got - x->rate_got) * 1000.0 / (double)(now - x->rate_at);
+            x->bps = x->bps > 0 ? (x->bps + bps) / 2 : bps;
+            x->rate_at = now;
+            x->rate_got = x->got;
+        }
+        int k = snprintf(buf + n, sizeof buf - n, "%s\t%lld\t%lld\t%lld\t%s\n", x->pull ? "out" : "in", x->size, x->got,
+                         (long long)x->bps, x->dest);
+        if (k < 0 || (size_t)k >= sizeof buf - n) {
+            buf[n] = 0;
+            break;
+        }
+        n += (size_t)k;
+    }
+    if (!live_inited) {
+        rd_mutex_init(&live_mu);
+        live_inited = 1;
+    }
+    rd_mutex_lock(&live_mu);
+    memcpy(live_text, buf, n + 1);
+    rd_mutex_unlock(&live_mu);
+}
+
+char *files_live(void)
+{
+    if (!live_inited)
+        return rd_strdup("");
+    rd_mutex_lock(&live_mu);
+    char *s = rd_strdup(live_text);
+    rd_mutex_unlock(&live_mu);
+    return s;
 }
 
 static int sha256_file(const char *path, char out[65])
@@ -311,6 +374,7 @@ void files_pump(void)
                     free(x->pending);
                     x->pending = NULL;
                     int xfer = x->xfer;
+                    transfers_add("out", x->dest, x->size); /* in File Transfer once it has all gone */
                     close_xfer(x, 0);
                     send_ctrl("file.done", xfer, NULL, 0);
                     break;
@@ -321,10 +385,12 @@ void files_pump(void)
             }
             if (rtc_dc_send(r, "file", 1, x->pending, x->pending_len) < 0)
                 break; /* buffer full: again on the next tick */
+            x->got += (long long)(x->pending_len - 8);
             free(x->pending);
             x->pending = NULL;
         }
     }
+    publish(0);
     if (active)
         start_pump();
     else if (pump_inited && ev_is_active(&pump_timer))
@@ -350,6 +416,7 @@ void files_chunk(const uint8_t *d, size_t n)
     x->next_seq++;
     if (x->got / (256 * 1024) != before / (256 * 1024))
         send_ctrl("file.progress", x->xfer, "bytes", x->got);
+    publish(0);
 }
 
 void files_cancel_all(void)
@@ -384,7 +451,6 @@ cJSON *files_offer(const char *const *paths, int n)
         if (noffered == MAX_OFFERED) /* the oldest offers make room */
             memmove(offered[0], offered[1], sizeof offered[0] * (MAX_OFFERED - 1)), noffered--;
         snprintf(offered[noffered++], sizeof offered[0], "%s", p);
-        transfers_add("out", p, (long long)st.st_size);
         cJSON *f = cJSON_CreateObject();
         cJSON_AddStringToObject(f, "path", p);
         cJSON_AddStringToObject(f, "name", base_name(p));
@@ -526,6 +592,7 @@ cJSON *files_control(const char *t, cJSON *d, char *code, size_t codecap, char *
         snprintf(x->sha, sizeof x->sha, "%s", msg_str(d, "sha256", ""));
         mbedtls_sha256_init(&x->md);
         mbedtls_sha256_starts(&x->md, 0);
+        publish(1);
         cJSON *r = cJSON_CreateObject();
         cJSON_AddNumberToObject(r, "xfer", xfer);
         cJSON_AddStringToObject(r, "path", path);
@@ -580,6 +647,9 @@ cJSON *files_control(const char *t, cJSON *d, char *code, size_t codecap, char *
             close_xfer(x, 0);
             FAIL("io_error", "cannot read %s", path);
         }
+        snprintf(x->dest, sizeof x->dest, "%s", path);
+        x->size = (long long)st.st_size;
+        publish(1);
         char sha[65] = "";
         if (st.st_size <= 64 * 1024 * 1024) /* larger ones would stall the agent thread */
             sha256_file(path, sha);

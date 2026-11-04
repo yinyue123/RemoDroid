@@ -15,7 +15,7 @@
 #define TRIM_AT (256 * 1024) /* bytes before the file is cut back to the newest KEEP lines */
 
 static rd_mutex_t mu;
-static unsigned seq;
+static unsigned seq, received; /* received: files the browser sent here */
 static char path[1024];
 
 void transfers_init(void)
@@ -75,6 +75,8 @@ void transfers_add(const char *dir, const char *file, long long size)
         }
     }
     seq++;
+    if (!strcmp(dir, "in"))
+        received++;
     rd_mutex_unlock(&mu);
 }
 
@@ -100,6 +102,18 @@ unsigned rd_agent_transfers_seq(void)
     unsigned s = seq;
     rd_mutex_unlock(&mu);
     return s;
+}
+
+char *rd_agent_transfers_active(void) { return files_live(); }
+
+unsigned rd_agent_received_seq(void)
+{
+    if (!path[0])
+        return 0;
+    rd_mutex_lock(&mu);
+    unsigned r = received;
+    rd_mutex_unlock(&mu);
+    return r;
 }
 
 void rd_agent_transfers_clear(void)
