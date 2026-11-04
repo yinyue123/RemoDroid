@@ -161,7 +161,7 @@ In each example the URL is `https://panel.example/mcp/alice/pixel7` and the toke
 | **Claude Desktop** | `claude_desktop_config.json` → `mcpServers`, through the `mcp-remote` bridge (below) | Header (via the bridge) |
 | **claude.ai** (web, iOS, Android) | Settings → Connectors → Add custom connector → the URL | OAuth |
 | **Claude API** | `mcp_servers` + an `mcp_toolset` tool, beta `mcp-client-2025-11-20` (below) | `authorization_token` |
-| **ChatGPT** | Settings → Apps & Connectors → Developer mode → Create → the URL | OAuth |
+| **ChatGPT** | Settings → Plugins → + → Add custom MCP server → the URL as Server URL (web) | OAuth |
 | **OpenAI API** (Responses) | `tools: [{"type": "mcp", ...}]` (below) | `authorization` |
 | **Codex CLI** | `~/.codex/config.toml` → `[mcp_servers.pixel7]` `url = …`, `bearer_token_env_var = "RD_TOKEN"` | Header |
 | **Cursor, VS Code, others** | an `mcpServers` entry with `url` and `headers` | Header |

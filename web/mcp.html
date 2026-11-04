@@ -156,11 +156,11 @@ CLIENTS.unshift(
     <li>In a chat, turn the connector on from the tools menu. It works in the Claude apps for iPhone and Android too.</li></ol>
     <p class="note">Custom connectors need a paid Claude plan; on Team and Enterprise an owner adds them first.</p>`, true],
   ['chatgpt', 'ChatGPT', (u, n) => `${PUBLIC()}<ol>
-    <li>In ChatGPT, open <b>Settings → Apps &amp; Connectors → Advanced settings</b> and turn on <b>Developer mode</b>.</li>
-    <li>Back in Apps &amp; Connectors, choose <b>Create</b>. Name it after the phone, set <b>Authentication</b> to OAuth, and paste the URL:</li></ol>${box(u, true)}
-    <ol start="3"><li>Choose <b>Create</b>. A RemoDroid page opens: log in if it asks, and tap <b>Allow</b>.</li>
-    <li>In a chat, pick the connector from the + menu (Developer mode).</li></ol>
-    <p class="note">Developer mode is in ChatGPT’s paid plans. OpenAI moves these menus now and then; search its help for “developer mode” if they’ve moved.</p>`, true],
+    <li>In ChatGPT on the web, open <b>Settings → Plugins</b>, select <b>+</b> and choose <b>Add custom MCP server</b>.</li>
+    <li>Name it, for example <b>${n}</b>. Under <b>Connection</b>, paste this as the <b>Server URL</b>, and set <b>Authentication</b> to OAuth:</li></ol>${box(u, true)}
+    <ol start="3"><li>Read the warning, choose <b>I understand and want to continue</b>, then <b>Create as a plugin</b>. A RemoDroid page opens: log in if it asks, and tap <b>Allow</b>.</li>
+    <li>Install the plugin. In a chat, type <b>@</b> and pick it.</li></ol>
+    <p class="note">No Developer mode needed any more. If <b>Add custom MCP server</b> isn't there, your ChatGPT plan or workspace doesn't allow custom servers yet; Business and Enterprise owners may have to allow them first. If Plugins says “Couldn’t load plugin settings”, that is ChatGPT’s own page: reload it. <a href="https://developers.openai.com/api/docs/guides/custom-mcp-server" target="_blank" rel="noopener">OpenAI’s guide</a></p>`, true],
 );
 
 /* a token named after the assistant: claude-code, codex, ... */
