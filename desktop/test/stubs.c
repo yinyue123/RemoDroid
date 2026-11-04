@@ -53,6 +53,14 @@ void dsk_mouse_button(int button, int down) { rec("button %d %s", button, down ?
 void dsk_mouse_scroll(double dx, double dy) { rec("scroll %.2f %.2f", dx, dy); }
 void dsk_key(int hid, int down) { rec("key 0x%02x %s", hid, down ? "down" : "up"); }
 void dsk_text(const char *utf8) { rec("text %s", utf8); }
+int dsk_char_key(unsigned cp, int *hid, int *shift) /* a US layout's letters */
+{
+    if (cp >= 'a' && cp <= 'z')
+        return *hid = 0x04 + (int)(cp - 'a'), *shift = 0, 0;
+    if (cp >= 'A' && cp <= 'Z')
+        return *hid = 0x04 + (int)(cp - 'A'), *shift = 1, 0;
+    return -1;
+}
 
 unsigned long dsk_clip_seq(void) { return 0; }
 char *dsk_clip_get(void) { return NULL; }

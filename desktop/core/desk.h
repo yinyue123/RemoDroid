@@ -87,7 +87,11 @@ void dsk_mouse_move(const dsk_screen_t *s, double nx, double ny); /* 0..1 across
 void dsk_mouse_button(int button, int down);                       /* 0 left, 1 middle, 2 right, 3 back, 4 forward */
 void dsk_mouse_scroll(double dx, double dy);                       /* notches; dy > 0 = up, dx > 0 = left */
 void dsk_key(int hid, int down);                                   /* USB HID usage (keyboard page) */
-void dsk_text(const char *utf8);
+void dsk_text(const char *utf8);                                   /* as text: no input method sees it */
+/* The key that types the character cp in the computer's current keyboard layout: 0 with its HID usage
+ * and whether it needs Shift, or -1 when no plain or shifted key types it (or the platform's dsk_text
+ * already types keys, as on Linux). */
+int  dsk_char_key(unsigned cp, int *hid, int *shift);
 
 /* ---- touch screen: real multi-touch, for viewers that send every finger (agent thread); optional ---- */
 /* spec names the backend, e.g. "inputtest:/run/rd-touch.sock" (Linux: browser/agent/touch_inputtest.c);
@@ -173,6 +177,7 @@ void input_release_all(void);
 void input_pads_close(void); /* the session ended: unplug the virtual gamepads */
 int  input_events(void);
 uint64_t input_last_ms(void); /* rd_mono_ms() of the viewer's last input, 0 if none */
+void input_type(const char *utf8); /* typed key by key, for the computer's input method */
 
 /* ai.c: the AI control API (mcp.md) — {"t": "api"} from the server, answered with one binary message */
 void ai_request(long id, const cJSON *d);

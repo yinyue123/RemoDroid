@@ -235,7 +235,7 @@ the same, so the viewer's HUD, quality sheet, keyboard sheet and file sheet keep
 |---|---|
 | `session.ready` (sent when ctrl opens) | adds `platform`, `screens` (§8.3) |
 | `quality.set`, `quality.state`, `stats` | same; preset 720p/1080p/**native** scales the capture |
-| `text` | types Unicode text (IME-safe path, §6) |
+| `text` | types Unicode text (IME-safe path, §6); with `keys: true` (the on-screen keyboard), each character as the key that types it in the computer's layout, so its input method (pinyin…) composes from them, and text only where no key does |
 | `key` (`press`/`down`/`up` with Android key codes) | the common ones (Enter, Backspace, arrows…) are mapped; the rest return `unsupported` |
 | `nav` | `back` → Alt+Left / Cmd+[, `home` → show desktop; the others return `unsupported` |
 | `clip.set`, `clip.changed` | system clipboard (§6) |

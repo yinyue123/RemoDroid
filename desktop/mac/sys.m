@@ -26,7 +26,11 @@ void dsk_os_name(char *out, size_t cap)
         snprintf(out, cap, "macOS %ld.%ld", (long)v.majorVersion, (long)v.minorVersion);
 }
 
-int dsk_init(char *problem, size_t cap) { return dsk_problem(problem, cap) > 0 ? -1 : 0; }
+int dsk_init(char *problem, size_t cap)
+{
+    mac_layout_watch();
+    return dsk_problem(problem, cap) > 0 ? -1 : 0;
+}
 
 int mac_can_capture(void) { return CGPreflightScreenCaptureAccess() ? 1 : 0; }
 int mac_can_control(void) { return AXIsProcessTrusted() ? 1 : 0; }

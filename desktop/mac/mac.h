@@ -9,5 +9,6 @@
 int      mac_can_capture(void);                  /* Screen Recording permission */
 int      mac_can_control(void);                  /* Accessibility permission */
 uint32_t mac_display_id(const dsk_screen_t *s);  /* CGDirectDisplayID */
+void     mac_layout_watch(void);                 /* input.c: learn the keyboard layout (main thread, later) */
 
 #endif

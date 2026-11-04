@@ -455,8 +455,10 @@ static void control(cJSON *m)
             error(m, "unsupported", "not on a computer");
         else
             reply(m, NULL);
-    } else if (!strcmp(t, "text")) {
-        if (!D.view_only)
+    } else if (!strcmp(t, "text")) { /* "keys": typed on the on-screen keyboard, for the input method */
+        if (!D.view_only && msg_bool(d, "keys", 0))
+            input_type(msg_str(d, "text", ""));
+        else if (!D.view_only)
             dsk_text(msg_str(d, "text", ""));
         reply(m, NULL);
     } else if (!strcmp(t, "clip.set")) {

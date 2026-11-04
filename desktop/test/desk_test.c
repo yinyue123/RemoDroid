@@ -197,6 +197,13 @@ static void test_input(void)
     uint8_t reset[5] = { 5 };
     input_handle(reset, sizeof reset);
     CHECK(has("button 0 up") && has("key 0x19 up") && has("key 0xe1 up"), "reset");
+    /* the on-screen keyboard: keys where the layout has them (the input method composes), text elsewhere */
+    STUB.n = 0;
+    input_type("aB中");
+    CHECK(STUB.n == 7 && !strcmp(STUB.ev[0], "key 0x04 down") && !strcmp(STUB.ev[1], "key 0x04 up") &&
+          !strcmp(STUB.ev[2], "key 0xe1 down") && !strcmp(STUB.ev[3], "key 0x05 down") &&
+          !strcmp(STUB.ev[4], "key 0x05 up") && !strcmp(STUB.ev[5], "key 0xe1 up") && !strcmp(STUB.ev[6], "text 中"),
+          "typed key by key: %d events, last %s", STUB.n, STUB.n ? STUB.ev[STUB.n - 1] : "-");
     /* touch from an old viewer: pointer 0 is the left button */
     STUB.n = 0;
     uint8_t t[14] = { 1, 0, 0, 1 };

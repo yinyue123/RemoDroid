@@ -19,6 +19,38 @@ static int8_t pad_on[DSK_MAX_PADS]; /* 1 open, -1 couldn't be created (not retri
 
 int input_events(void) { return events; }
 
+/* Text typed on the viewer's on-screen keyboard ("text" with "keys"): each character as the key that types
+ * it in the computer's current layout, so an input method (Chinese pinyin, Japanese, …) gets keystrokes to
+ * compose from, as with a real keyboard; only a character no key types goes in as text. Plain "text" stays
+ * text: finished words, which an input method must leave alone. */
+void input_type(const char *utf8)
+{
+    for (const unsigned char *p = (const unsigned char *)utf8; *p;) {
+        const unsigned char *start = p;
+        unsigned cp = *p++;
+        int more = cp >= 0xF0 ? 3 : cp >= 0xE0 ? 2 : cp >= 0xC0 ? 1 : 0;
+        cp &= more == 3 ? 0x07 : more == 2 ? 0x0F : more == 1 ? 0x1F : 0x7F;
+        for (; more && (*p & 0xC0) == 0x80; more--)
+            cp = cp << 6 | (*p++ & 0x3F);
+        int hid = 0, shift = 0;
+        if (!more && dsk_char_key(cp, &hid, &shift) == 0 && keymap_find(hid)) {
+            if (shift)
+                dsk_key(0xE1, 1);
+            dsk_key(hid, 1);
+            dsk_key(hid, 0);
+            if (shift)
+                dsk_key(0xE1, 0);
+        } else {
+            char one[8];
+            size_t n = (size_t)(p - start) < sizeof one ? (size_t)(p - start) : sizeof one - 1;
+            memcpy(one, start, n);
+            one[n] = 0;
+            dsk_text(one);
+        }
+        events++;
+    }
+}
+
 static uint64_t last_ms; /* the viewer's last input: assistants wait for the person (ai.c) */
 uint64_t input_last_ms(void) { return last_ms; }
 

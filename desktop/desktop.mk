@@ -53,8 +53,9 @@ DESK_DEFS  += -D_DARWIN_C_SOURCE -DEV_USE_SELECT=1 -DEV_USE_POLL=1 -DEV_USE_KQUE
 DESK_SCTP  += -DHAVE_SYS_QUEUE_H -DHAVE_STDATOMIC_H
 DESK_LIBS  := -framework ApplicationServices -framework CoreFoundation -framework CoreGraphics -framework CoreMedia \
               -framework CoreVideo -framework VideoToolbox -framework ScreenCaptureKit -framework Security \
-              -framework AppKit -framework UserNotifications -framework IOKit -lobjc
+              -framework AppKit -framework UserNotifications -framework IOKit -framework Carbon -lobjc
 DESK_SHARED := -dynamiclib -install_name @rpath/libremodroid.dylib
+DESK_HEADLESS_LIBS := -framework CoreFoundation # its main thread runs the run loop (headless.c)
 DESK_TEST_LIBS := -framework CoreFoundation -framework Security
 DESK_PIC   := -fPIC
 else
@@ -136,7 +137,7 @@ endif
 
 $(DESK_OUT)/remodroid-desktopd$(DESK_EXE): desktop/app/headless.c $(DESK_LIB) $(DESK_HEADLESS_EXTRA)
 	$(CC) $(OPT) $(ARCHFLAGS) -std=gnu11 -Idesktop/core $(DESK_WARN) -o $@ desktop/app/headless.c $(DESK_HEADLESS_EXTRA) \
-	    $(DESK_LINK) $(DESK_RPATH)
+	    $(DESK_LINK) $(DESK_RPATH) $(DESK_HEADLESS_LIBS)
 
 # Unit tests of the shared desktop code (no display needed)
 $(DESK_OUT)/desk_test$(DESK_EXE): desktop/test/desk_test.c $(filter-out $(DESK_OUT)/obj/$(DESK_SRC)/% \

@@ -3,11 +3,14 @@
  * repeated clicks carry a click count (double-click), and the modifier keys
  * held are set on every event, so ⇧-click and ⌘-drag work. */
 #include <ApplicationServices/ApplicationServices.h>
+#include <Carbon/Carbon.h>
+#include <dispatch/dispatch.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "desk.h"
+#include "mac.h"
 
 static CGEventSourceRef src;
 static CGPoint pos;
@@ -132,4 +135,90 @@ void dsk_text(const char *utf8)
     }
     flags = saved;
     CFRelease(s);
+}
+
+/* ---------------- characters → keys, for the input method (core input_type) ----------------
+ * Which key types a character depends on the keyboard layout (ABC, French, the layout under Pinyin…).
+ * macOS wants its input source calls on the main thread, so the table is built there, at start and
+ * whenever the input source changes, and read here on the agent's thread. Not built yet: text. */
+
+#define LAYOUT_MAX 256
+static pthread_mutex_t layout_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct { UniChar ch; uint16_t key; uint8_t shift; } layout[LAYOUT_MAX];
+static int layout_n;
+
+static void layout_build(void *unused)
+{
+    static struct { UniChar ch; uint16_t key; uint8_t shift; } t[LAYOUT_MAX];
+    int n = 0;
+    TISInputSourceRef src = TISCopyCurrentKeyboardLayoutInputSource();
+    CFDataRef data = src ? (CFDataRef)TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) : NULL;
+    if (data) {
+        const UCKeyboardLayout *kl = (const UCKeyboardLayout *)CFDataGetBytePtr(data);
+        UInt32 kbd = LMGetKbdType();
+        for (int sh = 0; sh < 2; sh++) { /* a key alone before a shifted one */
+            for (UInt16 key = 0; key < 128 && n < LAYOUT_MAX; key++) {
+                if (key >= kVK_ANSI_KeypadDecimal && key <= kVK_ANSI_Keypad9)
+                    continue; /* the main keys, not the keypad's */
+                UInt32 dead = 0;
+                UniChar c[4];
+                UniCharCount len = 0;
+                if (UCKeyTranslate(kl, key, kUCKeyActionDown, sh ? (shiftKey >> 8) & 0xFF : 0, kbd, kUCKeyTranslateNoDeadKeysMask,
+                                   &dead, 4, &len, c) != noErr || len != 1 || dead || c[0] < 0x20 || c[0] == 0x7F)
+                    continue;
+                int seen = 0;
+                for (int i = 0; i < n && !seen; i++)
+                    seen = t[i].ch == c[0];
+                if (!seen)
+                    t[n].ch = c[0], t[n].key = key, t[n].shift = (uint8_t)sh, n++;
+            }
+        }
+    }
+    if (src)
+        CFRelease(src);
+    pthread_mutex_lock(&layout_mu);
+    memcpy(layout, t, sizeof t[0] * (size_t)n);
+    layout_n = n;
+    pthread_mutex_unlock(&layout_mu);
+}
+
+static void layout_changed(CFNotificationCenterRef c, void *o, CFStringRef name, const void *obj, CFDictionaryRef info)
+{
+    layout_build(NULL);
+}
+
+static void layout_start(void *unused)
+{
+    layout_build(NULL);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(), NULL, layout_changed,
+                                    kTISNotifySelectedKeyboardInputSourceChanged, NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+}
+
+void mac_layout_watch(void)
+{
+    static int started;
+    if (!started++)
+        dispatch_async_f(dispatch_get_main_queue(), NULL, layout_start);
+}
+
+int dsk_char_key(unsigned cp, int *hid, int *shift)
+{
+    int key = -1;
+    pthread_mutex_lock(&layout_mu);
+    for (int i = 0; i < layout_n && key < 0; i++)
+        if (layout[i].ch == cp)
+            key = layout[i].key, *shift = layout[i].shift;
+    pthread_mutex_unlock(&layout_mu);
+    if (key < 0)
+        return -1;
+    size_t n;
+    const keymap_t *k = keymap_all(&n);
+    for (size_t i = 0; i < n; i++) {
+        if (k[i].mac == key) {
+            *hid = k[i].hid;
+            return 0;
+        }
+    }
+    return -1;
 }

@@ -1354,7 +1354,8 @@ $('#kbText').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preve
 
 /* ---- computers: the floating on-screen keyboard, for an iPad or iPhone without a physical keyboard ----
  * Keys fire on pointer-down and all go over the ordered ctrl channel, so "ab⌫" never arrives out of
- * order: characters as "text" (typed through the computer's own layout), the rest as "key" (Android
+ * order: characters as "text" with "keys" (each typed with the key that makes it in the computer's own
+ * layout, so its input method, pinyin and the like, composes from them), the rest as "key" (Android
  * key codes, desktop/core/keymap.c). Shift and Ctrl are one-shot: Ctrl then c is Ctrl+C. ⌫ and the
  * arrows repeat while held. Drag it by its grip; the spot is remembered per browser. */
 const FKB = { abc: ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'], sym1: ['1234567890', '-/:;()$&@"', '.,?!\''], sym2: ['[]{}#%^*+=', '_\\|~<>`"\':', '.,?!\''] };
@@ -1390,7 +1391,7 @@ function fkbKey(code) { /* a key, with the latched modifiers held around it */
 }
 function fkbChar(ch) {
   if ((fkb.ctrl || fkb.alt || fkb.meta) && charKey(ch)) { fkbKey(charKey(ch)); return; }
-  fkbSend('text', { text: fkb.shift && fkb.layer === 'abc' ? ch.toUpperCase() : ch });
+  fkbSend('text', { text: fkb.shift && fkb.layer === 'abc' ? ch.toUpperCase() : ch, keys: true });
   fkbUnlatch();
 }
 /* a soft click per key, since Safari gives no haptics */

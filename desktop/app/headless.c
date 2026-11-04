@@ -15,6 +15,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 #include "rd_agent.h"
 
 static volatile int quit, done, ok;
@@ -120,7 +124,11 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
     while (!quit)
+#ifdef __APPLE__
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.2, false); /* the main queue: the keyboard layout (mac/input.c) */
+#else
         sleep_ms(200);
+#endif
     rd_agent_stop();
     return 0;
 }

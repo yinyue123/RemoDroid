@@ -184,3 +184,6 @@ void dsk_text(const char *utf8)
     }
     XFlush(d);
 }
+
+/* dsk_text above already types each character with the key that makes it, so the input method sees keys */
+int dsk_char_key(unsigned cp, int *hid, int *shift) { return -1; }

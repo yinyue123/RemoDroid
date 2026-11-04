@@ -223,6 +223,37 @@ void dsk_key(int hid, int down)
         local_key(hid, down);
 }
 
+/* The key for a character in the layout of the window being typed into (VkKeyScanEx), as the scan code
+ * keymap.c knows; characters that need Ctrl or AltGr are typed as text. */
+int dsk_char_key(unsigned cp, int *hid, int *shift)
+{
+    if (cp < 0x20 || cp > 0xFFFF || cp == 0x7F)
+        return -1;
+    HWND fg = GetForegroundWindow();
+    HKL hkl = GetKeyboardLayout(fg ? GetWindowThreadProcessId(fg, NULL) : 0);
+    SHORT r = VkKeyScanExW((WCHAR)cp, hkl);
+    int state = (r >> 8) & 0xFF;
+    if (r == -1 || (state & ~1))
+        return -1;
+#ifndef MAPVK_VK_TO_VSC_EX
+#define MAPVK_VK_TO_VSC_EX 4
+#endif
+    UINT sc = MapVirtualKeyExW((UINT)(r & 0xFF), MAPVK_VK_TO_VSC_EX, hkl);
+    if (!sc || (sc & 0xFF00) == 0xE100)
+        return -1;
+    uint16_t win = (uint16_t)((sc & 0xFF00) ? 0xE000 | (sc & 0xFF) : sc & 0xFF);
+    size_t n;
+    const keymap_t *k = keymap_all(&n);
+    for (size_t i = 0; i < n; i++) {
+        if (k[i].win == win && (k[i].hid < 0x54 || k[i].hid > 0x63)) { /* not the keypad's */
+            *hid = k[i].hid;
+            *shift = state & 1;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 void dsk_text(const char *utf8)
 {
     size_t n = strlen(utf8);
