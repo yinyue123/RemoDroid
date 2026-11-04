@@ -272,13 +272,22 @@ async def trackpad(browser, http_port, probe, logs):
         if ev:
             got.append(ev["keysym"])
     ok["keyboard_types"] = got == ["a", "b"]
-    # 🌐: the next input method, with the computer's shortcut (Linux: Super+Space)
+    # 🌐: the next input method, with the computer's shortcut (Linux: Super+Space). It shows the
+    # computer's input method (ime.state): Xvfb's keyboard group, "English (US)" or the like, as EN
     probe.drain()
-    await page.locator("#tpadKeys .k", has_text=re.compile("^🌐$")).first.tap()
+    globe = page.locator("#tpadKeys .k.globe").first
+    try:
+        await page.wait_for_function("() => { const k = document.querySelector('#tpadKeys .k.globe'); return k && k.textContent !== '🌐'; }", timeout=5000)
+    except Exception:
+        pass
+    out["ime_label"] = await globe.text_content()
+    out["ime_ball"] = await page.locator("#ballIme").text_content()
+    ok["ime_shown"] = bool(re.fullmatch(r"[A-Z]{1,2}", out["ime_label"] or "")) and out["ime_ball"] == out["ime_label"]
+    await globe.tap()
     ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keysym"] == "space", 3)
     out["globe"] = ev and {"state": ev["state"]}
     ok["globe_super_space"] = bool(ev and ev["state"] & 0x40)
-    gb = await page.locator("#tpadKeys .k", has_text=re.compile("^🌐$")).first.bounding_box()
+    gb = await globe.bounding_box()
     eb = await page.locator("#tpadKeys .k", has_text=re.compile("^esc$")).first.bounding_box()
     ok["globe_top_row"] = abs(gb["y"] - eb["y"]) < 1
     await page.locator("#tpKb").tap()
