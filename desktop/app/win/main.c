@@ -10,7 +10,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commctrl.h>
+#include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 #include <windowsx.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +22,7 @@
 #include "icon.h"
 #include "rd_agent.h"
 #include "web.h"
+#include "xfer.h"
 
 #define WM_TRAY (WM_APP + 1)
 #define WM_STATUS (WM_APP + 2)
@@ -26,16 +30,19 @@
 #define WM_CONFIRM (WM_APP + 4)
 #define WM_TOAST (WM_APP + 5)
 #define WM_SHOWWIN (WM_APP + 6)
+#define WM_FTDRAGGED (WM_APP + 7)
 
 enum {
-    ID_STATUS = 100, ID_VIEWER, ID_DISCONNECT, ID_VIEWONLY, ID_OPEN, ID_WINDOW, ID_LOG, ID_LOGIN, ID_ADMIN, ID_QUIT,
+    ID_STATUS = 100, ID_VIEWER, ID_DISCONNECT, ID_VIEWONLY, ID_OPEN, ID_WINDOW, ID_FILES, ID_LOG, ID_LOGIN, ID_ADMIN, ID_QUIT,
     IDC_TITLE = 200, IDC_STATE, IDC_L_LINE, IDC_LINE, IDC_HINT, IDC_L_NAME, IDC_NAME,
-    IDC_INFO, IDC_UNPAIR, IDC_SHOWLOG, IDC_VIEWONLY, IDC_LOGIN, IDC_DISC, IDC_OPENPANEL, IDC_DROP,
+    IDC_INFO, IDC_UNPAIR, IDC_SHOWLOG, IDC_VIEWONLY, IDC_LOGIN, IDC_DISC, IDC_OPENPANEL, IDC_DROP, IDC_FILES,
     IDC_LOGTEXT = 300, IDC_LOGPATH, IDC_LOGCOPY, IDC_LOGFOLDER,
+    IDC_FTLIST = 400, IDC_FTHINT, IDC_FTSEND, IDC_FTCLEAR, ID_FTOPEN, ID_FTFOLDER,
 };
 #define IDC_PAIR IDOK /* Enter in the window presses it */
 
-static const wchar_t TRAY_CLASS[] = L"RemoDroidTray", WIN_CLASS[] = L"RemoDroidWindow", LOG_CLASS[] = L"RemoDroidLog";
+static const wchar_t TRAY_CLASS[] = L"RemoDroidTray", WIN_CLASS[] = L"RemoDroidWindow", LOG_CLASS[] = L"RemoDroidLog",
+                     FT_CLASS[] = L"RemoDroidFiles", FTLIST_CLASS[] = L"RemoDroidFilesList";
 static HINSTANCE g_inst;
 static HWND g_tray, g_win;
 static rd_status_t g_st;
@@ -50,6 +57,7 @@ static HFONT g_log_font, g_log_mono;
 static unsigned g_log_seq;
 
 static void show_log(void);
+static void show_files(void);
 
 /* ---------------- helpers ---------------- */
 
@@ -260,6 +268,7 @@ static void tray_menu(int x, int y)
     if (g_st.panel[0])
         AppendMenuW(m, MF_STRING, ID_OPEN, L"Open window");
     AppendMenuW(m, MF_STRING, ID_WINDOW, g_st.state == RD_UNPAIRED ? L"Pair with a panel…" : L"Pairing && status…");
+    AppendMenuW(m, MF_STRING, ID_FILES, L"File Transfer");
     AppendMenuW(m, MF_STRING, ID_LOG, L"Show log");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (login_enabled() ? MF_CHECKED : 0), ID_LOGIN, L"Start at login");
@@ -273,6 +282,7 @@ static void tray_menu(int x, int y)
     case ID_VIEWONLY: rd_agent_set("desktop.view_only", g_st.view_only ? "false" : "true"); break;
     case ID_OPEN: open_panel(); break;
     case ID_WINDOW: show_window(); break;
+    case ID_FILES: show_files(); break;
     case ID_LOG: show_log(); break;
     case ID_LOGIN: set_login(!login_enabled()); break;
     case ID_ADMIN: set_admin(!admin_enabled()); break;
@@ -305,6 +315,7 @@ static const ctl_t CTLS[] = {
     { IDC_VIEWONLY, L"BUTTON", L"View only: ignore the viewer's mouse and keyboard", WS_TABSTOP | BS_AUTOCHECKBOX },
     { IDC_LOGIN, L"BUTTON", L"Start RemoDroid when I log in", WS_TABSTOP | BS_AUTOCHECKBOX },
     { IDC_SHOWLOG, L"BUTTON", L"Show log", WS_TABSTOP | BS_PUSHBUTTON },
+    { IDC_FILES, L"BUTTON", L"File Transfer", WS_TABSTOP | BS_PUSHBUTTON },
 };
 
 static void place(int id, int x, int y, int w, int h, int show)
@@ -397,8 +408,8 @@ static void layout(void)
         place(IDC_UNPAIR, W - 20 - 90, y, 90, 30, 1);
         y += 42;
         SetDlgItemTextW(g_win, IDC_DROP, g_st.state == RD_IN_SESSION
-                                             ? L"Drop files on this window to send them: the viewer's browser "
-                                               L"downloads them."
+                                             ? L"Drop files on this window to send them to the viewer's "
+                                               L"File Transfer."
                                              : L"While someone is viewing, drop files on this window to send them.");
         place(IDC_DROP, X, y, FW, 40, 1);
         y += 46;
@@ -409,7 +420,8 @@ static void layout(void)
     y += 28;
     place(IDC_LOGIN, X, y, FW, 24, 1);
     y += 36;
-    place(IDC_SHOWLOG, X, y, 90, 28, 1);
+    place(IDC_FILES, X, y, 110, 28, 1);
+    place(IDC_SHOWLOG, X + 118, y, 90, 28, 1);
     y += 44;
     UINT d = dpi_of(g_win);
     RECT r = { 0, 0, MulDiv(W, (int)d, 96), MulDiv(y, (int)d, 96) };
@@ -587,6 +599,527 @@ static void show_log(void)
     SetForegroundWindow(g_log);
 }
 
+/* files dropped on a window: to the viewer, whose File Transfer keeps them */
+static void send_paths(char **paths, int k)
+{
+    wchar_t t[120];
+    if (rd_agent_send_files((const char *const *)paths, k) < 0)
+        swprintf(t, 120, L"Nobody is viewing this computer, so nothing was sent.");
+    else
+        swprintf(t, 120, k == 1 ? L"Sending 1 file to the viewer…" : L"Sending %d files to the viewer…", k);
+    toast(t);
+}
+
+static void send_drop(HDROP drop)
+{
+    UINT n = DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
+    char **paths = calloc(n ? n : 1, sizeof *paths);
+    int k = 0;
+    for (UINT i = 0; i < n; i++) {
+        wchar_t f[MAX_PATH * 4];
+        if (DragQueryFileW(drop, i, f, MAX_PATH * 4))
+            paths[k++] = utf8(f);
+    }
+    DragFinish(drop);
+    send_paths(paths, k);
+    for (int i = 0; i < k; i++)
+        free(paths[i]);
+    free(paths);
+}
+
+/* ---------------- the File Transfer window ----------------
+ * What the viewer's browser sent here (left, white) and what was sent to it (right, green), like a
+ * chat, drawn by hand: a list box can't hold rows as tall as a picture. A file drags out to Explorer
+ * or the desktop, double-click opens it, right-click shows it in its folder; files dropped on the
+ * window go to the viewer. */
+
+typedef struct {
+    rd_xfer_t x;
+    wchar_t *path;
+    int gone, stamp_y;
+    RECT b;           /* the bubble, in list coordinates */
+    HBITMAP thumb;    /* pictures: the shell's thumbnail */
+    int tw, th;
+} ft_item_t;
+
+static HWND g_ft, g_ft_list;
+static char *g_ft_text;
+static ft_item_t *g_fti;
+static int g_ftn, g_ft_pos, g_ft_total, g_ft_dragging;
+static unsigned g_ft_seq;
+static HFONT g_ft_name, g_ft_small, g_ft_badge;
+
+/* {bcc18b79-ba16-442f-80c4-8a59c30c463b} */
+static const IID IID_ImageFactory = { 0xbcc18b79, 0xba16, 0x442f, { 0x80, 0xc4, 0x8a, 0x59, 0xc3, 0x0c, 0x46, 0x3b } };
+
+static int ft_px(int v) { return MulDiv(v, (int)dpi_of(g_ft), 96); }
+
+static void ft_fonts(void)
+{
+    NONCLIENTMETRICSW nm = { .cbSize = sizeof nm };
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof nm, &nm, 0);
+    LOGFONTW lf = nm.lfMessageFont;
+    int d = (int)dpi_of(g_ft);
+    HFONT *f[] = { &g_ft_name, &g_ft_small, &g_ft_badge };
+    for (int i = 0; i < 3; i++)
+        if (*f[i])
+            DeleteObject(*f[i]);
+    lf.lfHeight = -MulDiv(11, d, 72);
+    g_ft_name = CreateFontIndirectW(&lf);
+    lf.lfHeight = -MulDiv(9, d, 72);
+    g_ft_small = CreateFontIndirectW(&lf);
+    lf.lfHeight = -MulDiv(8, d, 72);
+    lf.lfWeight = FW_BOLD;
+    g_ft_badge = CreateFontIndirectW(&lf);
+    for (int id = IDC_FTHINT; id <= IDC_FTCLEAR; id++)
+        SendDlgItemMessageW(g_ft, id, WM_SETFONT, (WPARAM)g_ft_small, TRUE);
+}
+
+/* The shell's thumbnail, on the bubble's white where the picture is see-through. */
+static HBITMAP ft_thumb(const wchar_t *path, int *w, int *h)
+{
+    IShellItem *si = NULL;
+    IShellItemImageFactory *f = NULL;
+    HBITMAP bm = NULL;
+    if (FAILED(SHCreateItemFromParsingName(path, NULL, &IID_IShellItem, (void **)&si)))
+        return NULL;
+    if (SUCCEEDED(si->lpVtbl->QueryInterface(si, &IID_ImageFactory, (void **)&f))) {
+        SIZE sz = { ft_px(220), ft_px(160) };
+        if (FAILED(f->lpVtbl->GetImage(f, sz, SIIGBF_RESIZETOFIT | SIIGBF_THUMBNAILONLY, &bm)))
+            bm = NULL;
+        f->lpVtbl->Release(f);
+    }
+    si->lpVtbl->Release(si);
+    DIBSECTION ds;
+    if (!bm || (size_t)GetObjectW(bm, sizeof ds, &ds) != sizeof ds || ds.dsBm.bmBitsPixel != 32 || !ds.dsBm.bmBits) {
+        if (bm)
+            DeleteObject(bm);
+        return NULL;
+    }
+    *w = ds.dsBm.bmWidth;
+    *h = abs(ds.dsBm.bmHeight);
+    uint8_t *p = ds.dsBm.bmBits;
+    size_t n = (size_t)*w * (size_t)*h;
+    int alpha = 0;
+    for (size_t i = 0; i < n && !alpha; i++)
+        alpha = p[i * 4 + 3] != 0;
+    for (size_t i = 0; alpha && i < n; i++) /* premultiplied, over white */
+        for (int c = 0; c < 3; c++)
+            p[i * 4 + c] = (uint8_t)(p[i * 4 + c] + (255 - p[i * 4 + 3]));
+    return bm;
+}
+
+static void ft_free(void)
+{
+    for (int i = 0; i < g_ftn; i++) {
+        free(g_fti[i].path);
+        if (g_fti[i].thumb)
+            DeleteObject(g_fti[i].thumb);
+    }
+    free(g_fti);
+    rd_agent_free(g_ft_text);
+    g_fti = NULL;
+    g_ft_text = NULL;
+    g_ftn = 0;
+}
+
+/* Bubble places for the list's width; the scroll bar follows. */
+static void ft_layout(int to_end)
+{
+    RECT r;
+    GetClientRect(g_ft_list, &r);
+    int W = r.right, y = ft_px(8), m = ft_px(16);
+    for (int i = 0; i < g_ftn; i++) {
+        ft_item_t *it = &g_fti[i];
+        it->stamp_y = -1;
+        if (it->x.stamp) {
+            it->stamp_y = y + ft_px(6);
+            y += ft_px(36);
+        }
+        int bw, bh;
+        if (it->thumb) {
+            bw = it->tw + ft_px(8);
+            bh = it->th + ft_px(8);
+        } else {
+            bw = W - 2 * m - ft_px(60);
+            if (bw > ft_px(310))
+                bw = ft_px(310);
+            bh = ft_px(80);
+        }
+        int x = it->x.in ? m : W - m - bw;
+        SetRect(&it->b, x, y, x + bw, y + bh);
+        y += bh + ft_px(12);
+    }
+    g_ft_total = y;
+    if (to_end)
+        g_ft_pos = g_ft_total;
+    int max = g_ft_total - r.bottom;
+    g_ft_pos = g_ft_pos > max ? max : g_ft_pos;
+    g_ft_pos = g_ft_pos < 0 ? 0 : g_ft_pos;
+    SCROLLINFO si = { .cbSize = sizeof si, .fMask = SIF_ALL, .nMin = 0, .nMax = g_ft_total - 1,
+                      .nPage = (UINT)r.bottom, .nPos = g_ft_pos };
+    SetScrollInfo(g_ft_list, SB_VERT, &si, TRUE);
+    InvalidateRect(g_ft_list, NULL, FALSE);
+}
+
+static void ft_refresh(int force)
+{
+    unsigned seq = rd_agent_transfers_seq();
+    if (!g_ft || (!force && seq == g_ft_seq))
+        return;
+    g_ft_seq = seq;
+    ft_free();
+    g_ft_text = rd_agent_transfers();
+    rd_xfer_t *v;
+    g_ftn = rd_xfers_parse(g_ft_text, &v);
+    g_fti = calloc((size_t)(g_ftn ? g_ftn : 1), sizeof *g_fti);
+    for (int i = 0; i < g_ftn; i++) {
+        ft_item_t *it = &g_fti[i];
+        it->x = v[i];
+        it->path = wide(v[i].path);
+        DWORD a = GetFileAttributesW(it->path);
+        it->gone = a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY);
+        if (!it->gone && rd_xfer_is_image(v[i].name) && i >= g_ftn - 60) /* the newest pictures as pictures */
+            it->thumb = ft_thumb(it->path, &it->tw, &it->th);
+    }
+    free(v);
+    ft_layout(1);
+}
+
+static void ft_paint(HWND h)
+{
+    PAINTSTRUCT ps;
+    HDC wdc = BeginPaint(h, &ps);
+    RECT r;
+    GetClientRect(h, &r);
+    HDC dc = CreateCompatibleDC(wdc);
+    HBITMAP buf = CreateCompatibleBitmap(wdc, r.right, r.bottom), old = SelectObject(dc, buf);
+    HBRUSH bg = CreateSolidBrush(RGB(0xED, 0xED, 0xED));
+    FillRect(dc, &r, bg);
+    DeleteObject(bg);
+    SetBkMode(dc, TRANSPARENT);
+    if (!g_ftn) {
+        RECT t = { ft_px(30), ft_px(70), r.right - ft_px(30), r.bottom };
+        SelectObject(dc, g_ft_name);
+        SetTextColor(dc, RGB(0x88, 0x88, 0x88));
+        DrawTextW(dc, L"Nothing yet.\n\nFiles the viewer sends land here, and files you drop on this window go to "
+                      L"the viewer's browser.",
+                  -1, &t, DT_CENTER | DT_WORDBREAK);
+    }
+    HDC tdc = CreateCompatibleDC(wdc);
+    HGDIOBJ none = GetStockObject(NULL_PEN);
+    for (int i = 0; i < g_ftn; i++) {
+        ft_item_t *it = &g_fti[i];
+        RECT b = it->b;
+        OffsetRect(&b, 0, -g_ft_pos);
+        if (b.bottom < -ft_px(40) || b.top > r.bottom + ft_px(40))
+            continue;
+        if (it->stamp_y >= 0) {
+            char when[40];
+            rd_xfer_when(it->x.ms, when, sizeof when);
+            wchar_t *w = wide(when);
+            RECT t = { 0, it->stamp_y - g_ft_pos, r.right, it->stamp_y - g_ft_pos + ft_px(20) };
+            SelectObject(dc, g_ft_small);
+            SetTextColor(dc, RGB(0x99, 0x99, 0x99));
+            DrawTextW(dc, w, -1, &t, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+            free(w);
+        }
+        COLORREF fill = it->x.in ? RGB(0xFF, 0xFF, 0xFF) : RGB(0x95, 0xEC, 0x69);
+        HBRUSH br = CreateSolidBrush(fill);
+        HGDIOBJ ob = SelectObject(dc, br), op = SelectObject(dc, none);
+        RoundRect(dc, b.left, b.top, b.right + 1, b.bottom + 1, ft_px(8), ft_px(8));
+        int ty = b.top + ft_px(16), tx = it->x.in ? b.left : b.right, s = it->x.in ? -1 : 1;
+        POINT tail[3] = { { tx, ty }, { tx + s * ft_px(6), ty + ft_px(6) }, { tx, ty + ft_px(12) } };
+        Polygon(dc, tail, 3);
+        SelectObject(dc, op);
+        SelectObject(dc, ob);
+        DeleteObject(br);
+        if (it->thumb) {
+            HGDIOBJ ot = SelectObject(tdc, it->thumb);
+            BitBlt(dc, b.left + ft_px(4), b.top + ft_px(4), it->tw, it->th, tdc, 0, 0, SRCCOPY);
+            SelectObject(tdc, ot);
+            continue;
+        }
+        int bw = ft_px(40), bh = ft_px(50), pad = ft_px(14);
+        RECT badge = { b.right - pad - bw, b.top + (b.bottom - b.top - bh) / 2, b.right - pad, 0 };
+        badge.bottom = badge.top + bh;
+        wchar_t *nm = wide(it->x.name);
+        RECT t = { b.left + pad, b.top + ft_px(12), badge.left - ft_px(12), b.top + ft_px(12) };
+        SelectObject(dc, g_ft_name);
+        TEXTMETRICW tm;
+        GetTextMetricsW(dc, &tm);
+        t.bottom = t.top + 2 * tm.tmHeight;
+        SetTextColor(dc, it->gone ? RGB(0x99, 0x99, 0x99) : RGB(0x19, 0x19, 0x19));
+        DrawTextW(dc, nm, -1, &t, DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS | DT_NOPREFIX);
+        free(nm);
+        char sz[64], line[120];
+        rd_xfer_size(it->x.size, sz, sizeof sz);
+        snprintf(line, sizeof line, "%s%s", sz, it->gone ? " · moved or deleted" : "");
+        wchar_t *w = wide(line);
+        RECT m = { t.left, t.bottom + ft_px(4), t.right + ft_px(12), b.bottom - ft_px(6) };
+        SelectObject(dc, g_ft_small);
+        SetTextColor(dc, it->x.in ? RGB(0x99, 0x99, 0x99) : RGB(0x4E, 0x8A, 0x35));
+        DrawTextW(dc, w, -1, &m, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        free(w);
+        char ext[8];
+        unsigned rgb;
+        rd_xfer_badge(it->x.name, ext, sizeof ext, &rgb);
+        br = CreateSolidBrush(it->gone ? RGB(0xBB, 0xBB, 0xBB) : RGB(rgb >> 16, (rgb >> 8) & 0xFF, rgb & 0xFF));
+        ob = SelectObject(dc, br);
+        op = SelectObject(dc, none);
+        RoundRect(dc, badge.left, badge.top, badge.right + 1, badge.bottom + 1, ft_px(6), ft_px(6));
+        SelectObject(dc, op);
+        SelectObject(dc, ob);
+        DeleteObject(br);
+        w = wide(ext);
+        badge.top += bh / 3;
+        SelectObject(dc, g_ft_badge);
+        SetTextColor(dc, RGB(0xFF, 0xFF, 0xFF));
+        DrawTextW(dc, w, -1, &badge, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        free(w);
+    }
+    DeleteDC(tdc);
+    BitBlt(wdc, 0, 0, r.right, r.bottom, dc, 0, 0, SRCCOPY);
+    SelectObject(dc, old);
+    DeleteObject(buf);
+    DeleteDC(dc);
+    EndPaint(h, &ps);
+}
+
+static int ft_hit(int x, int y)
+{
+    POINT p = { x, y + g_ft_pos };
+    for (int i = 0; i < g_ftn; i++)
+        if (PtInRect(&g_fti[i].b, p))
+            return i;
+    return -1;
+}
+
+static void ft_open(int i, int folder)
+{
+    if (i < 0 || i >= g_ftn)
+        return;
+    if (g_fti[i].gone) {
+        toast(L"That file is no longer there.");
+        return;
+    }
+    if (folder) {
+        wchar_t args[MAX_PATH * 4 + 16];
+        swprintf(args, MAX_PATH * 4 + 16, L"/select,\"%ls\"", g_fti[i].path);
+        ShellExecuteW(NULL, L"open", L"explorer.exe", args, NULL, SW_SHOWNORMAL);
+    } else {
+        ShellExecuteW(NULL, L"open", g_fti[i].path, NULL, NULL, SW_SHOWNORMAL);
+    }
+}
+
+/* The file itself, as Explorer would drag it: copied wherever it's dropped. */
+static void ft_drag(int i)
+{
+    IShellItem *si = NULL;
+    IDataObject *data = NULL;
+    if (FAILED(SHCreateItemFromParsingName(g_fti[i].path, NULL, &IID_IShellItem, (void **)&si)))
+        return;
+    if (SUCCEEDED(si->lpVtbl->BindToHandler(si, NULL, &BHID_DataObject, &IID_IDataObject, (void **)&data))) {
+        DWORD effect = 0;
+        g_ft_dragging = 1;
+        SHDoDragDrop(g_ft, data, NULL, DROPEFFECT_COPY, &effect);
+        PostMessageW(g_ft, WM_FTDRAGGED, 0, 0); /* after a drop on this window, which isn't a send */
+        data->lpVtbl->Release(data);
+    }
+    si->lpVtbl->Release(si);
+}
+
+static void ft_scroll_to(int pos)
+{
+    RECT r;
+    GetClientRect(g_ft_list, &r);
+    int max = g_ft_total - r.bottom;
+    pos = pos > max ? max : pos;
+    pos = pos < 0 ? 0 : pos;
+    if (pos == g_ft_pos)
+        return;
+    g_ft_pos = pos;
+    SetScrollPos(g_ft_list, SB_VERT, pos, TRUE);
+    InvalidateRect(g_ft_list, NULL, FALSE);
+}
+
+static LRESULT CALLBACK ft_list_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_PAINT: ft_paint(h); return 0;
+    case WM_ERASEBKGND: return 1;
+    case WM_SIZE: ft_layout(0); return 0;
+    case WM_MOUSEWHEEL: ft_scroll_to(g_ft_pos - GET_WHEEL_DELTA_WPARAM(wp) * ft_px(60) / WHEEL_DELTA); return 0;
+    case WM_VSCROLL: {
+        SCROLLINFO si = { .cbSize = sizeof si, .fMask = SIF_ALL };
+        GetScrollInfo(h, SB_VERT, &si);
+        int p = g_ft_pos;
+        switch (LOWORD(wp)) {
+        case SB_LINEUP: p -= ft_px(40); break;
+        case SB_LINEDOWN: p += ft_px(40); break;
+        case SB_PAGEUP: p -= (int)si.nPage; break;
+        case SB_PAGEDOWN: p += (int)si.nPage; break;
+        case SB_THUMBTRACK:
+        case SB_THUMBPOSITION: p = si.nTrackPos; break;
+        case SB_TOP: p = 0; break;
+        case SB_BOTTOM: p = g_ft_total; break;
+        }
+        ft_scroll_to(p);
+        return 0;
+    }
+    case WM_LBUTTONDOWN: {
+        SetFocus(h);
+        int i = ft_hit(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+        POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+        ClientToScreen(h, &pt);
+        if (i >= 0 && !g_fti[i].gone && DragDetect(h, pt))
+            ft_drag(i);
+        return 0;
+    }
+    case WM_LBUTTONDBLCLK: ft_open(ft_hit(GET_X_LPARAM(lp), GET_Y_LPARAM(lp)), 0); return 0;
+    case WM_CONTEXTMENU: {
+        POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) }, c = pt;
+        ScreenToClient(h, &c);
+        int i = ft_hit(c.x, c.y);
+        if (i < 0 || g_fti[i].gone)
+            return 0;
+        HMENU m = CreatePopupMenu();
+        AppendMenuW(m, MF_STRING, ID_FTOPEN, L"Open");
+        AppendMenuW(m, MF_STRING, ID_FTFOLDER, L"Show in folder");
+        int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, NULL);
+        DestroyMenu(m);
+        if (cmd)
+            ft_open(i, cmd == ID_FTFOLDER);
+        return 0;
+    }
+    case WM_SETCURSOR:
+        if (LOWORD(lp) == HTCLIENT) {
+            POINT p;
+            GetCursorPos(&p);
+            ScreenToClient(h, &p);
+            int i = ft_hit(p.x, p.y);
+            SetCursor(LoadCursorW(NULL, (LPCWSTR)(i >= 0 && !g_fti[i].gone ? IDC_HAND : IDC_ARROW)));
+            return TRUE;
+        }
+        break;
+    case WM_DROPFILES: return SendMessageW(GetParent(h), msg, wp, lp);
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+static void ft_bar_layout(HWND h)
+{
+    RECT r;
+    GetClientRect(h, &r);
+    int m = ft_px(10), bh = ft_px(30), bar = bh + 2 * m, y = r.bottom - bar + m;
+    MoveWindow(g_ft_list, 0, 0, r.right, r.bottom - bar, TRUE);
+    MoveWindow(GetDlgItem(h, IDC_FTCLEAR), r.right - m - ft_px(70), y, ft_px(70), bh, TRUE);
+    MoveWindow(GetDlgItem(h, IDC_FTSEND), r.right - 2 * m - ft_px(170), y, ft_px(100), bh, TRUE);
+    MoveWindow(GetDlgItem(h, IDC_FTHINT), m, y + ft_px(7), r.right - 4 * m - ft_px(170), bh - ft_px(7), TRUE);
+}
+
+static void ft_choose(HWND h)
+{
+    enum { CAP = 32768 };
+    wchar_t *buf = calloc(CAP, sizeof *buf);
+    OPENFILENAMEW of = { .lStructSize = sizeof of, .hwndOwner = h, .lpstrFile = buf, .nMaxFile = CAP,
+                         .lpstrTitle = L"Send to the viewer",
+                         .Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY };
+    if (GetOpenFileNameW(&of)) {
+        /* one file: its path; several: the folder, then each name */
+        char *paths[256];
+        int k = 0;
+        const wchar_t *dir = buf, *name = buf + wcslen(buf) + 1;
+        if (!*name)
+            paths[k++] = utf8(buf);
+        for (; *name && k < 256; name += wcslen(name) + 1) {
+            wchar_t full[MAX_PATH * 4];
+            swprintf(full, MAX_PATH * 4, L"%ls\\%ls", dir, name);
+            paths[k++] = utf8(full);
+        }
+        send_paths(paths, k);
+        for (int i = 0; i < k; i++)
+            free(paths[i]);
+    }
+    free(buf);
+}
+
+static LRESULT CALLBACK ft_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_CREATE:
+        g_ft = h;
+        g_ft_list = CreateWindowExW(0, FTLIST_CLASS, L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP, 0, 0, 10, 10,
+                                    h, (HMENU)(INT_PTR)IDC_FTLIST, g_inst, NULL);
+        CreateWindowExW(0, L"STATIC", L"Drop files here to send them to the viewer",
+                        WS_CHILD | WS_VISIBLE | SS_ENDELLIPSIS | SS_NOPREFIX, 0, 0, 10, 10, h,
+                        (HMENU)(INT_PTR)IDC_FTHINT, g_inst, NULL);
+        CreateWindowExW(0, L"BUTTON", L"Send files…", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10,
+                        h, (HMENU)(INT_PTR)IDC_FTSEND, g_inst, NULL);
+        CreateWindowExW(0, L"BUTTON", L"Clear", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10, h,
+                        (HMENU)(INT_PTR)IDC_FTCLEAR, g_inst, NULL);
+        DragAcceptFiles(h, TRUE);
+        DragAcceptFiles(g_ft_list, TRUE);
+        ft_fonts();
+        return 0;
+    case WM_SIZE: ft_bar_layout(h); return 0;
+    case WM_DPICHANGED: {
+        RECT *r = (RECT *)lp;
+        SetWindowPos(h, NULL, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER);
+        ft_fonts();
+        ft_refresh(1); /* thumbnails at the new size */
+        ft_bar_layout(h);
+        return 0;
+    }
+    case WM_TIMER: ft_refresh(0); return 0;
+    case WM_CTLCOLORSTATIC:
+        SetBkMode((HDC)wp, TRANSPARENT);
+        SetTextColor((HDC)wp, GetSysColor(COLOR_GRAYTEXT));
+        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+    case WM_COMMAND:
+        if (LOWORD(wp) == IDC_FTSEND)
+            ft_choose(h);
+        else if (LOWORD(wp) == IDC_FTCLEAR &&
+                 MessageBoxW(h, L"Clear the list? The files themselves stay where they are.", L"File Transfer",
+                             MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+            rd_agent_transfers_clear();
+            ft_refresh(1);
+        }
+        return 0;
+    case WM_DROPFILES:
+        if (g_ft_dragging) /* a file from this list, dropped back on it */
+            DragFinish((HDROP)wp);
+        else
+            send_drop((HDROP)wp);
+        return 0;
+    case WM_FTDRAGGED: g_ft_dragging = 0; return 0;
+    case WM_CLOSE:
+        KillTimer(h, 1);
+        ShowWindow(h, SW_HIDE);
+        return 0;
+    case WM_DESTROY:
+        ft_free();
+        g_ft = g_ft_list = NULL;
+        return 0;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+static void show_files(void)
+{
+    if (!g_ft) {
+        UINT d = dpi_of(NULL);
+        CreateWindowExW(0, FT_CLASS, L"File Transfer", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                        MulDiv(480, (int)d, 96), MulDiv(640, (int)d, 96), NULL, NULL, g_inst, NULL);
+        if (!g_ft)
+            return;
+    }
+    ShowWindow(g_ft, SW_SHOWNORMAL);
+    ft_refresh(1);
+    SetTimer(g_ft, 1, 700, NULL);
+    SetForegroundWindow(g_ft);
+}
+
 static void on_paired(void *ud, int ok, const char *msg);
 
 static void start_pair(void)
@@ -653,30 +1186,10 @@ static LRESULT CALLBACK win_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         case IDC_LOGIN: set_login(IsDlgButtonChecked(h, IDC_LOGIN) == BST_CHECKED); return 0;
         case IDC_SHOWLOG: show_log(); return 0;
+        case IDC_FILES: show_files(); return 0;
         }
         break;
-    case WM_DROPFILES: { /* to the viewer, whose browser downloads them */
-        HDROP drop = (HDROP)wp;
-        UINT n = DragQueryFileW(drop, 0xFFFFFFFF, NULL, 0);
-        char **paths = calloc(n ? n : 1, sizeof *paths);
-        int k = 0;
-        for (UINT i = 0; i < n; i++) {
-            wchar_t f[MAX_PATH * 4];
-            if (DragQueryFileW(drop, i, f, MAX_PATH * 4))
-                paths[k++] = utf8(f);
-        }
-        DragFinish(drop);
-        wchar_t t[120];
-        if (rd_agent_send_files((const char *const *)paths, k) < 0)
-            swprintf(t, 120, L"Nobody is viewing this computer, so nothing was sent.");
-        else
-            swprintf(t, 120, k == 1 ? L"Sending 1 file to the viewer…" : L"Sending %d files to the viewer…", k);
-        toast(t);
-        for (int i = 0; i < k; i++)
-            free(paths[i]);
-        free(paths);
-        return 0;
-    }
+    case WM_DROPFILES: send_drop((HDROP)wp); return 0;
     case WM_CLOSE:
         ShowWindow(h, SW_HIDE);
         return 0;
@@ -792,6 +1305,7 @@ static LRESULT CALLBACK tray_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
 {
     g_inst = inst;
+    OleInitialize(NULL); /* dragging files out of File Transfer */
     int background = wcsstr(cmdline, L"--background") != NULL;
     char *conf = NULL;
     const wchar_t *c = wcsstr(cmdline, L"--conf ");
@@ -818,6 +1332,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     lc.lpfnWndProc = log_proc;
     lc.lpszClassName = LOG_CLASS;
     RegisterClassW(&lc);
+    WNDCLASSW fc = wc;
+    fc.lpfnWndProc = ft_proc;
+    fc.lpszClassName = FT_CLASS;
+    RegisterClassW(&fc);
+    WNDCLASSW flc = { .style = CS_DBLCLKS, .lpfnWndProc = ft_list_proc, .hInstance = inst, .lpszClassName = FTLIST_CLASS,
+                      .hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW) };
+    RegisterClassW(&flc);
     WM_TASKBARCREATED = RegisterWindowMessageW(L"TaskbarCreated");
     g_tray = CreateWindowExW(0, TRAY_CLASS, L"RemoDroid", 0, 0, 0, 0, 0, NULL, NULL, inst, NULL);
     int sz = GetSystemMetrics(SM_CXSMICON) * (int)dpi_of(NULL) / 96;

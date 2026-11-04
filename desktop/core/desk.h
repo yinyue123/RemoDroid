@@ -187,6 +187,10 @@ cJSON *files_control(const char *t, cJSON *d, char *code, size_t codecap, char *
 void   files_chunk(const uint8_t *d, size_t n);
 void   files_cancel_all(void);
 void   files_pump(void);       /* sends pulled chunks while the channel has room */
+
+/* transfers.c: the File Transfer list (rd_agent_transfers) */
+void transfers_init(void);
+void transfers_add(const char *dir, const char *path, long long size); /* dir: "in" (from the viewer) or "out" */
 /* Files the person at the computer sends to the viewer: they may be pulled from anywhere until the
  * session ends. Returns the file.offer list ({path, name, size}), NULL if none is a file. */
 cJSON *files_offer(const char *const *paths, int n);

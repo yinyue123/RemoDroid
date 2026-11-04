@@ -73,6 +73,14 @@ RD_AGENT_API void rd_agent_end_session(void);
 /* Sends files to the viewer (dropped on the app's window): its browser downloads them. Paths are
  * UTF-8; returns at once, the transfer runs on the agent's thread. 0, or -1 when nobody is viewing. */
 RD_AGENT_API int  rd_agent_send_files(const char *const *paths, int n);
+/* The File Transfer list, oldest first: files the viewer's browser sent here ("in", saved in
+ * [files] upload_dir) and files sent to it ("out"), one per line: "<unix ms>\t<in|out>\t<size>\t<path>"
+ * (paths UTF-8). Kept in transfers.log beside desktop.ini, the newest 500. Caller frees. */
+RD_AGENT_API char *rd_agent_transfers(void);
+/* Grows whenever the list changes: a File Transfer window refreshes when it does. */
+RD_AGENT_API unsigned rd_agent_transfers_seq(void);
+/* Empties the list (the files themselves stay). */
+RD_AGENT_API void rd_agent_transfers_clear(void);
 /* Changes a [desktop] / [video] / [files] setting ("desktop.view_only", "true") and saves it. */
 RD_AGENT_API void rd_agent_set(const char *key, const char *value);
 RD_AGENT_API void rd_agent_status(rd_status_t *out);

@@ -1032,8 +1032,7 @@ document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contai
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeMenu(); closeSheet(); } });
 function syncMenuStates() {
   const dk = desk(), screens = (st.ready && st.ready.screens) || [];
-  for (const a of ['back', 'home', 'recents', 'photo']) menu.querySelector(`[data-act="${a}"]`).hidden = dk && a !== 'photo';
-  menu.querySelector('[data-act="photo"] span').textContent = dk ? 'Upload' : 'Photo';
+  for (const a of ['back', 'home', 'recents']) menu.querySelector(`[data-act="${a}"]`).hidden = dk;
   $('#menuSound').hidden = dk && !(st.ready && st.ready.caps && st.ready.caps.audio);
   $('#menuMonitor').hidden = !dk || screens.length < 2;
   const sb = $('#menuScreen');
@@ -1123,7 +1122,7 @@ menu.addEventListener('click', e => {
   else if (a === 'keys' && desk()) { closeMenu(); fkb.el.hidden ? showFkb() : hideFkb(); }
   else if (a === 'gamepad') { closeMenu(); gpad.hidden ? showGpad() : hideGpad(); }
   else if (a === 'trackpad') { closeMenu(); tpSwitch(); }
-  else if (['photo', 'clip', 'settings', 'keys', 'turn'].includes(a)) { closeMenu(); openSheet(a); }
+  else if (['files', 'clip', 'settings', 'keys', 'turn'].includes(a)) { closeMenu(); openSheet(a); }
   else if (['back', 'home', 'recents'].includes(a)) { sendCtrl('nav', { button: a }).catch(() => toast('Not connected')); closeMenu(); }
   else if (a === 'screen') {
     const on = st.panel === 'off', what = desk() ? 'Display' : 'Phone screen';
@@ -1156,8 +1155,12 @@ function openSheet(id) {
   if (id === 'clip') { clipEdited = false; refreshClip(); }
   if (id === 'settings') renderTab(currentTab);
   if (id === 'turn') { renderTurn(); testTurns(); }
-  if (id === 'photo') $('#ph-dest').textContent = desk() ? `to ${uploadDir()}` : `to ${S.destDir}${S.mediaScan ? ' · added to Gallery' : ''}`;
-  $('#photoInput').accept = desk() ? '' : 'image/*';
+  if (id === 'files') {
+    const who = (st.device && st.device.name) || noun();
+    $('#ft-dest').textContent = desk() ? `with ${who} · saved there in ${uploadDir()}` : `with ${who} · saved there in ${S.destDir}${S.mediaScan ? ' · added to Gallery' : ''}`;
+    ftUnread(false);
+    if (FT.dev !== ftDev()) ftUse(ftDev()); else ftRender();
+  }
   ball.hidden = true;
 }
 function closeSheet() {
@@ -2338,70 +2341,218 @@ function padPoll() {
 }
 window.addEventListener('gamepadconnected', () => { if (!PAD.poll) PAD.poll = requestAnimationFrame(padPoll); });
 
-/* ================= photo upload (A.6 file.push + A.8 chunks) ================= */
+/* ================= File Transfer (A.6 file.push / file.pull + A.8 chunks) =================
+ * Files and the device, as a chat: what this browser sent (right) and what came from the device (left:
+ * dropped on the computer's RemoDroid window, or downloaded in Settings → Files). Kept in this browser
+ * (IndexedDB), per device, with the files themselves: click one to save it, or drag it out to a folder. */
 let xferId = 1;
 const uploads = new Map();
 const uploadQ = [];
 let uploading = false;
+const FT = { db: null, dev: '', items: [], dragging: false };
+const FT_KEEP = 300, FT_BLOB_MAX = 512 * 1048576; /* bigger files are listed but not kept */
 function stamp() {
   const d = new Date(), p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  svg: 'image/svg+xml', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg',
+  m4a: 'audio/mp4', wav: 'audio/wav', txt: 'text/plain', json: 'application/json', zip: 'application/zip' };
+const extOf = n => { const m = /\.([^./\\]+)$/.exec(n || ''); return m ? m[1].toLowerCase() : ''; };
+const mimeOf = n => MIME[extOf(n)] || 'application/octet-stream';
+const BADGES = [['pdf', '#D9453B'], ['doc docx odt rtf pages', '#2B6CD9'], ['xls xlsx csv ods numbers', '#1F9D55'],
+  ['ppt pptx odp key', '#E0782A'], ['zip rar 7z gz tgz xz bz2 tar', '#C99A1C'], ['png jpg jpeg gif bmp webp heic svg', '#8E5BD9'],
+  ['mp4 mov mkv avi webm mp3 m4a wav flac ogg', '#D94A8C'], ['apk exe msi dmg pkg deb rpm appimage', '#4F7A8A'],
+  ['txt md log json xml yml yaml ini', '#6B7280']];
+function badge(name) {
+  const e = extOf(name), hit = e && BADGES.find(([l]) => l.split(' ').includes(e));
+  return { text: e && e.length <= 4 ? e.toUpperCase() : 'FILE', color: hit ? hit[1] : '#8A94A6' };
+}
+function ftWhen(t) {
+  const d = new Date(t), n = new Date(), p = x => String(x).padStart(2, '0'), hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  if (d.toDateString() === n.toDateString()) return hm;
+  return (d.getFullYear() === n.getFullYear() ? '' : d.getFullYear() + '/') + `${p(d.getMonth() + 1)}/${p(d.getDate())} ${hm}`;
+}
+
+/* ---- the store: one record per file, the file itself in it (blob) when it fits ---- */
+function ftDb() {
+  if (!FT.db) FT.db = new Promise(res => {
+    try {
+      const r = indexedDB.open('remodroid-files', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('items', { keyPath: 'id', autoIncrement: true }).createIndex('dev', 'dev');
+      r.onsuccess = () => res(r.result);
+      r.onerror = r.onblocked = () => res(null);
+    } catch (e) { res(null); }
+  });
+  return FT.db;
+}
+async function ftTx(mode, fn) {
+  const db = await ftDb();
+  if (!db) return null;
+  return new Promise(res => {
+    try {
+      const tx = db.transaction('items', mode), req = fn(tx.objectStore('items'));
+      tx.oncomplete = () => res(req ? req.result : true);
+      tx.onerror = tx.onabort = e => { if (e && e.preventDefault) e.preventDefault(); res(null); };
+    } catch (e) { res(null); }
+  });
+}
+const ftRec = it => { const o = {}; for (const k in it) if (k[0] !== '_' && it[k] !== undefined) o[k] = it[k]; return o; };
+function ftStore(it) { /* in order, so the first put's id is there for the next */
+  it._saved = (it._saved || Promise.resolve()).then(async () => {
+    let id = await ftTx('readwrite', s => s.put(ftRec(it)));
+    if (id == null && it.blob) { it.blob = null; it.kept = false; id = await ftTx('readwrite', s => s.put(ftRec(it))); } /* storage full */
+    if (id != null) it.id = id;
+  });
+}
+async function ftUse(dev) {
+  if (FT.dev === dev) return;
+  FT.dev = dev;
+  const fresh = FT.items.filter(i => i.dev === dev);
+  FT.items = fresh;
+  const rows = (await ftTx('readonly', s => s.index('dev').getAll(dev))) || [];
+  if (FT.dev !== dev) return;
+  rows.sort((a, b) => a.id - b.id);
+  for (const r of rows) if (r.state === 'sending' || r.state === 'receiving') { r.state = 'failed'; r.err = 'Interrupted'; }
+  const extra = rows.length + fresh.length - FT_KEEP;
+  if (extra > 0) { const old = rows.splice(0, extra); ftTx('readwrite', s => { for (const r of old) s.delete(r.id); }); }
+  const ids = new Set(rows.map(r => r.id));
+  FT.items = rows.concat(fresh.filter(i => !ids.has(i.id)));
+  if (openId === 'files') ftRender();
+}
+
+/* ---- the chat ---- */
+const ftDev = () => (st.device && st.device.id) || 'demo';
+function ftUrl(it) { if (!it._url && it.blob) it._url = URL.createObjectURL(it.blob); return it._url || ''; }
+function ftSave(it) {
+  if (!it.blob) { toast(it.state === 'ok' ? `${it.name} is too large to keep in the browser` : `${it.name} isn't here yet`); return; }
+  const a = el('a', { href: ftUrl(it), download: it.name });
+  document.body.append(a); a.click(); a.remove();
+}
+function ftShow(it) {
+  const m = it._meta, f = it._fill;
+  if (!m) return;
+  const size = fmtSize(it.size), pct = it.got != null && it.size ? Math.round(it.got / it.size * 100) + '%' : '';
+  m.textContent = {
+    queued: `${size} · waiting`, hashing: `${size} · checking`, sending: `${size} · ${pct || 'sending'}`, receiving: `${size} · ${pct || 'receiving'}`,
+    failed: `${size} · ${it.err || 'failed'}`,
+  }[it.state] || (it.dir === 'out' ? `${size} · ${it.gallery ? 'in Gallery' : 'sent'}` : size + (it.kept === false ? ' · not kept' : ''));
+  it._b.classList.toggle('bad', it.state === 'failed');
+  if (f) { f.parentNode.hidden = !['sending', 'receiving'].includes(it.state); f.style.width = pct || '0%'; }
+}
+function ftRow(it) {
+  const pic = it.blob && /^image\/(png|jpeg|gif|webp|bmp|svg\+xml)$/.test(it.type || '');
+  const b = el('div', { class: 'ft-b' + (pic ? ' pic' : ''), title: it.path || it.name, role: 'button', tabindex: '0' });
+  const meta = el('span', { class: 'meta' }), fill = el('i'), bar = el('div', { class: 'bar' }, fill);
+  if (pic) b.append(el('img', { src: ftUrl(it), alt: it.name, draggable: 'false' }), el('div', { class: 'ft-t' }, meta, bar));
+  else {
+    const bd = badge(it.name);
+    b.append(el('div', { class: 'ft-t' }, el('b', { class: 'nm', text: it.name }), meta, bar),
+      el('i', { class: 'ft-ic', text: bd.text, style: `--c:${bd.color}` }));
+  }
+  b.draggable = true;
+  b.addEventListener('dragstart', e => {
+    if (!it.blob) { e.preventDefault(); return; }
+    FT.dragging = true;
+    const u = ftUrl(it);
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('DownloadURL', `${it.type || mimeOf(it.name)}:${it.name}:${u}`); /* Chrome, Edge: the file itself */
+    e.dataTransfer.setData('text/uri-list', u);
+  });
+  b.addEventListener('dragend', () => { FT.dragging = false; });
+  b.addEventListener('click', () => ftSave(it));
+  b.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ftSave(it); } });
+  Object.assign(it, { _b: b, _meta: meta, _fill: fill });
+  ftShow(it);
+  return el('div', { class: 'ft-row ' + it.dir }, b);
+}
+function ftRender() {
+  const log = $('#ftLog');
+  log.textContent = '';
+  let prev = 0;
+  for (const it of FT.items) {
+    if (it.t - prev > 5 * 60e3) log.append(el('div', { class: 'ft-time', text: ftWhen(it.t) }));
+    prev = it.t;
+    log.append(ftRow(it));
+  }
+  $('#ftEmpty').hidden = FT.items.length > 0;
+  log.scrollTop = log.scrollHeight;
+}
+function ftAdd(it) {
+  ftUse(it.dev);
+  const prev = FT.items[FT.items.length - 1];
+  FT.items.push(it);
+  ftStore(it);
+  if (openId !== 'files') return;
+  const log = $('#ftLog'), end = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  if (!prev || it.t - prev.t > 5 * 60e3) log.append(el('div', { class: 'ft-time', text: ftWhen(it.t) }));
+  log.append(ftRow(it));
+  $('#ftEmpty').hidden = true;
+  if (end || it.dir === 'out') log.scrollTop = log.scrollHeight;
+}
+function ftUnread(on) {
+  $('#ball').classList.toggle('unread', on);
+  menu.querySelector('[data-act="files"]').classList.toggle('unread', on);
+}
+$('#ftClear').addEventListener('click', () => {
+  if (!FT.items.length || !confirm('Clear File Transfer? The files kept in this browser go too.')) return;
+  const ids = FT.items.map(i => i.id).filter(x => x != null);
+  for (const it of FT.items) if (it._url) URL.revokeObjectURL(it._url);
+  FT.items = FT.items.filter(i => ['sending', 'receiving', 'queued', 'hashing'].includes(i.state));
+  ftTx('readwrite', s => { for (const id of ids) s.delete(id); });
+  ftRender();
+});
+
+/* ---- sending (the file picker, or files dropped anywhere on the viewer) ---- */
 $('#photoInput').addEventListener('change', e => {
   for (const f of Array.from(e.target.files || [])) addUpload(f);
   e.target.value = '';
   pumpUploads();
 });
 function addUpload(f) {
-  $('#queueEmpty').hidden = true;
   const ext = (f.name.split('.').pop() || 'jpg').toLowerCase();
   const name = /^image\.(jpe?g|heic|png)$/i.test(f.name) || !f.name ? `IMG_${stamp()}.${ext}` : f.name;
-  const img = el('img', { alt: '' });
-  if (!f.type || f.type.startsWith('image/')) try { img.src = URL.createObjectURL(f); } catch (_) {}
-  const meta = el('div', { class: 'meta', text: `${fmtSize(f.size)} · ${f.type || 'image'} · waiting` });
-  const fill = el('i'), stp = el('span', { class: 'pill', text: 'Queued' });
-  $('#queue').prepend(el('li', { class: 'qi' }, img, el('div', { style: 'min-width:0' }, el('div', { class: 'nm', text: name }), meta, el('div', { class: 'bar' }, fill)), stp));
-  uploadQ.push({ f, name, meta, fill, st: stp });
+  const it = { dev: ftDev(), t: Date.now(), dir: 'out', name, size: f.size, type: f.type || mimeOf(name),
+    blob: f.size <= FT_BLOB_MAX ? f : null, kept: f.size <= FT_BLOB_MAX, state: 'queued' };
+  ftAdd(it);
+  uploadQ.push({ f, name, it });
 }
 const waitDrain = c => new Promise(res => { if (c.bufferedAmount < 1024 * 1024) return res(); c.onbufferedamountlow = () => { c.onbufferedamountlow = null; res(); }; });
 async function pumpUploads() {
   if (uploading) return;
   uploading = true;
   while (uploadQ.length) {
-    const j = uploadQ.shift();
-    if (j.f.size > S.maxMb * 1048576) { j.st.className = 'pill bad'; j.st.textContent = 'Too large'; continue; }
+    const j = uploadQ.shift(), it = j.it, set = (state, more) => { Object.assign(it, { state }, more); ftShow(it); };
+    if (j.f.size > S.maxMb * 1048576) { set('failed', { err: 'too large' }); ftStore(it); continue; }
     try {
-      j.st.className = 'pill warn'; j.st.textContent = 'Hashing';
+      set('hashing');
       const buf = await j.f.arrayBuffer(), sum = await sha256(buf);
       const xfer = xferId++, path = `${(desk() ? uploadDir() : S.destDir).replace(/[\/\\]+$/, '')}/${j.name}`;
       uploads.set(xfer, j);
       await sendCtrl('file.push', { xfer, path, size: j.f.size, sha256: sum, overwrite: S.overwrite, media_scan: S.mediaScan }, true);
-      j.st.textContent = 'Sending';
+      set('sending', { got: 0 });
       const c = st.ch.file, bytes = new Uint8Array(buf), CH = 16 * 1024;
       for (let off = 0, seq = 0; off < bytes.length || (off === 0 && bytes.length === 0); off += CH, seq++) {
         if (!DEMO) { if (!c || c.readyState !== 'open') throw new Error('not connected'); await waitDrain(c); }
         const n = Math.min(CH, bytes.length - off), m = new Uint8Array(8 + n), v = new DataView(m.buffer);
         v.setUint32(0, xfer); v.setUint32(4, seq); m.set(bytes.subarray(off, off + n), 8);
         if (!DEMO) c.send(m);
-        j.fill.style.width = ((off + n) / Math.max(1, bytes.length) * 100).toFixed(1) + '%';
+        if (seq % 16 === 0 || off + n >= bytes.length) set('sending', { got: off + n });
         if (bytes.length === 0) break;
       }
       const res = await sendCtrl('file.done', { xfer }, true);
-      const gallery = S.mediaScan && !desk();
-      j.st.className = 'pill ok'; j.st.textContent = gallery ? 'In Gallery' : 'Saved';
-      j.meta.textContent = `${fmtSize(j.f.size)} · ${(res && res.path) || path}`;
-      toast(`${j.name} saved to ${gallery ? 'the Android Gallery' : (res && res.path) || path}`);
+      set('ok', { path: (res && res.path) || path, gallery: S.mediaScan && !desk(), got: undefined });
     } catch (e) {
-      j.st.className = 'pill bad'; j.st.textContent = 'Failed';
-      j.meta.textContent = e.msg || e.message;
+      set('failed', { err: e.msg || e.message });
     }
+    ftStore(it);
   }
   uploading = false;
 }
 
 /* ---- drop files on the viewer: they go to the device (computers: its upload folder) ---- */
 let dragDepth = 0;
-const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+const hasFiles = e => !FT.dragging && e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
 window.addEventListener('dragenter', e => {
   if (!hasFiles(e)) return;
   e.preventDefault();
@@ -2423,13 +2574,13 @@ window.addEventListener('drop', e => {
   for (const f of files) addUpload(f);
   pumpUploads();
   const who = (st.device && st.device.name) || 'the device';
-  toast(files.length === 1 ? `Sending ${files[0].name} to ${who}` : `Sending ${files.length} files to ${who}`);
+  if (openId !== 'files') toast(files.length === 1 ? `Sending ${files[0].name} to ${who}` : `Sending ${files.length} files to ${who}`);
 });
 
 /* computers: the agent's upload folder (session.ready), "~" until it is known */
 const uploadDir = () => (st.ready && st.ready.upload_dir) || '~/Downloads/RemoDroid';
 
-/* ---- pulls (phone -> iPhone) ---- */
+/* ---- receiving: pulls from the device, kept in File Transfer ---- */
 function onFileChunk(u8) {
   if (u8.length < 8) return;
   const v = new DataView(u8.buffer, u8.byteOffset), xfer = v.getUint32(0);
@@ -2437,25 +2588,43 @@ function onFileChunk(u8) {
   if (!p) return;
   p.parts.push(u8.slice(8)); p.got += u8.length - 8;
   if (p.meta) p.meta.textContent = `${fmtSize(p.got)} / ${fmtSize(p.size)}`;
+  if (now() - p.shown > 150) { p.shown = now(); p.it.got = p.got; ftShow(p.it); }
 }
 function finishPull(xfer) {
-  const p = st.pulls.get(xfer); st.pulls.delete(xfer);
-  const url = URL.createObjectURL(new Blob(p.parts)), a = el('a', { href: url, download: p.name });
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  const p = st.pulls.get(xfer), it = p.it; st.pulls.delete(xfer);
+  const blob = new Blob(p.parts, { type: it.type });
+  Object.assign(it, { state: 'ok', got: undefined, blob: blob.size <= FT_BLOB_MAX ? blob : null, kept: blob.size <= FT_BLOB_MAX });
+  if (!it.blob) { /* too big to keep: saved at once instead */
+    const url = URL.createObjectURL(blob), a = el('a', { href: url, download: it.name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } else if (p.save) ftSave(it);
+  if (it._b && it._b.parentNode && it.blob && /^image\//.test(it.type)) it._b.parentNode.replaceWith(ftRow(it)); /* now a picture */
+  else ftShow(it);
+  ftStore(it);
   if (p.meta) p.meta.textContent = fmtSize(p.size) + ' · saved';
-  toast(p.name + ' downloaded');
+  if (!p.save) {
+    toast(`${it.name} received · in File Transfer`);
+    if (openId !== 'files') ftUnread(true);
+  }
   if (p.done) p.done();
 }
-async function pull(path, name, meta, done) {
+async function pull(path, name, o = {}) {
   const xfer = xferId++;
+  const it = { dev: ftDev(), t: Date.now(), dir: 'in', name, size: o.size || 0, type: mimeOf(name), path, state: 'receiving', got: 0 };
+  ftAdd(it);
   try {
     const r = await sendCtrl('file.pull', { xfer, path }, true);
-    st.pulls.set(xfer, { name, size: r.size || 0, parts: [], got: 0, meta, done });
-  } catch (e) { toast(`${name}: ${e.msg || e.message}`); if (done) done(); }
+    it.size = r.size || it.size;
+    ftShow(it);
+    st.pulls.set(xfer, { name, size: r.size || 0, parts: [], got: 0, shown: 0, meta: o.meta, done: o.done, save: o.save, it });
+  } catch (e) {
+    Object.assign(it, { state: 'failed', err: e.msg || e.message }); ftShow(it); ftStore(it);
+    toast(`${name}: ${e.msg || e.message}`); if (o.done) o.done();
+  }
 }
 
-/* ---- files the person at the computer dropped on its RemoDroid window: saved here at once ---- */
+/* ---- files the person at the computer dropped on its RemoDroid window or File Transfer ---- */
 const offerQ = [];
 let offerBusy = 0;
 function receiveOffer(files) {
@@ -2469,7 +2638,7 @@ function pumpOffers() {
   while (offerBusy < 3 && offerQ.length) {
     const f = offerQ.shift();
     offerBusy++;
-    pull(f.path, f.name, null, () => { offerBusy--; pumpOffers(); });
+    pull(f.path, f.name, { size: f.size, done: () => { offerBusy--; pumpOffers(); } });
   }
 }
 
@@ -2638,7 +2807,7 @@ function renderTab(id) {
           const meta = el('div', { class: 'meta', text: e.dir ? 'folder' : fmtSize(e.size) });
           const full = pathIn.value.replace(/[\/\\]+$/, '') + (pathIn.value.includes('\\') && !pathIn.value.includes('/') ? '\\' : '/') + e.name;
           const btn = e.dir ? el('button', { class: 'btn', type: 'button', text: 'Open', onclick: () => { pathIn.value = full; browse(); } })
-            : el('button', { class: 'btn', type: 'button', text: 'Download', onclick: () => pull(full, e.name, meta) });
+            : el('button', { class: 'btn', type: 'button', text: 'Download', onclick: () => pull(full, e.name, { meta, size: e.size, save: true }) });
           list.append(el('li', {}, el('div', { style: 'flex:1;min-width:0' }, el('div', { class: 'nm', text: e.name }), meta), btn));
         }
       } catch (e) { list.append(el('li', { class: 'note', text: e.msg || e.message })); }

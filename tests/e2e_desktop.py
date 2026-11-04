@@ -649,7 +649,7 @@ notify = false
             src = f"{d}/notes.txt"
             open(src, "w").write("hello computer\n")
             await page.locator("#ball").click()
-            await page.locator('#menu button[data-act="photo"]').click()
+            await page.locator('#menu button[data-act="files"]').click()
             await page.set_input_files("#photoInput", src)
             dest = f"{home}/Downloads/RemoDroid/notes.txt"
             for _ in range(80):
@@ -657,7 +657,12 @@ notify = false
                     break
                 await page.wait_for_timeout(100)
             res["upload_ok"] = os.path.exists(dest) and open(dest).read() == "hello computer\n"
-            await page.locator("#sheet-photo button[data-close]").click()
+            # File Transfer: the bubble says sent, and the computer's list has it
+            await page.wait_for_function("() => [...document.querySelectorAll('#ftLog .ft-row.out .meta')]"
+                                         ".some(m => m.textContent.endsWith('sent'))", timeout=5000)
+            log = f"{home}/.config/remodroid/transfers.log"
+            res["transfer_logged"] = os.path.exists(log) and f"\tin\t15\t{dest}\n" in open(log).read()
+            await page.locator("#sheet-files button[data-close]").click()
             # the computer's sound: Opus packets keep arriving, and they decode to a tone
             stats = """async () => { let a = null; (await window.__pcs[window.__pcs.length - 1].getStats()).forEach(r => {
                 if (r.type === 'inbound-rtp' && r.kind === 'audio') a = r; });
@@ -896,7 +901,7 @@ notify = false
         ok = (res.get("pair") and res.get("platform") == "linux" and res["video"]["w"] == 1280 and res.get("colours_ok") and res.get("click_ok")
               and res.get("right_click_ok") and res.get("wheel_ok") and res.get("key_a") == "a" and res.get("shift_1") == "exclam"
               and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("ctrl_c_ok") and res.get("clip_to_viewer")
-              and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok")
+              and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok") and res.get("transfer_logged")
               and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
               and res.get("fkb_fits") and res.get("fkb") == ["h", "I", "1", "BackSpace", "c+ctrl"]
               and (not pads or res.get("pad") == {"device": True, "b": True, "stick_right": True, "stick_back": True}

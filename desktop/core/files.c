@@ -384,6 +384,7 @@ cJSON *files_offer(const char *const *paths, int n)
         if (noffered == MAX_OFFERED) /* the oldest offers make room */
             memmove(offered[0], offered[1], sizeof offered[0] * (MAX_OFFERED - 1)), noffered--;
         snprintf(offered[noffered++], sizeof offered[0], "%s", p);
+        transfers_add("out", p, (long long)st.st_size);
         cJSON *f = cJSON_CreateObject();
         cJSON_AddStringToObject(f, "path", p);
         cJSON_AddStringToObject(f, "name", base_name(p));
@@ -550,6 +551,7 @@ cJSON *files_control(const char *t, cJSON *d, char *code, size_t codecap, char *
             FAIL("io_error", "cannot move the file into place");
         }
         LOGI("files: received %s (%lld bytes)", x->dest, x->size);
+        transfers_add("in", x->dest, x->size);
         cJSON *r = cJSON_CreateObject();
         cJSON_AddNumberToObject(r, "xfer", xfer);
         cJSON_AddStringToObject(r, "path", x->dest);

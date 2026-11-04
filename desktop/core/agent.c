@@ -622,6 +622,7 @@ int rd_agent_start(const char *conf_path, rd_agent_cb_t cb, void *ud)
     if (G.started)
         return 0;
     rd_mutex_init(&G.mu);
+    transfers_init();
     G.cb = cb;
     G.ud = ud;
     G.rtc_state = -1;

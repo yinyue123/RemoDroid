@@ -13,8 +13,9 @@
 #include "icon.h"
 #include "rd_agent.h"
 #include "sni.h"
+#include "xfer.h"
 
-enum { M_STATUS = 1, M_VIEWER, M_DISCONNECT, M_VIEWONLY, M_OPEN, M_WINDOW, M_LOG, M_X11, M_LOGIN, M_QUIT };
+enum { M_STATUS = 1, M_VIEWER, M_DISCONNECT, M_VIEWONLY, M_OPEN, M_WINDOW, M_FILES, M_LOG, M_X11, M_LOGIN, M_QUIT };
 
 static struct {
     GtkApplication *app;
@@ -27,9 +28,13 @@ static struct {
     GtkWidget *log_win, *log_view;
     unsigned log_seq;
     guint log_timer;
+    GtkWidget *ft_win, *ft_list, *ft_scroll, *ft_empty;
+    unsigned ft_seq;
+    guint ft_timer;
 } U;
 
 static void show_log(void);
+static void show_files(void);
 
 static const char *state_text(void)
 {
@@ -278,7 +283,7 @@ static void tray_refresh(void)
     char status[160], viewer[120];
     snprintf(status, sizeof status, "RemoDroid — %s", state_text());
     snprintf(viewer, sizeof viewer, "Viewer: %s", U.st.viewer[0] ? U.st.viewer : "someone");
-    sni_item_t items[13];
+    sni_item_t items[14];
     int n = 0;
     items[n++] = (sni_item_t){ M_STATUS, status, 0, 0, 0 };
     if (U.st.state == RD_IN_SESSION)
@@ -290,6 +295,7 @@ static void tray_refresh(void)
     if (U.st.panel[0])
         items[n++] = (sni_item_t){ M_OPEN, "Open panel", 1, 0, 0 };
     items[n++] = (sni_item_t){ M_WINDOW, U.st.state == RD_UNPAIRED ? "Pair with a panel…" : "Pairing & status…", 1, 0, 0 };
+    items[n++] = (sni_item_t){ M_FILES, "File Transfer", 1, 0, 0 };
     items[n++] = (sni_item_t){ M_LOG, "Show log", 1, 0, 0 };
     if (wayland_session() && can_switch_x11())
         items[n++] = (sni_item_t){ M_X11, "Switch to X11…", 1, 0, 0 };
@@ -306,6 +312,7 @@ static void on_menu(int id)
     case M_VIEWONLY: rd_agent_set("desktop.view_only", U.st.view_only ? "false" : "true"); break;
     case M_OPEN: open_panel(); break;
     case M_WINDOW: show_window(); break;
+    case M_FILES: show_files(); break;
     case M_LOG: show_log(); break;
     case M_X11: switch_x11(); break;
     case M_LOGIN: set_login(!login_enabled()); tray_refresh(); break;
@@ -340,7 +347,7 @@ static void refresh(void)
     gtk_label_set_text(GTK_LABEL(U.info), s);
     gtk_widget_set_visible(U.disc, U.st.state == RD_IN_SESSION);
     gtk_label_set_text(GTK_LABEL(U.drop), U.st.state == RD_IN_SESSION
-                                              ? "Drop files on this window to send them: the viewer's browser downloads them."
+                                              ? "Drop files on this window to send them to the viewer's File Transfer."
                                               : "While someone is viewing, drop files on this window to send them.");
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(U.view_only), U.st.view_only);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(U.login), login_enabled());
@@ -508,6 +515,7 @@ static void show_log(void)
 }
 
 static void do_show_log(GtkWidget *w, gpointer ud) { show_log(); }
+static void do_show_files(GtkWidget *w, gpointer ud) { show_files(); }
 static void do_switch_x11(GtkWidget *w, gpointer ud) { switch_x11(); }
 
 static GtkWidget *add_label(GtkWidget *grid, const char *text, int row)
@@ -532,6 +540,8 @@ static GtkWidget *add_entry(GtkWidget *grid, int row, const char *placeholder)
 static void on_drop(GtkWidget *w, GdkDragContext *ctx, gint x, gint y, GtkSelectionData *data, guint info, guint time,
                     gpointer ud)
 {
+    if (gtk_drag_get_source_widget(ctx)) /* a file dragged out of File Transfer, back in */
+        return;
     gchar **uris = gtk_selection_data_get_uris(data);
     if (!uris)
         return;
@@ -550,6 +560,262 @@ static void on_drop(GtkWidget *w, GdkDragContext *ctx, gint x, gint y, GtkSelect
         snprintf(t, sizeof t, k == 1 ? "Sending 1 file to the viewer…" : "Sending %d files to the viewer…", k);
     notify(t);
     g_ptr_array_free(paths, TRUE);
+}
+
+/* ---------------- File Transfer window ----------------
+ * What the viewer's browser sent here (left) and what was sent to it (right), like a chat. A file
+ * drags out to any folder, double-click opens it, right-click shows it in its folder; files dropped
+ * on the window go to the viewer. */
+
+static void ft_open(const char *path, int folder)
+{
+    char *target = folder ? g_path_get_dirname(path) : g_strdup(path);
+    char *uri = g_filename_to_uri(target, NULL, NULL);
+    if (uri && !g_app_info_launch_default_for_uri(uri, NULL, NULL))
+        notify("That file is no longer there.");
+    g_free(uri);
+    g_free(target);
+}
+
+static void ft_drag_get(GtkWidget *w, GdkDragContext *ctx, GtkSelectionData *data, guint info, guint time, gpointer ud)
+{
+    char *uri = g_filename_to_uri(g_object_get_data(G_OBJECT(w), "path"), NULL, NULL);
+    gchar *uris[] = { uri, NULL };
+    if (uri)
+        gtk_selection_data_set_uris(data, uris);
+    g_free(uri);
+}
+
+static void ft_menu_open(GtkMenuItem *m, gpointer w) { ft_open(g_object_get_data(G_OBJECT(w), "path"), 0); }
+static void ft_menu_folder(GtkMenuItem *m, gpointer w) { ft_open(g_object_get_data(G_OBJECT(w), "path"), 1); }
+
+static gboolean ft_press(GtkWidget *w, GdkEventButton *e, gpointer ud)
+{
+    if (e->type == GDK_2BUTTON_PRESS && e->button == 1) {
+        ft_open(g_object_get_data(G_OBJECT(w), "path"), 0);
+        return TRUE;
+    }
+    if (e->type == GDK_BUTTON_PRESS && e->button == 3) {
+        GtkWidget *m = gtk_menu_new(), *open = gtk_menu_item_new_with_label("Open"),
+                  *folder = gtk_menu_item_new_with_label("Show in folder");
+        g_signal_connect(open, "activate", G_CALLBACK(ft_menu_open), w);
+        g_signal_connect(folder, "activate", G_CALLBACK(ft_menu_folder), w);
+        gtk_menu_shell_append(GTK_MENU_SHELL(m), open);
+        gtk_menu_shell_append(GTK_MENU_SHELL(m), folder);
+        gtk_widget_show_all(m);
+        gtk_menu_popup_at_pointer(GTK_MENU(m), (GdkEvent *)e);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static GtkWidget *ft_bubble(const rd_xfer_t *x)
+{
+    int gone = !g_file_test(x->path, G_FILE_TEST_IS_REGULAR);
+    GtkWidget *ev = gtk_event_box_new(), *b = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_style_context_add_class(gtk_widget_get_style_context(b), "bubble");
+    gtk_style_context_add_class(gtk_widget_get_style_context(b), x->in ? "in" : "out");
+    gtk_widget_set_tooltip_text(ev, x->path);
+    gtk_container_add(GTK_CONTAINER(ev), b);
+    GtkWidget *pic = NULL;
+    if (!gone && rd_xfer_is_image(x->name)) {
+        GdkPixbuf *pb = gdk_pixbuf_new_from_file_at_scale(x->path, 220, 160, TRUE, NULL);
+        if (pb) {
+            pic = gtk_image_new_from_pixbuf(pb);
+            g_object_unref(pb);
+            gtk_style_context_add_class(gtk_widget_get_style_context(b), "picture");
+            gtk_box_pack_start(GTK_BOX(b), pic, FALSE, FALSE, 0);
+        }
+    }
+    if (!pic) {
+        GtkWidget *text = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4), *nm = gtk_label_new(x->name);
+        gtk_label_set_line_wrap(GTK_LABEL(nm), TRUE);
+        gtk_label_set_line_wrap_mode(GTK_LABEL(nm), PANGO_WRAP_WORD_CHAR);
+        gtk_label_set_lines(GTK_LABEL(nm), 2);
+        gtk_label_set_ellipsize(GTK_LABEL(nm), PANGO_ELLIPSIZE_MIDDLE);
+        gtk_label_set_max_width_chars(GTK_LABEL(nm), 24);
+        gtk_label_set_width_chars(GTK_LABEL(nm), 24);
+        gtk_label_set_xalign(GTK_LABEL(nm), 0);
+        gtk_style_context_add_class(gtk_widget_get_style_context(nm), "name");
+        char sz[64], line[120];
+        rd_xfer_size(x->size, sz, sizeof sz);
+        snprintf(line, sizeof line, "%s%s", sz, gone ? " · moved or deleted" : "");
+        GtkWidget *meta = gtk_label_new(line);
+        gtk_label_set_xalign(GTK_LABEL(meta), 0);
+        gtk_style_context_add_class(gtk_widget_get_style_context(meta), "dim-label");
+        gtk_box_pack_start(GTK_BOX(text), nm, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(text), meta, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(b), text, TRUE, TRUE, 0);
+        char ext[8], css[200];
+        unsigned rgb;
+        rd_xfer_badge(x->name, ext, sizeof ext, &rgb);
+        GtkWidget *badge = gtk_label_new(ext);
+        gtk_widget_set_size_request(badge, 44, 54);
+        gtk_widget_set_valign(badge, GTK_ALIGN_CENTER);
+        GtkCssProvider *p = gtk_css_provider_new();
+        snprintf(css, sizeof css, "label{background:#%06x;color:#fff;border-radius:5px;font-weight:bold;font-size:10px}",
+                 rgb);
+        gtk_css_provider_load_from_data(p, css, -1, NULL);
+        gtk_style_context_add_provider(gtk_widget_get_style_context(badge), GTK_STYLE_PROVIDER(p),
+                                       GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        g_object_unref(p);
+        gtk_box_pack_end(GTK_BOX(b), badge, FALSE, FALSE, 0);
+    }
+    if (!gone) {
+        g_object_set_data_full(G_OBJECT(ev), "path", g_strdup(x->path), g_free);
+        gtk_drag_source_set(ev, GDK_BUTTON1_MASK, NULL, 0, GDK_ACTION_COPY);
+        gtk_drag_source_add_uri_targets(ev);
+        g_signal_connect(ev, "drag-data-get", G_CALLBACK(ft_drag_get), NULL);
+        g_signal_connect(ev, "button-press-event", G_CALLBACK(ft_press), NULL);
+    } else {
+        gtk_widget_set_opacity(b, 0.55);
+    }
+    gtk_widget_set_halign(ev, x->in ? GTK_ALIGN_START : GTK_ALIGN_END);
+    return ev;
+}
+
+static gboolean ft_to_end(gpointer ud)
+{
+    GtkAdjustment *a = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(U.ft_scroll));
+    gtk_adjustment_set_value(a, gtk_adjustment_get_upper(a));
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean ft_tick(gpointer ud)
+{
+    unsigned seq = rd_agent_transfers_seq();
+    if (seq == U.ft_seq)
+        return G_SOURCE_CONTINUE;
+    U.ft_seq = seq;
+    GList *kids = gtk_container_get_children(GTK_CONTAINER(U.ft_list));
+    for (GList *k = kids; k; k = k->next)
+        gtk_widget_destroy(k->data);
+    g_list_free(kids);
+    char *text = rd_agent_transfers();
+    rd_xfer_t *v;
+    int n = rd_xfers_parse(text, &v);
+    for (int i = 0; i < n; i++) {
+        if (v[i].stamp) {
+            char when[40];
+            rd_xfer_when(v[i].ms, when, sizeof when);
+            GtkWidget *t = gtk_label_new(when);
+            gtk_style_context_add_class(gtk_widget_get_style_context(t), "dim-label");
+            gtk_widget_set_margin_top(t, 10);
+            gtk_box_pack_start(GTK_BOX(U.ft_list), t, FALSE, FALSE, 0);
+        }
+        gtk_box_pack_start(GTK_BOX(U.ft_list), ft_bubble(&v[i]), FALSE, FALSE, 0);
+    }
+    free(v);
+    rd_agent_free(text);
+    gtk_widget_set_visible(U.ft_empty, n == 0);
+    gtk_widget_show_all(U.ft_list);
+    g_idle_add(ft_to_end, NULL);
+    return G_SOURCE_CONTINUE;
+}
+
+static void ft_choose(GtkWidget *w, gpointer ud)
+{
+    GtkWidget *d = gtk_file_chooser_dialog_new("Send to the viewer", GTK_WINDOW(U.ft_win), GTK_FILE_CHOOSER_ACTION_OPEN,
+                                               "Cancel", GTK_RESPONSE_CANCEL, "Send", GTK_RESPONSE_ACCEPT, NULL);
+    gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(d), TRUE);
+    if (gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_ACCEPT) {
+        GSList *files = gtk_file_chooser_get_filenames(GTK_FILE_CHOOSER(d));
+        GPtrArray *paths = g_ptr_array_new();
+        for (GSList *f = files; f; f = f->next)
+            g_ptr_array_add(paths, f->data);
+        if (rd_agent_send_files((const char *const *)paths->pdata, (int)paths->len) < 0)
+            notify("Nobody is viewing this computer, so nothing was sent.");
+        g_ptr_array_free(paths, TRUE);
+        g_slist_free_full(files, g_free);
+    }
+    gtk_widget_destroy(d);
+}
+
+static void ft_clear(GtkWidget *w, gpointer ud)
+{
+    GtkWidget *d = gtk_message_dialog_new(GTK_WINDOW(U.ft_win), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+                                          GTK_BUTTONS_OK_CANCEL, "Clear the list?");
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(d), "The files themselves stay where they are.");
+    if (gtk_dialog_run(GTK_DIALOG(d)) == GTK_RESPONSE_OK)
+        rd_agent_transfers_clear();
+    gtk_widget_destroy(d);
+    ft_tick(NULL);
+}
+
+static gboolean ft_hidden(GtkWidget *w, GdkEvent *e, gpointer ud)
+{
+    if (U.ft_timer)
+        g_source_remove(U.ft_timer);
+    U.ft_timer = 0;
+    return gtk_widget_hide_on_delete(w);
+}
+
+static void show_files(void)
+{
+    if (!U.ft_win) {
+        U.ft_win = gtk_application_window_new(U.app);
+        gtk_window_set_title(GTK_WINDOW(U.ft_win), "File Transfer");
+        gtk_window_set_default_size(GTK_WINDOW(U.ft_win), 460, 600);
+        gtk_window_set_icon_name(GTK_WINDOW(U.ft_win), "remodroid");
+        g_signal_connect(U.ft_win, "delete-event", G_CALLBACK(ft_hidden), NULL);
+        gtk_drag_dest_set(U.ft_win, GTK_DEST_DEFAULT_ALL, NULL, 0, GDK_ACTION_COPY);
+        gtk_drag_dest_add_uri_targets(U.ft_win);
+        g_signal_connect(U.ft_win, "drag-data-received", G_CALLBACK(on_drop), NULL);
+        GtkCssProvider *p = gtk_css_provider_new();
+        gtk_css_provider_load_from_data(p,
+                                        ".ft{background:alpha(@theme_fg_color,0.05)}"
+                                        ".bubble{border-radius:8px;padding:12px 14px}"
+                                        ".bubble.in{background:@theme_base_color}"
+                                        ".bubble.out{background:alpha(#07c160,0.18)}"
+                                        ".bubble.picture{padding:4px}"
+                                        ".bubble .name{font-size:105%}",
+                                        -1, NULL);
+        gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(p),
+                                                  GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        g_object_unref(p);
+        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_container_add(GTK_CONTAINER(U.ft_win), box);
+        U.ft_scroll = gtk_scrolled_window_new(NULL, NULL);
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(U.ft_scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_style_context_add_class(gtk_widget_get_style_context(U.ft_scroll), "ft");
+        GtkWidget *inner = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        U.ft_empty = gtk_label_new("Nothing yet. Files the viewer sends land here, and files you drop on this "
+                                   "window go to the viewer's browser.");
+        gtk_label_set_line_wrap(GTK_LABEL(U.ft_empty), TRUE);
+        gtk_label_set_justify(GTK_LABEL(U.ft_empty), GTK_JUSTIFY_CENTER);
+        gtk_style_context_add_class(gtk_widget_get_style_context(U.ft_empty), "dim-label");
+        gtk_widget_set_margin_top(U.ft_empty, 60);
+        gtk_widget_set_margin_start(U.ft_empty, 30);
+        gtk_widget_set_margin_end(U.ft_empty, 30);
+        U.ft_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        gtk_container_set_border_width(GTK_CONTAINER(U.ft_list), 16);
+        gtk_box_pack_start(GTK_BOX(inner), U.ft_empty, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(inner), U.ft_list, FALSE, FALSE, 0);
+        gtk_container_add(GTK_CONTAINER(U.ft_scroll), inner);
+        gtk_box_pack_start(GTK_BOX(box), U.ft_scroll, TRUE, TRUE, 0);
+        GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_container_set_border_width(GTK_CONTAINER(bar), 10);
+        GtkWidget *hint = gtk_label_new("Drop files here to send them");
+        gtk_style_context_add_class(gtk_widget_get_style_context(hint), "dim-label");
+        gtk_label_set_ellipsize(GTK_LABEL(hint), PANGO_ELLIPSIZE_END);
+        gtk_label_set_xalign(GTK_LABEL(hint), 0);
+        gtk_box_pack_start(GTK_BOX(bar), hint, TRUE, TRUE, 0);
+        GtkWidget *clear = gtk_button_new_with_label("Clear");
+        g_signal_connect(clear, "clicked", G_CALLBACK(ft_clear), NULL);
+        gtk_box_pack_end(GTK_BOX(bar), clear, FALSE, FALSE, 0);
+        GtkWidget *send = gtk_button_new_with_label("Send files…");
+        gtk_style_context_add_class(gtk_widget_get_style_context(send), "suggested-action");
+        g_signal_connect(send, "clicked", G_CALLBACK(ft_choose), NULL);
+        gtk_box_pack_end(GTK_BOX(bar), send, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL), FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(box), bar, FALSE, FALSE, 0);
+        gtk_widget_show_all(box);
+    }
+    U.ft_seq = rd_agent_transfers_seq() - 1; /* fill it now */
+    ft_tick(NULL);
+    if (!U.ft_timer)
+        U.ft_timer = g_timeout_add(700, ft_tick, NULL);
+    gtk_window_present(GTK_WINDOW(U.ft_win));
 }
 
 static void build_window(void)
@@ -639,6 +905,9 @@ static void build_window(void)
     g_signal_connect(U.login, "toggled", G_CALLBACK(login_toggled), NULL);
     gtk_box_pack_start(GTK_BOX(box), U.login, FALSE, FALSE, 0);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *files = gtk_button_new_with_label("File Transfer");
+    g_signal_connect(files, "clicked", G_CALLBACK(do_show_files), NULL);
+    gtk_box_pack_start(GTK_BOX(row), files, FALSE, FALSE, 0);
     GtkWidget *log = gtk_button_new_with_label("Show log");
     g_signal_connect(log, "clicked", G_CALLBACK(do_show_log), NULL);
     gtk_box_pack_start(GTK_BOX(row), log, FALSE, FALSE, 0);

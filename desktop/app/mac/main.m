@@ -4,12 +4,14 @@
  * come from the agent's thread and are dispatched to the main queue. */
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <ImageIO/ImageIO.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <UserNotifications/UserNotifications.h>
 
 #include "icon.h"
 #include "rd_agent.h"
 #include "web.h"
+#include "xfer.h"
 
 static NSString *str(const char *s) { return [NSString stringWithUTF8String:s ?: ""] ?: @""; }
 
@@ -77,6 +79,10 @@ static NSImage *icon_image(int style, CGFloat points)
 @property(strong) NSTextView *logView;
 @property(strong) NSTimer *logTimer;
 @property(assign) unsigned logSeq;
+@property(strong) NSWindow *ftWindow;
+@property(strong) id ftList;
+@property(strong) NSTimer *ftTimer;
+@property(assign) unsigned ftSeq;
 @property(assign) rd_status_t st;
 @property(assign) BOOL pairing;
 @property(strong) NSString *pairMsg;
@@ -86,32 +92,9 @@ static NSImage *icon_image(int style, CGFloat points)
 
 static AppDelegate *app;
 
-/* The window's content: files dropped on it go to the viewer, whose browser downloads them. */
-@interface DropView : NSView
-@end
-
-@implementation DropView
-- (instancetype)initWithFrame:(NSRect)r
+/* Files to the viewer, from a drop or the open panel: its File Transfer keeps them. */
+static BOOL send_urls(NSArray<NSURL *> *urls)
 {
-    if ((self = [super initWithFrame:r]))
-        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
-    return self;
-}
-
-- (NSArray<NSURL *> *)files:(id<NSDraggingInfo>)info
-{
-    return [info.draggingPasteboard readObjectsForClasses:@[ NSURL.class ]
-                                                  options:@{ NSPasteboardURLReadingFileURLsOnlyKey : @YES }];
-}
-
-- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info
-{
-    return [self files:info].count ? NSDragOperationCopy : NSDragOperationNone;
-}
-
-- (BOOL)performDragOperation:(id<NSDraggingInfo>)info
-{
-    NSArray<NSURL *> *urls = [self files:info];
     const char **paths = calloc(urls.count ? urls.count : 1, sizeof *paths);
     int k = 0;
     for (NSURL *u in urls)
@@ -124,6 +107,241 @@ static AppDelegate *app;
                          : [NSString stringWithFormat:@"Sending %d files to the viewer…", k]];
     return ok;
 }
+
+static NSArray<NSURL *> *dragged_files(id<NSDraggingInfo> info)
+{
+    return [info.draggingPasteboard readObjectsForClasses:@[ NSURL.class ]
+                                                  options:@{ NSPasteboardURLReadingFileURLsOnlyKey : @YES }];
+}
+
+/* The window's content: files dropped on it go to the viewer. */
+@interface DropView : NSView
+@end
+
+@implementation DropView
+- (instancetype)initWithFrame:(NSRect)r
+{
+    if ((self = [super initWithFrame:r]))
+        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
+    return self;
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info
+{
+    /* a file dragged out of File Transfer and back in isn't a send */
+    return dragged_files(info).count && ![(id)info.draggingSource isKindOfClass:NSView.class] ? NSDragOperationCopy
+                                                                                             : NSDragOperationNone;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info { return send_urls(dragged_files(info)); }
+@end
+
+/* ---------------- File Transfer ----------------
+ * What the viewer's browser sent here (left) and what was sent to it (right), like a chat. A file
+ * drags out to Finder or the desktop, double-click opens it, right-click shows it in Finder; files
+ * dropped on the window go to the viewer. */
+
+@interface FTItem : NSObject
+@property(assign) long long ms, size;
+@property(assign) BOOL incoming, gone, stamp;
+@property(strong) NSString *path, *name;
+@property(strong) NSImage *thumb;
+@property(assign) NSRect bubble;
+@property(assign) CGFloat stampY;
+@end
+
+@implementation FTItem
+@end
+
+static NSImage *thumbnail(NSString *path, CGFloat max)
+{
+    CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], NULL);
+    if (!src)
+        return nil;
+    NSDictionary *o = @{ (id)kCGImageSourceCreateThumbnailFromImageAlways : @YES,
+                         (id)kCGImageSourceCreateThumbnailWithTransform : @YES,
+                         (id)kCGImageSourceThumbnailMaxPixelSize : @(max * 2) };
+    CGImageRef im = CGImageSourceCreateThumbnailAtIndex(src, 0, (__bridge CFDictionaryRef)o);
+    CFRelease(src);
+    if (!im)
+        return nil;
+    NSSize sz = NSMakeSize(CGImageGetWidth(im) / 2.0, CGImageGetHeight(im) / 2.0);
+    CGFloat k = MIN(1, MIN(220 / sz.width, 160 / sz.height));
+    NSImage *img = [[NSImage alloc] initWithCGImage:im size:NSMakeSize(round(sz.width * k), round(sz.height * k))];
+    CGImageRelease(im);
+    return img;
+}
+
+static NSColor *rgb(unsigned c, CGFloat a)
+{
+    return [NSColor colorWithSRGBRed:(c >> 16) / 255.0 green:((c >> 8) & 0xFF) / 255.0 blue:(c & 0xFF) / 255.0 alpha:a];
+}
+
+@interface FTList : NSView <NSDraggingSource>
+@property(strong) NSArray<FTItem *> *items;
+@end
+
+@implementation FTList
+- (BOOL)isFlipped { return YES; }
+
+- (BOOL)dark
+{
+    return [[self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]]
+        isEqualToString:NSAppearanceNameDarkAqua];
+}
+
+/* Bubble places for this width; the view grows to hold them (at least the visible height). */
+- (void)layoutFor:(CGFloat)W minHeight:(CGFloat)H
+{
+    CGFloat y = 10, m = 16;
+    for (FTItem *it in self.items) {
+        it.stampY = -1;
+        if (it.stamp) {
+            it.stampY = y + 6;
+            y += 34;
+        }
+        NSSize b = it.thumb ? NSMakeSize(it.thumb.size.width + 8, it.thumb.size.height + 8)
+                            : NSMakeSize(MIN(W - 2 * m - 60, 300), 76);
+        it.bubble = NSMakeRect(it.incoming ? m : W - m - b.width, y, b.width, b.height);
+        y += b.height + 12;
+    }
+    [self setFrameSize:NSMakeSize(W, MAX(y, H))];
+    self.needsDisplay = YES;
+}
+
+- (void)drawRect:(NSRect)dirty
+{
+    BOOL dark = [self dark];
+    [(dark ? rgb(0x1E1E1E, 1) : rgb(0xEDEDED, 1)) setFill];
+    NSRectFill(dirty);
+    NSColor *dim = rgb(dark ? 0x8A8A8A : 0x999999, 1);
+    if (!self.items.count) {
+        NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
+        ps.alignment = NSTextAlignmentCenter;
+        [@"Nothing yet.\n\nFiles the viewer sends land here, and files you drop on this window go to the viewer's browser."
+            drawInRect:NSMakeRect(30, 70, self.bounds.size.width - 60, 120)
+            withAttributes:@{ NSFontAttributeName : [NSFont systemFontOfSize:13], NSForegroundColorAttributeName : dim,
+                              NSParagraphStyleAttributeName : ps }];
+    }
+    NSMutableParagraphStyle *wrap = [[NSMutableParagraphStyle alloc] init];
+    wrap.lineBreakMode = NSLineBreakByCharWrapping;
+    NSMutableParagraphStyle *center = [[NSMutableParagraphStyle alloc] init];
+    center.alignment = NSTextAlignmentCenter;
+    for (FTItem *it in self.items) {
+        NSRect b = it.bubble;
+        if (!NSIntersectsRect(NSInsetRect(b, 0, -40), dirty))
+            continue;
+        if (it.stampY >= 0) {
+            char when[40];
+            rd_xfer_when(it.ms, when, sizeof when);
+            [str(when) drawInRect:NSMakeRect(0, it.stampY, self.bounds.size.width, 18)
+                   withAttributes:@{ NSFontAttributeName : [NSFont systemFontOfSize:11], NSForegroundColorAttributeName : dim,
+                                     NSParagraphStyleAttributeName : center }];
+        }
+        NSColor *fill = it.incoming ? (dark ? rgb(0x2C2C2C, 1) : NSColor.whiteColor) : (dark ? rgb(0x3EB575, 1) : rgb(0x95EC69, 1));
+        [fill setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:b xRadius:6 yRadius:6] fill];
+        NSBezierPath *tail = [NSBezierPath bezierPath];
+        CGFloat tx = it.incoming ? NSMinX(b) : NSMaxX(b), s = it.incoming ? -1 : 1, ty = NSMinY(b) + 14;
+        [tail moveToPoint:NSMakePoint(tx, ty)];
+        [tail lineToPoint:NSMakePoint(tx + s * 6, ty + 6)];
+        [tail lineToPoint:NSMakePoint(tx, ty + 12)];
+        [tail fill];
+        if (it.thumb) {
+            [it.thumb drawInRect:NSInsetRect(b, 4, 4) fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
+                        fraction:1 respectFlipped:YES hints:nil];
+            continue;
+        }
+        NSColor *ink = it.gone ? dim : dark && it.incoming ? rgb(0xE6E6E6, 1) : rgb(0x191919, 1);
+        NSRect badge = NSMakeRect(NSMaxX(b) - 14 - 38, NSMidY(b) - 24, 38, 48);
+        [it.name drawWithRect:NSMakeRect(NSMinX(b) + 14, NSMinY(b) + 12, NSMinX(badge) - NSMinX(b) - 26, 36)
+                      options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine
+                   attributes:@{ NSFontAttributeName : [NSFont systemFontOfSize:14], NSForegroundColorAttributeName : ink,
+                                 NSParagraphStyleAttributeName : wrap }
+                      context:nil];
+        char sz[64];
+        rd_xfer_size(it.size, sz, sizeof sz);
+        NSString *meta = it.gone ? [NSString stringWithFormat:@"%s · moved or deleted", sz] : str(sz);
+        [meta drawAtPoint:NSMakePoint(NSMinX(b) + 14, NSMaxY(b) - 24)
+            withAttributes:@{ NSFontAttributeName : [NSFont systemFontOfSize:11],
+                              NSForegroundColorAttributeName : it.incoming || dark ? dim : rgb(0x4E8A35, 1) }];
+        char ext[8];
+        unsigned c;
+        rd_xfer_badge(it.name.UTF8String, ext, sizeof ext, &c);
+        [(it.gone ? rgb(0xBBBBBB, 1) : rgb(c, 1)) setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:badge xRadius:4 yRadius:4] fill];
+        [str(ext) drawInRect:NSMakeRect(NSMinX(badge), NSMinY(badge) + 22, NSWidth(badge), 16)
+              withAttributes:@{ NSFontAttributeName : [NSFont boldSystemFontOfSize:10],
+                                NSForegroundColorAttributeName : NSColor.whiteColor, NSParagraphStyleAttributeName : center }];
+    }
+}
+
+- (FTItem *)itemAt:(NSEvent *)e
+{
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    for (FTItem *it in self.items)
+        if (NSPointInRect(p, it.bubble))
+            return it;
+    return nil;
+}
+
+- (void)open:(FTItem *)it inFinder:(BOOL)finder
+{
+    NSURL *u = [NSURL fileURLWithPath:it.path];
+    if (it.gone || ![NSFileManager.defaultManager fileExistsAtPath:it.path])
+        [app notify:@"That file is no longer there."];
+    else if (finder)
+        [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ u ]];
+    else
+        [NSWorkspace.sharedWorkspace openURL:u];
+}
+
+- (void)mouseDown:(NSEvent *)e
+{
+    FTItem *it = [self itemAt:e];
+    if (!it || it.gone)
+        return;
+    if (e.clickCount == 2) {
+        [self open:it inFinder:NO];
+        return;
+    }
+    /* a drag: the file itself, copied wherever it's dropped */
+    NSEvent *next = [self.window nextEventMatchingMask:NSEventMaskLeftMouseUp | NSEventMaskLeftMouseDragged];
+    if (next.type != NSEventTypeLeftMouseDragged)
+        return;
+    NSDraggingItem *d = [[NSDraggingItem alloc] initWithPasteboardWriter:[NSURL fileURLWithPath:it.path]];
+    NSImage *img = it.thumb ?: [NSWorkspace.sharedWorkspace iconForFile:it.path];
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    [d setDraggingFrame:NSMakeRect(p.x - 24, p.y - 24, 48, 48) contents:img];
+    [self beginDraggingSessionWithItems:@[ d ] event:e source:self];
+}
+
+- (NSDragOperation)draggingSession:(NSDraggingSession *)s sourceOperationMaskForDraggingContext:(NSDraggingContext)c
+{
+    return NSDragOperationCopy;
+}
+
+- (NSMenu *)menuForEvent:(NSEvent *)e
+{
+    FTItem *it = [self itemAt:e];
+    if (!it || it.gone)
+        return nil;
+    NSMenu *m = [[NSMenu alloc] init];
+    [m addItemWithTitle:@"Open" action:@selector(menuOpen:) keyEquivalent:@""].representedObject = it;
+    [m addItemWithTitle:@"Show in Finder" action:@selector(menuReveal:) keyEquivalent:@""].representedObject = it;
+    for (NSMenuItem *i in m.itemArray)
+        i.target = self;
+    return m;
+}
+
+- (void)resizeWithOldSuperviewSize:(NSSize)old
+{
+    [super resizeWithOldSuperviewSize:old];
+    [self layoutFor:self.superview.bounds.size.width minHeight:self.superview.bounds.size.height];
+}
+
+- (void)menuOpen:(NSMenuItem *)i { [self open:i.representedObject inFinder:NO]; }
+- (void)menuReveal:(NSMenuItem *)i { [self open:i.representedObject inFinder:YES]; }
 @end
 
 static void on_status(void *ud, const rd_status_t *s)
@@ -251,6 +469,7 @@ static void on_notify(void *ud, const char *text)
     if (self.st.panel[0])
         [m addItemWithTitle:@"Open window" action:@selector(openPanel:) keyEquivalent:@""].target = self;
     [m addItemWithTitle:self.st.state == RD_UNPAIRED ? @"Pair with a panel…" : @"Pairing & status…" action:@selector(showWindow:) keyEquivalent:@""].target = self;
+    [m addItemWithTitle:@"File Transfer" action:@selector(showFiles:) keyEquivalent:@""].target = self;
     [m addItemWithTitle:@"Show log" action:@selector(showLog:) keyEquivalent:@""].target = self;
     [m addItem:[NSMenuItem separatorItem]];
     NSMenuItem *li = [m addItemWithTitle:@"Start at login" action:@selector(toggleLogin:) keyEquivalent:@""];
@@ -344,12 +563,13 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     button(@"Open Settings", v, NSMakeRect(W - 140, 50, 124, 28), self, @selector(openControlSettings:));
 
     self.viewOnly = [NSButton checkboxWithTitle:@"View only" target:self action:@selector(viewOnlyChanged:)];
-    self.viewOnly.frame = NSMakeRect(18, 16, 120, 24);
+    self.viewOnly.frame = NSMakeRect(18, 16, 88, 24);
     [v addSubview:self.viewOnly];
     self.login = [NSButton checkboxWithTitle:@"Start at login" target:self action:@selector(loginChanged:)];
-    self.login.frame = NSMakeRect(140, 16, 140, 24);
+    self.login.frame = NSMakeRect(106, 16, 112, 24);
     [v addSubview:self.login];
-    button(@"Show log", v, NSMakeRect(W - 116, 12, 100, 30), self, @selector(showLog:));
+    button(@"File Transfer", v, NSMakeRect(W - 222, 12, 108, 30), self, @selector(showFiles:));
+    button(@"Show log", v, NSMakeRect(W - 114, 12, 98, 30), self, @selector(showLog:));
     [self.window center];
 }
 
@@ -369,7 +589,7 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     self.info.stringValue = [NSString stringWithFormat:@"Panel:  %@\nDevice: %@", str(self.st.panel), str(self.st.device_id)];
     self.disconnect.hidden = self.st.state != RD_IN_SESSION;
     self.drop.stringValue = self.st.state == RD_IN_SESSION
-                                ? @"Drop files on this window to send them: the viewer's browser downloads them."
+                                ? @"Drop files on this window to send them to the viewer's File Transfer."
                                 : @"While someone is viewing, drop files on this window to send them.";
     self.viewOnly.state = self.st.view_only ? NSControlStateValueOn : NSControlStateValueOff;
     self.login.state = [self loginEnabled] ? NSControlStateValueOn : NSControlStateValueOff;
@@ -398,6 +618,11 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     if (n.object == self.logWindow) {
         [self.logTimer invalidate];
         self.logTimer = nil;
+        return;
+    }
+    if (n.object == self.ftWindow) {
+        [self.ftTimer invalidate];
+        self.ftTimer = nil;
         return;
     }
     [self.permTimer invalidate];
@@ -437,6 +662,114 @@ static NSButton *button(NSString *t, NSView *in, NSRect r, id target, SEL a)
     NSDictionary *o = @{ (__bridge NSString *)kAXTrustedCheckOptionPrompt : @YES };
     AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)o);
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
+}
+
+/* ---------------- the File Transfer window ---------------- */
+
+- (void)showFiles:(id)sender
+{
+    if (!self.ftWindow) {
+        const CGFloat W = 460, H = 620, BAR = 50;
+        NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, W, H)
+                                                  styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                                                            NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable
+                                                    backing:NSBackingStoreBuffered defer:NO];
+        w.title = @"File Transfer";
+        w.releasedWhenClosed = NO;
+        w.delegate = self;
+        w.minSize = NSMakeSize(340, 300);
+        w.contentView = [[DropView alloc] initWithFrame:NSMakeRect(0, 0, W, H)];
+        NSView *v = w.contentView;
+        NSScrollView *sv = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, BAR, W, H - BAR)];
+        sv.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        sv.hasVerticalScroller = YES;
+        sv.drawsBackground = NO;
+        FTList *list = [[FTList alloc] initWithFrame:NSMakeRect(0, 0, W, H - BAR)];
+        list.autoresizingMask = NSViewWidthSizable;
+        sv.documentView = list;
+        [v addSubview:sv];
+        NSBox *line = [[NSBox alloc] initWithFrame:NSMakeRect(0, BAR - 1, W, 1)];
+        line.boxType = NSBoxSeparator;
+        line.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
+        [v addSubview:line];
+        NSTextField *hint = label(@"Drop files here to send them", v, NSMakeRect(14, 16, W - 230, 18), 12, NO);
+        hint.textColor = NSColor.secondaryLabelColor;
+        hint.lineBreakMode = NSLineBreakByTruncatingTail;
+        hint.autoresizingMask = NSViewWidthSizable;
+        NSButton *send = button(@"Send files…", v, NSMakeRect(W - 210, 10, 112, 30), self, @selector(ftSend:));
+        send.autoresizingMask = NSViewMinXMargin;
+        send.bezelColor = NSColor.controlAccentColor;
+        button(@"Clear", v, NSMakeRect(W - 94, 10, 80, 30), self, @selector(ftClear:)).autoresizingMask = NSViewMinXMargin;
+        self.ftList = list;
+        self.ftWindow = w;
+        [w center];
+    }
+    self.ftSeq = rd_agent_transfers_seq() - 1; /* fill it now */
+    [self ftTick];
+    if (!self.ftTimer)
+        self.ftTimer = [NSTimer scheduledTimerWithTimeInterval:0.7 target:self selector:@selector(ftTick) userInfo:nil repeats:YES];
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.ftWindow makeKeyAndOrderFront:nil];
+}
+
+- (void)ftTick
+{
+    unsigned seq = rd_agent_transfers_seq();
+    if (seq == self.ftSeq)
+        return;
+    self.ftSeq = seq;
+    char *text = rd_agent_transfers();
+    rd_xfer_t *v;
+    int n = rd_xfers_parse(text, &v);
+    NSMutableArray *items = [NSMutableArray arrayWithCapacity:(NSUInteger)n];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    for (int i = 0; i < n; i++) {
+        FTItem *it = [[FTItem alloc] init];
+        it.ms = v[i].ms;
+        it.size = v[i].size;
+        it.incoming = v[i].in;
+        it.stamp = v[i].stamp;
+        it.path = str(v[i].path);
+        it.name = str(v[i].name);
+        BOOL dir = NO;
+        it.gone = ![fm fileExistsAtPath:it.path isDirectory:&dir] || dir;
+        if (!it.gone && rd_xfer_is_image(v[i].name) && i >= n - 60) /* the newest pictures as pictures */
+            it.thumb = thumbnail(it.path, 220);
+        [items addObject:it];
+    }
+    free(v);
+    rd_agent_free(text);
+    FTList *list = self.ftList;
+    list.items = items;
+    NSClipView *clip = list.enclosingScrollView.contentView;
+    [list layoutFor:clip.bounds.size.width minHeight:clip.bounds.size.height];
+    [list scrollPoint:NSMakePoint(0, NSHeight(list.frame))];
+}
+
+- (void)ftSend:(id)sender
+{
+    NSOpenPanel *p = [NSOpenPanel openPanel];
+    p.allowsMultipleSelection = YES;
+    p.canChooseDirectories = NO;
+    p.prompt = @"Send";
+    p.message = @"Send to the viewer";
+    [p beginSheetModalForWindow:self.ftWindow completionHandler:^(NSModalResponse r) {
+        if (r == NSModalResponseOK)
+            send_urls(p.URLs);
+    }];
+}
+
+- (void)ftClear:(id)sender
+{
+    NSAlert *a = [[NSAlert alloc] init];
+    a.messageText = @"Clear the list?";
+    a.informativeText = @"The files themselves stay where they are.";
+    [a addButtonWithTitle:@"Clear"];
+    [a addButtonWithTitle:@"Cancel"];
+    if ([a runModal] == NSAlertFirstButtonReturn) {
+        rd_agent_transfers_clear();
+        [self ftTick];
+    }
 }
 
 /* ---------------- the log window ---------------- */
