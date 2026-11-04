@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download grids (CPU x platform: the server, the router agent, and the desktop agents) from a release's files.
+"""Download grids (CPU x platform: the panel, RemoDroid for phones, RemoDroid for computers) from a release's files.
 The server is for Linux and Windows servers: no OpenWrt or MIPS builds (routers run the agent).
 
   doc/downloads.py 0.3.4 packages/            Markdown for the release notes (CI, release job)
@@ -76,10 +76,10 @@ def windows_grid(names, ver):
 
 HINT = ('Pick the row for the machine\'s CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, '
         '`i686` = x86) and the column for its system. OpenWrt: take the build that `opkg print-architecture` '
-        'lists. *Any Linux* holds both the server and the agent (only the agent on MIPS).')
+        'lists. *Any Linux* holds both RemoDroid for phones and the panel (only RemoDroid for phones on MIPS).')
 SERVER_HINT = ('Pick the row for the server\'s CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, '
-               '`i686` = x86) and the column for its system. *Any Linux* holds both the server and the agent.')
-WINDOWS_HINT = ('Windows: unzip it, run **RemoDroidServer.exe** and choose *Install and start*; the same window sets the '
+               '`i686` = x86) and the column for its system. *Any Linux* holds both the panel and RemoDroid for phones.')
+WINDOWS_HINT = ('Windows server: unzip it, run **RemoDroidServer.exe** and choose *Install and start*; the same window sets the '
                 'administrator, web port, HTTPS domain and STUN/TURN, and shows the log.')
 
 
@@ -88,7 +88,7 @@ def merlin_note(names, ver):
               for arch in ('armv7', 'aarch64')
               if (name := f'remodroid-{ver}-merlin-{arch}.tar.gz') in names]
     return ('Koolshare / KoolCenter offline installers: ' + ' · '.join(merlin)
-            + '. RT-AC86U and RT-AX88U: choose aarch64. These are agent-only plugins, not OpenWrt packages.') if merlin else ''
+            + '. RT-AC86U and RT-AX88U: choose aarch64. These hold only RemoDroid for phones, as router plugins (not OpenWrt packages).') if merlin else ''
 
 
 def desktop_grid(names, ver):
@@ -98,21 +98,24 @@ def desktop_grid(names, ver):
     def cell(*files):
         bs = [btn(n, b, alt) for n, b, alt in files if n in names]
         return '<br>'.join(bs) or '—'
+    def comp(tail):  # RemoDroid-Computer-<ver>-<tail>; RemoDroid-<ver>-<tail> before 0.6.2
+        new = f'RemoDroid-Computer-{ver}-{tail}'
+        return new if new in names else f'RemoDroid-{ver}-{tail}'
     linux = lambda deb, rpm, tar: cell((f'remodroid-desktop_{ver}-1_{deb}.deb', 'deb', f'desktop .deb {tar}'),
                                        (f'remodroid-desktop-{ver}-1.{rpm}.rpm', 'rpm', f'desktop .rpm {tar}'),
                                        (f'remodroid-desktop-{ver}-linux-{tar}.tar.gz', 'tar', f'desktop .tar.gz {tar}'),
-                                       (f'RemoDroid-{ver}-linux-{tar}.AppImage', 'appimage', f'desktop .AppImage {tar}'))
-    mac = cell((f'RemoDroid-{ver}-macos.zip', 'zip', 'macOS .zip (Apple silicon and Intel)'))
+                                       (comp(f'linux-{tar}.AppImage'), 'appimage', f'desktop .AppImage {tar}'))
+    mac = cell((comp('macos.zip'), 'zip', 'macOS .zip (Apple silicon and Intel)'))
     return '\n'.join([
         '| Computer | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Apple silicon, Snapdragon…</sub> |', '|:--|:-:|:-:|',
-        f'| **Windows** 10 1809+, 11 | {cell((f"RemoDroid-{ver}-windows-x86_64.zip", "zip", "Windows .zip x86_64"))} | '
-        f'{cell((f"RemoDroid-{ver}-windows-arm64.zip", "zip", "Windows .zip ARM64"))} |',
+        f'| **Windows** 10 1809+, 11 | {cell((comp("windows-x86_64.zip"), "zip", "Windows .zip x86_64"))} | '
+        f'{cell((comp("windows-arm64.zip"), "zip", "Windows .zip ARM64"))} |',
         f'| **macOS** 13+ | {mac} | {mac} |',
         f'| **Linux** (X11 session) | {linux("amd64", "x86_64", "x86_64")} | {linux("arm64", "aarch64", "aarch64")} |',
     ])
 
 
-DESKTOP_HINT = ('Remote desktop for the computer itself: install it there, then pair it by pasting the line from the panel '
+DESKTOP_HINT = ('Install it on the computer you want to control, then pair it by pasting the line from the panel '
                 '(Agents → Add → Computer). The macOS build runs on Apple silicon and Intel Macs.')
 
 
@@ -127,9 +130,10 @@ def server_section(names, ver):
 
 def markdown(names, ver):
     return '\n'.join([
-        f'### Downloads (v{ver})', ''] + server_section(names, ver) + [HINT, '',
+        f'### Downloads (v{ver})', '', '#### The panel, on a Linux or Windows server', ''] + server_section(names, ver) + [
+        '#### RemoDroid for phones (on the router the Android phone is plugged into)', '', HINT, '',
         grid('agent', names, ver), '', merlin_note(names, ver), '',
-        '#### Remote desktop (Windows, macOS, Linux)', '', DESKTOP_HINT, '', desktop_grid(names, ver), '',
+        '#### RemoDroid for computers (Windows, macOS, Linux)', '', DESKTOP_HINT, '', desktop_grid(names, ver), '',
         checksums(ver),
     ])
 
@@ -137,12 +141,12 @@ def markdown(names, ver):
 def section(part, names, ver):
     """One part's grid for its own install step in the README."""
     if part == 'desktop':
-        return '\n'.join([f'#### Download RemoDroid for your computer (v{ver})', '', DESKTOP_HINT, '',
+        return '\n'.join([f'#### Download RemoDroid for computers (v{ver})', '', DESKTOP_HINT, '',
                           desktop_grid(names, ver), '', checksums(ver)])
     if part == 'server':
-        return '\n'.join([f'#### Download the server (v{ver})', ''] + server_section(names, ver) + [checksums(ver)])
+        return '\n'.join([f'#### Download the panel for a Linux or Windows server (v{ver})', ''] + server_section(names, ver) + [checksums(ver)])
     note = merlin_note(names, ver)
-    return '\n'.join([f'#### Download the {part} (v{ver})', '', HINT, '', grid(part, names, ver), '']
+    return '\n'.join([f'#### Download RemoDroid for phones (v{ver})', '', HINT, '', grid(part, names, ver), '']
                       + ([note, ''] if note else []) + [checksums(ver)])
 
 

@@ -2,20 +2,51 @@
 
 # RemoDroid
 
-Control an Android phone from your iPhone's Safari with low latency, good enough for cloud gaming.
-The phone stays at home on a USB cable to your router. You watch and tap it from anywhere.
-Windows, macOS and Linux computers work too: a small tray app makes them remote desktops in the same panel,
-with mouse and keyboard from the browser.
+Control an Android phone, or a Windows, Mac or Linux computer, from your iPhone's Safari (or any browser) with low
+latency, good enough for cloud gaming.
+
+## Which do I need?
+
+**Two pieces: a panel, and RemoDroid on what you want to control.** The panel is the web page you log in to: put it
+on **Cloudflare** if you have no server (free, nothing to keep running), or on your own **Linux** or **Windows**
+server. Then, to control an **Android phone**, install *RemoDroid for phones* on the router (or any Linux box) the
+phone is plugged into by USB; to control a **Windows, Mac or Linux computer**, install *RemoDroid for computers* on
+that computer. You watch and control from Safari on your iPhone, or any browser; nothing to install there.
+
+**The panel: pick one.**
+
+| Put the panel on | Choose it when | Setting it up |
+|---|---|---|
+| [**Cloudflare**](#on-cloudflare-no-server) | You have no server. Cloudflare hosts the page and relays the video when a network blocks a direct path (1,000 GB a month free). | A few minutes in the browser |
+| [**A Linux server**](#on-a-linux-server) | You rent a VPS with a public IP. Pick a region close to home: it relays the video when needed. | One command |
+| [**A Windows server**](#on-a-windows-server) | The same, on Windows Server 2019 or newer (Windows 10 or 11 with a public IP works too). | Unzip and click *Install and start* |
+
+**Then, on each thing you want to control:**
+
+| To control | Install | Where |
+|---|---|---|
+| An **Android phone** | [**RemoDroid for phones**](#an-android-phone-remodroid-for-phones) | On the router (OpenWrt, ASUS Merlin, or any Linux box) the phone is plugged into by USB. Nothing is installed on the phone. |
+| A **Windows** PC | [**RemoDroid for computers**](#a-computer-remodroid-for-computers) | On that PC (Windows 10 1809 or newer) |
+| A **Mac** | [**RemoDroid for computers**](#a-computer-remodroid-for-computers) | On that Mac (macOS 13 or newer) |
+| A **Linux** PC | [**RemoDroid for computers**](#a-computer-remodroid-for-computers) | On that PC (an X11 session) |
+
+One panel serves any number of phones and computers. Every setup is the same three steps:
+[1. the panel](#1-the-panel) → [2. RemoDroid on what you control](#2-remodroid-on-what-you-control) →
+[3. open it on your iPhone](#3-open-it-on-your-iphone).
 
 <p align="center"><a href="https://remodroid.pages.dev/"><img src="wizard/button.svg" alt="Install RemoDroid with the wizard: remodroid.pages.dev" width="318" height="64"></a></p>
 
-<p align="center"><img src="doc/architecture.svg" alt="How RemoDroid works: Safari on the iPhone logs in to the control server; the agent on the home router drives the Android phone over USB; video, sound and touch flow over WebRTC between Safari and the router, through TURN when direct UDP is blocked" width="100%"></p>
+<p align="center">For an Android phone, the install wizard walks you through every step with copy buttons.</p>
 
-**How it works, in one paragraph.** A small **server** on a public machine (or a free Cloudflare Worker) hosts the
-web page, your login and the connection setup. An **agent** on your home router talks to the phone over USB with
-its own built-in ADB (no `adb` needed) and starts a tiny helper on the phone. The helper captures the screen,
-encodes it in hardware and sends it as WebRTC straight to Safari, with your touches going back the same way.
-The router only forwards packets; nothing is decoded in between.
+## How it works
+
+<p align="center"><img src="doc/architecture.svg" alt="How RemoDroid works: Safari on the iPhone logs in to the panel; RemoDroid for phones on the home router drives the Android phone over USB; video, sound and touch flow over WebRTC between Safari and the router, through TURN when direct UDP is blocked" width="100%"></p>
+
+The **panel** hosts the web page, your login and the connection setup. **RemoDroid for phones** on your home router
+talks to the phone over USB with its own built-in ADB (no `adb` needed) and starts a tiny helper on the phone. The
+helper captures the screen, encodes it in hardware and sends it as WebRTC straight to Safari, with your touches going
+back the same way. The router only forwards packets; nothing is decoded in between. **RemoDroid for computers** does
+the same from the computer itself: it captures the screen, encodes it on the GPU and takes the mouse and keyboard.
 
 <details>
 <summary>More detail: media paths, TURN, what runs on the phone</summary>
@@ -35,67 +66,58 @@ The router only forwards packets; nothing is decoded in between.
 
 ## What you need
 
-RemoDroid is light: the phone does the heavy work (capture and hardware encoding), the router only forwards packets,
-and the server only sets up connections. What matters most is **upload speed at home**.
+RemoDroid is light: the phone or computer does the heavy work (capture and hardware encoding), the router only
+forwards packets, and the panel only sets up connections. What matters most is **upload speed at home**.
 
 | | Minimum | Recommended | What it uses |
 |---|---|---|---|
-| **Server** | Any Linux machine, or Windows Server 2019 or newer, with a public IP: 1 CPU, 128 MB RAM, a few MB of disk. Or a free Cloudflare account instead | A small VM in the cloud region **closest to your home** (it carries the stream when TURN is needed), with enough monthly traffic | About 2 MB of RAM and almost no CPU. Bandwidth only when a session falls back to TURN; then the whole stream passes through it (about 4.5 GB per hour at 10 Mbps) |
-| **Router** | OpenWrt, Linux (Debian, Ubuntu, CentOS, Alpine) or ASUS Merlin with Koolshare, a USB port and about 2 MB of free storage. CPU: x86, ARM or MIPS | An ARM (aarch64, ARMv7) or x86 router. A weak MIPS router works but may not keep up with the top bitrates | About 2 MB of RAM. CPU only to move packets between USB and UDP; nothing is decoded |
+| **Panel** | A free Cloudflare account, or any Linux machine or Windows Server 2019+ with a public IP: 1 CPU, 128 MB RAM, a few MB of disk | On your own server: a small VM in the cloud region **closest to your home** (it carries the stream when TURN is needed), with enough monthly traffic | About 2 MB of RAM and almost no CPU. Bandwidth only when a session falls back to TURN; then the whole stream passes through it (about 4.5 GB per hour at 10 Mbps) |
+| **Router** (for a phone) | OpenWrt, Linux (Debian, Ubuntu, CentOS, Alpine) or ASUS Merlin with Koolshare, a USB port and about 2 MB of free storage. CPU: x86, ARM or MIPS | An ARM (aarch64, ARMv7) or x86 router. A weak MIPS router works but may not keep up with the top bitrates | About 2 MB of RAM. CPU only to move packets between USB and UDP; nothing is decoded |
 | **Android phone** | Android 8 or newer, USB debugging, a hardware H.264 encoder | Android 12 or newer (for sound) with a hardware H.265 encoder | Its own hardware encoder; the screen is turned off while you're connected |
+| **Computer** | Windows 10 1809+, macOS 13+, or Linux with an X11 session | A GPU encoder (any recent Intel, AMD, NVIDIA or Apple chip) | Its GPU encoder; software H.264 at 30 fps without one |
 | **iPhone** | Safari | A recent iOS, for H.265 over WebRTC (older iOS gets H.264 automatically) | Hardware video decoding |
 | **Network** | 3–5 Mbps upload at home (720p) | 10–20 Mbps upload at home and the same download on the iPhone (1080p, 60 fps) | 1–20 Mbps per stream (default cap 20 Mbps, 60 fps); the quality adapts automatically |
 
 Expected delay is 40–80 ms when the iPhone reaches your home directly, and about 70–120 ms through TURN.
-Memory figures are from a running server and an RT-AC86U agent.
+Memory figures are from a running server and an RT-AC86U router.
 
 ## Install
 
-<p align="center"><a href="https://remodroid.pages.dev/"><img src="wizard/button.svg" alt="Install RemoDroid with the wizard: remodroid.pages.dev" width="318" height="64"></a></p>
+### 1. The panel
 
-**The wizard walks you through everything with copy buttons.** Prefer to stay here? Follow these five steps,
-the same five as the bottom of the picture.
+Pick one place for it: Cloudflare, a Linux server or a Windows server. You can move later; the routers and computers
+are then added to the new panel again.
 
-### 1. Server
+#### On Cloudflare (no server)
 
-On your Linux server:
+1. **Make a TURN key** (it relays the video when a network blocks a direct path). In the
+   [Cloudflare dashboard](https://dash.cloudflare.com/): **Realtime → TURN Server → Create**. Keep its **Turn Token
+   ID** and **API Token**; copy the API Token right away.
+2. **Deploy the panel.** Fork this repository, then in the dashboard **Workers & Pages → Create → Import a
+   repository**, pick your fork and set the root directory to `worker`. Every push to your fork then updates the
+   panel by itself. Or from a computer: `cd worker && npm install && npx wrangler deploy`.
+3. **Open it and finish the setup at once**, at `https://remodroid.<you>.workers.dev`: until you do, the first
+   visitor chooses the login. To be safe, first give the Worker a secret `SETUP_TOKEN` (Settings → Variables and
+   Secrets → Add, type *Secret*; a plain variable is lost at the next deploy); the setup page then asks for it. The
+   setup page asks for your login and the TURN key.
+
+Nothing to open in a firewall: Cloudflare does the relaying. The panel's **Server** tab changes the login and the
+TURN key later.
+
+#### On a Linux server
 
 ```sh
 curl -fsSL https://remodroid.pages.dev/install_server.sh | sudo sh
 ```
 
-It picks the right package, installs it, starts the server and prints a link like
-`http://<ip>:5580/wizard.html?token=…`.
+It picks the right package, installs it, starts the panel and prints a link like
+`http://<ip>:5580/wizard.html?token=…`. Open it and fill in the web port, your **domain** (for automatic HTTPS from
+Let's Encrypt), the admin login and the STUN/TURN port. The panel restarts on your ports and is ready.
 
-On a **Windows server** (Windows Server 2019 or newer; Windows 10 and 11 work too): download the Windows `.zip`
-below, unzip it into a folder it can stay in, run **RemoDroidServer.exe** and choose **Install and start**. It
-runs the server as a Windows service, which starts with Windows whether or not anyone is signed in, and lets it
-through Windows Firewall. The same window sets the administrator, web port, HTTPS domain and STUN/TURN, starts and
-stops the server and shows its log; its icon stays by the clock. From a command prompt instead:
-`remodroid-server install` (as an administrator).
+Open these ports in the firewall: **TCP 5580** (only for setup), your web port (**80**) and **443** if you use a
+domain, **UDP 3478** and **UDP 49152–49252** (TURN).
 
-<!-- downloads:server -->
-#### Download the server (v0.6.1)
-
-Pick the row for the server's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, `i686` = x86) and the column for its system. *Any Linux* holds both the server and the agent.
-
-| Server | Debian · Ubuntu | CentOS · Fedora | Alpine | Any Linux |
-|:--|:-:|:-:|:-:|:-:|
-| **x86_64**<br><sub>Intel / AMD 64-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_amd64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.x86_64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_x86_64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-x86_64.tar.gz) |
-| **ARM64**<br><sub>aarch64</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_arm64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.aarch64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_aarch64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-aarch64.tar.gz) |
-| **ARMv7**<br><sub>32-bit ARM</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_armhf.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.armv7hl.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_armv7.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-armv7.tar.gz) |
-| **x86**<br><sub>32-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_i386.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.i686.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_x86.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-x86.tar.gz) |
-
-Windows: unzip it, run **RemoDroidServer.exe** and choose *Install and start*; the same window sets the administrator, web port, HTTPS domain and STUN/TURN, and shows the log.
-
-| Server | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Graviton, Snapdragon…</sub> |
-|:--|:-:|:-:|
-| **Windows** Server 2019+, 10 1809+, 11 | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="server Windows .zip x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/RemoDroid-Server-0.6.1-windows-x86_64.zip) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="server Windows .zip ARM64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/RemoDroid-Server-0.6.1-windows-arm64.zip) |
-
-Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/SHA256SUMS)
-<!-- /downloads:server -->
-
-Install it and start the service:
+To install a package by hand instead, take it from the table below, then:
 
 ```sh
 sudo apt install ./remodroid-server_*.deb                  # Debian, Ubuntu
@@ -107,6 +129,36 @@ rc-update add remodroid-server && rc-service remodroid-server start            #
 ```
 
 Then open `http://<server>:5580/wizard.html?token=…`. The token is in `/var/lib/remodroid/setup-token`.
+
+#### On a Windows server
+
+Windows Server 2019 or newer; Windows 10 and 11 work too. Download the Windows `.zip` below, unzip it into a folder
+it can stay in, run **RemoDroidServer.exe** and choose **Install and start**. It runs the panel as a Windows service,
+which starts with Windows whether or not anyone is signed in, and lets it through Windows Firewall. The same window
+sets the administrator, web port, HTTPS domain and STUN/TURN, starts and stops it and shows its log; its icon stays by
+the clock. From a command prompt instead: `remodroid-server install` (as an administrator). Open the same ports as on
+Linux in your cloud provider's firewall.
+
+<!-- downloads:server -->
+#### Download the panel for a Linux or Windows server (v0.6.1)
+
+Pick the row for the server's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, `i686` = x86) and the column for its system. *Any Linux* holds both the panel and RemoDroid for phones.
+
+| Server | Debian · Ubuntu | CentOS · Fedora | Alpine | Any Linux |
+|:--|:-:|:-:|:-:|:-:|
+| **x86_64**<br><sub>Intel / AMD 64-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_amd64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.x86_64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_x86_64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-x86_64.tar.gz) |
+| **ARM64**<br><sub>aarch64</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_arm64.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.aarch64.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_aarch64.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz aarch64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-aarch64.tar.gz) |
+| **ARMv7**<br><sub>32-bit ARM</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_armhf.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.armv7hl.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_armv7.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz armv7" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-armv7.tar.gz) |
+| **x86**<br><sub>32-bit</sub> | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/deb.svg" alt="server .deb x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-1_i386.deb) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/rpm.svg" alt="server .rpm x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server-0.6.1-1.i686.rpm) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/apk.svg" alt="server .apk x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-server_0.6.1-r1_x86.apk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="server + agent .tar.gz x86" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-x86.tar.gz) |
+
+Windows server: unzip it, run **RemoDroidServer.exe** and choose *Install and start*; the same window sets the administrator, web port, HTTPS domain and STUN/TURN, and shows the log.
+
+| Server | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Graviton, Snapdragon…</sub> |
+|:--|:-:|:-:|
+| **Windows** Server 2019+, 10 1809+, 11 | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="server Windows .zip x86_64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/RemoDroid-Server-0.6.1-windows-x86_64.zip) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/zip.svg" alt="server Windows .zip ARM64" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/RemoDroid-Server-0.6.1-windows-arm64.zip) |
+
+Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/SHA256SUMS)
+<!-- /downloads:server -->
 
 <details>
 <summary>Any Linux (.tar.gz) by hand</summary>
@@ -125,25 +177,6 @@ remodroid-server -c /etc/remodroid/server.ini
 
 </details>
 
-**Set it up.** In the wizard, fill in the web port, your **domain** (for automatic HTTPS from Let's Encrypt), the
-admin login and the STUN/TURN port. The server restarts on your ports and the panel is ready.
-
-Open these ports in the firewall: **TCP 5580** (only for setup), your web port (**80**) and **443** if you use a
-domain, **UDP 3478** and **UDP 49152–49252** (TURN).
-
-<details>
-<summary>No server? Use Cloudflare instead</summary>
-
-1. In the Cloudflare dashboard, make a TURN key: **Realtime → TURN Server**.
-2. Deploy `worker/`: `cd worker && npm install && npx wrangler deploy`, or import your fork into Cloudflare with
-   root directory `worker`.
-3. Open `https://remodroid.<you>.workers.dev`. Its wizard asks for the login and the TURN key.
-
-The Worker is the same panel (login, routers, signaling) running on a Durable Object with built-in storage.
-Skip the firewall step; Cloudflare's TURN does the relaying.
-
-</details>
-
 <details>
 <summary>Server settings after setup</summary>
 
@@ -155,7 +188,11 @@ Packages keep your `server.ini` on upgrade.
 
 </details>
 
-### 2. Agent on the router
+### 2. RemoDroid on what you control
+
+#### An Android phone: RemoDroid for phones
+
+It goes on the router the phone will be plugged into (or any Linux box with a USB port), not on the phone.
 
 OpenWrt, Alpine:
 
@@ -169,10 +206,12 @@ Debian, Ubuntu, CentOS, Fedora:
 curl -fsSL https://remodroid.pages.dev/install_agent.sh | sudo sh
 ```
 
-<!-- downloads:agent -->
-#### Download the agent (v0.6.1)
+ASUS Merlin with Koolshare: take the Merlin package below and see *ASUS Merlin / Koolshare* further down.
 
-Pick the row for the machine's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, `i686` = x86) and the column for its system. OpenWrt: take the build that `opkg print-architecture` lists. *Any Linux* holds both the server and the agent (only the agent on MIPS).
+<!-- downloads:agent -->
+#### Download RemoDroid for phones (v0.6.1)
+
+Pick the row for the machine's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `armv7l` = ARMv7, `i686` = x86) and the column for its system. OpenWrt: take the build that `opkg print-architecture` lists. *Any Linux* holds both RemoDroid for phones and the panel (only RemoDroid for phones on MIPS).
 
 | Agent | Debian · Ubuntu | CentOS · Fedora | Alpine | OpenWrt | Any Linux |
 |:--|:-:|:-:|:-:|:-:|:-:|
@@ -183,7 +222,7 @@ Pick the row for the machine's CPU (`uname -m`: `x86_64`, `aarch64` = ARM64, `ar
 | **MIPS LE**<br><sub>mipsel</sub> | — | — | — | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="agent .ipk mipsel_24kc" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-agent_0.6.1-1_mipsel_24kc.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="agent .tar.gz mipsel" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-mipsel.tar.gz) |
 | **MIPS BE**<br><sub>mips</sub> | — | — | — | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/ipk.svg" alt="agent .ipk mips_24kc" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-agent_0.6.1-1_mips_24kc.ipk) | [<img src="https://raw.githubusercontent.com/yinyue123/RemoDroid/main/doc/badges/tar.svg" alt="agent .tar.gz mips" height="24">](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-linux-mips.tar.gz) |
 
-Koolshare / KoolCenter offline installers: [Merlin armv7](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-merlin-armv7.tar.gz) · [Merlin aarch64](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-merlin-aarch64.tar.gz). RT-AC86U and RT-AX88U: choose aarch64. These are agent-only plugins, not OpenWrt packages.
+Koolshare / KoolCenter offline installers: [Merlin armv7](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-merlin-armv7.tar.gz) · [Merlin aarch64](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/remodroid-0.6.1-merlin-aarch64.tar.gz). RT-AC86U and RT-AX88U: choose aarch64. These hold only RemoDroid for phones, as router plugins (not OpenWrt packages).
 
 Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download/v0.6.1/SHA256SUMS)
 <!-- /downloads:agent -->
@@ -192,10 +231,10 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
 the OpenWrt versions that work.
 
 **OpenWrt with LuCI, no command line:** in LuCI open **System → Software → Upload Package…**, choose the
-`.ipk` for your router, and install it. A **Services → RemoDroid** page appears: it pairs the router with your
-panel (step 3), starts and stops the agent, and shows whether the panel and the phone are connected.
+`.ipk` for your router, and install it. A **Services → RemoDroid** page appears: it adds the router to your
+panel (next step), starts and stops it, and shows whether the panel and the phone are connected.
 
-On other systems, install it and start the service:
+On other systems, install the package and start the service:
 
 ```sh
 opkg install ./remodroid-agent_*.ipk                       # OpenWrt
@@ -241,42 +280,35 @@ Building, migration and limits: [Merlin packaging](packaging/merlin/README.md).
 
 </details>
 
-### 3. Enroll the router
-
-In the panel, open **Agents → Add**. It shows a command with a one-time code; run it on the router:
+**Add the router to the panel.** In the panel, open **Agents → Add**. It shows a command with a one-time code;
+run it on the router:
 
 ```sh
 remodroid enroll --panel https://your.panel --code X5SX-K3M7
 ```
 
-On OpenWrt you can paste the same command into **Services → RemoDroid → Pair** in LuCI instead.
+On OpenWrt you can paste the same command into **Services → RemoDroid → Pair** in LuCI instead. The code works once,
+for 10 minutes. The router then shows as online; tap it to change its settings.
 
-The code works once, for 10 minutes. The router then shows as online; tap it to change its settings.
+**Plug in the phone.** On the phone, turn on **Developer options → USB debugging**. Plug it into the router's USB
+port and tap **Allow** on the "Allow USB debugging?" prompt (tick "Always allow"). That's the only time you touch the
+phone.
 
-### 4. Plug in the phone
+#### A computer: RemoDroid for computers
 
-On the phone, turn on **Developer options → USB debugging**. Plug it into the router's USB port and tap
-**Allow** on the "Allow USB debugging?" prompt (tick "Always allow"). That's the only time you touch the phone.
-
-### 5. Open it on the iPhone
-
-Open your panel in Safari, log in, then **Share → Add to Home Screen**. Started from the Home Screen it runs full
-screen (Safari can't hide its bars for a normal page). Tap your phone to connect.
-
-### Computers: Windows, macOS, Linux
-
-A computer needs no router: install **RemoDroid** on it, start it, and pair it from its tray (or menu bar) icon
-by pasting the line the panel shows under **Agents → Add → Computer**. It runs as the logged-in user, shows a notification
-whenever someone connects, and its icon turns red while it is being viewed (**Disconnect viewer** is one click
-away). The viewer hears what the computer plays (the **Sound** switch, or `desktop.audio = false` to never
-send it), and **Show log** in the icon's menu opens a live log window. Windows 10 1809+ and macOS 13+; Linux needs an X11 session (on GNOME: "GNOME on Xorg").
-The picture is encoded on the GPU where there is one (Media Foundation, VideoToolbox, and VA-API on Linux with an
-AMD or Intel GPU, a Steam Deck included: H.265 or H.264 at up to 60 fps); otherwise in software (H.264, 30 fps).
+A computer needs no router: install **RemoDroid** on it, start it, and add it to the panel from its tray (or menu
+bar) icon by pasting the line the panel shows under **Agents → Add → Computer**. It runs as the logged-in user, shows
+a notification whenever someone connects, and its icon turns red while it is being viewed (**Disconnect viewer** is
+one click away). The viewer hears what the computer plays (the **Sound** switch, or `desktop.audio = false` to never
+send it), and **Show log** in the icon's menu opens a live log window. Windows 10 1809+ and macOS 13+; Linux needs an
+X11 session (on GNOME: "GNOME on Xorg"). The picture is encoded on the GPU where there is one (Media Foundation,
+VideoToolbox, and VA-API on Linux with an AMD or Intel GPU, a Steam Deck included: H.265 or H.264 at up to 60 fps);
+otherwise in software (H.264, 30 fps).
 
 <!-- downloads:desktop -->
-#### Download RemoDroid for your computer (v0.6.1)
+#### Download RemoDroid for computers (v0.6.1)
 
-Remote desktop for the computer itself: install it there, then pair it by pasting the line from the panel (Agents → Add → Computer). The macOS build runs on Apple silicon and Intel Macs.
+Install it on the computer you want to control, then pair it by pasting the line from the panel (Agents → Add → Computer). The macOS build runs on Apple silicon and Intel Macs.
 
 | Computer | **x86_64**<br><sub>Intel / AMD</sub> | **ARM64**<br><sub>Apple silicon, Snapdragon…</sub> |
 |:--|:-:|:-:|
@@ -288,7 +320,7 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
 <!-- /downloads:desktop -->
 
 - **Windows**: unzip and run `RemoDroid.exe`. To also control windows of programs that run as administrator
-  (installers, Task Manager, the RemoDroid Server app), choose **Control administrator windows…** in its menu
+  (installers, Task Manager, the panel's own Windows app), choose **Control administrator windows…** in its menu
   once and confirm as an administrator: it sets up the small `RemoDroidInput` service, which passes the
   viewer's mouse and keyboard to them (`remodroid-input install` / `uninstall` does the same). UAC prompts stay
   out of reach. **macOS**: move `RemoDroid.app` to Applications, open it
@@ -304,6 +336,11 @@ Checksums: [SHA256SUMS](https://github.com/yinyue123/RemoDroid/releases/download
   `remodroid-desktopd` (a systemd user unit comes with the Linux packages).
 - Settings are in `desktop.ini` (`%APPDATA%\RemoDroid`, `~/Library/Application Support/RemoDroid`,
   `~/.config/remodroid`) and in the panel. Design: [`multi-platform.md`](multi-platform.md).
+
+### 3. Open it on your iPhone
+
+Open your panel in Safari, log in, then **Share → Add to Home Screen**. Started from the Home Screen it runs full
+screen (Safari can't hide its bars for a normal page). Tap your phone or computer to connect.
 
 ## Using it
 
