@@ -136,7 +136,7 @@ include server/win/win.mk
 
 # Offline installer for the Koolshare/KoolCenter software center.
 # Requires build/out/$(ARCH) and build/android (or BIN/PHONE environment overrides).
-VERSION ?= 0.5
+VERSION ?= 0.6
 ARCH ?= armv7
 package-merlin:
 	./packaging/merlin/build.sh "$(VERSION)" "$(ARCH)"

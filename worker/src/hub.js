@@ -13,7 +13,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { aiRoute, bearer, initTables, mcpHandle, oauthApi, oauthHandle, platformOf, tokenApi, tokensApi } from './mcp.js';
 
 const PROTO = 1;
-const VERSION = '0.3.0';
+const VERSION = '0.6';
 const CODE_TTL = 10 * 60 * 1000;
 const CODE_ABC = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const PBKDF2_ITER = 20000;   // keeps a login inside the Workers CPU budget; cookies make logins rare
