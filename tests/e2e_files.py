@@ -144,6 +144,8 @@ async def run(args):
                 await page.wait_for_timeout(100)
             res["viewer_drop_ok"] = os.path.exists(dest) and open(dest).read() == "hello from the browser\n"
             res["computer_ft_opened"] = bool(await window_of(env, "^File Transfer$", 5))
+            for w in xdo(env, "search", "--onlyvisible", "--name", "^File Transfer$").split():
+                xdo(env, "windowmove", w, "1400", "0")  # out of the way of the drag below (no window manager here)
 
             # 2. a file dragged onto the RemoDroid window → downloaded in the browser by itself, and its File
             # Transfer opens
@@ -158,7 +160,6 @@ async def run(args):
             source = await window_of(env, "^drag-source$")
             if target and source:
                 tx, ty = target["X"] + target["WIDTH"] // 2, target["Y"] + target["HEIGHT"] // 2
-                xdo(env, "windowraise", xdo(env, "search", "--onlyvisible", "--name", "^RemoDroid$").split()[-1])
                 try:
                     xdo(env, "mousemove", str(source["X"] + 60), str(source["Y"] + 50))
                     xdo(env, "mousedown", "1")
@@ -180,7 +181,8 @@ async def run(args):
             res["window_drop_ok"] = res.get("download", {}).get("ok") and res["download"]["name"] == "outside home.txt"
             logs = [os.path.join(r, "transfers.log") for r, _, fs in os.walk(d) if "transfers.log" in fs]
             res["transfer_logged"] = bool(logs) and f"\tout\t17\t{src}\n" in open(logs[0]).read()
-            await page.locator("#sheet-files button[data-close]").click()
+            if await page.locator("#sheet-files").is_visible():
+                await page.locator("#sheet-files button[data-close]").click()
 
             # 3. the computer copies → this clipboard, without a tap (or the Copy bar where writing isn't allowed)
             probe.send("setclip copied on linux")
