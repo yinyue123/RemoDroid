@@ -12,5 +12,6 @@
   "durable_objects": { "bindings": [{ "name": "HUB", "class_name": "Hub" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
   "observability": { "enabled": true }
-  // Optional: "vars": { "SETUP_TOKEN": "…" } makes the first-run wizard ask for this code.
+  // Optional: "vars": { "SETUP_TOKEN": "…" } makes the first-run wizard ask for this code;
+  // "TIMEOUT_SECONDS" (default 60, at least 25) is how long a silent router agent counts as online.
 }

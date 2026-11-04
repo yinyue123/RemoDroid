@@ -267,9 +267,10 @@ function lockState(ui) {
 
 /* wake_phone: WAKEUP → look → (the clock) swipe up → look → answer; null when a step failed (its error is returned) */
 async function wakePhone(hub, d) {
-  const step = async (op, args) => {
+  const step = async (op, args) => { /* an answer that isn't JSON reads as an empty screen, as in mcp.c */
     const a = await hub.apiForward(d.id, op, args);
-    return a.status >= 200 && a.status < 400 ? { ok: JSON.parse(dec.decode(a.body) || 'null') } : { fail: a };
+    if (a.status < 200 || a.status >= 400) return { fail: a };
+    try { return { ok: JSON.parse(dec.decode(a.body)) }; } catch (_) { return { ok: null }; }
   };
   let r = await step('action', { action: 'key', key: 'WAKEUP', wait: { for: 'idle', timeout_ms: 1500 } });
   if (r.fail) return r;
@@ -447,7 +448,7 @@ export async function mcpHandle(hub, req, url, version) {
   if (!t.user) return err(403, 'forbidden', 'this token has no owner; make one in the panel');
   if (t.user !== user || !hub.one('SELECT name FROM users WHERE name = ?', user)) return err(404, 'not_found', 'no such MCP URL for this token');
   if (rest === 'devices') {
-    if (req.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, { allow: 'GET' });
+    if (req.method !== 'GET' && req.method !== 'HEAD') return json({ error: 'method_not_allowed' }, 405, { allow: 'GET' });
     return json({ devices: hub.all('SELECT * FROM devices ORDER BY created').filter(d => !t.device || d.id === t.device).map(d => ({
       id: d.id, name: d.name, online: hub.online(d.id), platform: platformOf(d), mcp: true,
       url: `${url.origin}/mcp/${user}/${d.id}` })) });

@@ -18,11 +18,18 @@ const CODE_TTL = 10 * 60 * 1000;
 const CODE_ABC = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const PBKDF2_ITER = 20000;   // keeps a login inside the Workers CPU budget; cookies make logins rare
 const MAX_FAILED = 5, LOCKOUT_MS = 15 * 60 * 1000;
+const MAX_CODES = 32;
 const enc = new TextEncoder();
+/* an agent's error code → the HTTP status (hub.c code_status) */
+const STATUS = { bad_request: 400, unauthorized: 401, forbidden: 403, not_found: 404, offline: 409, busy: 409, adb_unauthorized: 409,
+  too_large: 413, rate_limited: 429, timeout: 504, io_error: 500, unsupported: 501 };
+const codeStatus = code => STATUS[code] || 500;
 
 const json = (body, status = 200, headers = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
 const err = (status, code, msg) => json({ error: code, msg }, status);
+/* the Hub approves a page and index.js serves it from the assets, /x.html as /x (the assets would redirect it there) */
+const page = p => new Response(null, { status: 200, headers: { 'x-rd-asset': p === '/index.html' ? '/' : p.replace(/\.html$/, '') } });
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const b64url = buf => b64(buf).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -72,6 +79,21 @@ function parseIce(line) {
   return out;
 }
 
+/* Cloudflare TURN off: the key stays, so turning it back on needs nothing typed again */
+const off = old => ({ cloudflare: false, ...(old.api_token ? { key_id: old.key_id || '', api_token: old.api_token } : {}) });
+
+const urlsOf = s => (typeof s.urls === 'string' ? [s.urls] : Array.isArray(s.urls) ? s.urls : []);
+
+/* The viewer's relay pick (the floating ball's Relay sheet, hub.c pick_turn): both ends get only the
+ * TURN URLs in pick, so they relay through the same server; STUN stays. No pick, or one that names
+ * nothing offered any more, keeps them all. */
+function pickTurn(ice, pick) {
+  if (!Array.isArray(pick) || !pick.length) return ice;
+  const want = pick.filter(p => typeof p === 'string');
+  if (!ice.some(s => urlsOf(s).some(u => want.includes(u)))) return ice;
+  return ice.map(s => ({ ...s, urls: urlsOf(s).filter(u => !/^turns?:/.test(u) || want.includes(u)) })).filter(s => s.urls.length);
+}
+
 export class Hub extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -88,8 +110,55 @@ export class Hub extends DurableObject {
         CREATE TABLE IF NOT EXISTS codes (code TEXT PRIMARY KEY, name TEXT, expires INTEGER, device TEXT);
         CREATE TABLE IF NOT EXISTS fails (ip TEXT PRIMARY KEY, count INTEGER, until INTEGER);
         CREATE TABLE IF NOT EXISTS vsessions (sid TEXT PRIMARY KEY, device TEXT, viewer TEXT, since INTEGER);`);
+      try { this.sql.exec('ALTER TABLE fails ADD COLUMN last INTEGER'); } catch (_) { /* already there */ }
       initTables(this.sql); /* API tokens, OAuth (mcp.js) */
+      this.restarted();
     });
+  }
+
+  /* A deploy or an eviction drops every WebSocket without webSocketClose: whatever lost its socket
+   * is offline now, as hub_conn_closed would have left it. On a wake from hibernation the sockets
+   * are all still here, so nothing changes. */
+  restarted() {
+    const viewers = new Set(this.ctx.getWebSockets('viewer').map(w => (w.deserializeAttachment() || {}).sid).filter(Boolean));
+    for (const vs of this.all('SELECT sid, device FROM vsessions'))
+      if (!viewers.has(vs.sid) || !this.agentWs(vs.device)) this.endSession(vs.sid, 'agent_offline', false, true);
+    for (const d of this.all('SELECT id FROM devices WHERE hello IS NOT NULL'))
+      if (!this.agentWs(d.id)) this.sql.exec('UPDATE devices SET hello = NULL WHERE id = ?', d.id);
+  }
+
+  /* hub.c's welcome timings; TIMEOUT_SECONDS ([keepalive] timeout_seconds) scales the rest: 60 → 20, 60, 30.
+   * At least 25: an agent's first status comes 20 s after its hello, before it has read the welcome. */
+  keepalive() {
+    const timeout_s = Math.max(25, Math.round(+this.env.TIMEOUT_SECONDS) || 60);
+    return { ping_s: Math.min(20, Math.max(1, Math.floor(timeout_s / 3))), timeout_s, heartbeat_s: Math.min(30, Math.max(1, Math.floor(timeout_s / 2))) };
+  }
+
+  /* The open socket of an agent: one being replaced may still be listed while it closes. */
+  agentWs(id) { return this.ctx.getWebSockets('agent:' + id).find(w => w.readyState === 1) || null; }
+
+  /* Every ping_s while agents are connected (http.c on_ping): one silent for timeout_s is gone, though
+   * its socket may never close by itself (a router that lost power). The agent's own pings are answered
+   * by the runtime; its status, every heartbeat_s, is what counts. */
+  async alarm() {
+    const { ping_s, timeout_s } = this.keepalive(), t = now();
+    for (const ws of this.ctx.getWebSockets('agent')) {
+      const a = ws.deserializeAttachment() || {}, d = this.one('SELECT last_seen FROM devices WHERE id = ?', a.id);
+      if (ws.readyState !== 1 || t - Math.max((d && d.last_seen) || 0, a.since || 0) <= timeout_s * 1000) continue;
+      try { ws.close(1001, 'no traffic'); } catch (_) {}
+      this.closed(ws);
+    }
+    this.sweep();
+    if (this.ctx.getWebSockets('agent').some(w => w.readyState === 1)) await this.ctx.storage.setAlarm(t + ping_s * 1000);
+  }
+  async armAlarm() {
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(now() + this.keepalive().ping_s * 1000);
+  }
+
+  /* expired logins and old failed attempts (auth_sweep) */
+  sweep() {
+    this.sql.exec('DELETE FROM sessions WHERE created < ?', now() - this.sessionDays() * 864e5);
+    this.sql.exec('DELETE FROM fails WHERE until < ? AND (last IS NULL OR last < ?)', now(), now() - 3600e3);
   }
 
   /* ---------------- small storage helpers ---------------- */
@@ -106,8 +175,8 @@ export class Hub extends DurableObject {
   fail(req) {
     const ip = this.ip(req), f = this.one('SELECT count FROM fails WHERE ip = ?', ip);
     const count = (f ? f.count : 0) + 1;
-    if (count >= MAX_FAILED) this.sql.exec('INSERT OR REPLACE INTO fails VALUES (?, 0, ?)', ip, now() + LOCKOUT_MS);
-    else this.sql.exec('INSERT OR REPLACE INTO fails VALUES (?, ?, 0)', ip, count);
+    if (count >= MAX_FAILED) this.sql.exec('INSERT OR REPLACE INTO fails (ip, count, until, last) VALUES (?, 0, ?, ?)', ip, now() + LOCKOUT_MS, now());
+    else this.sql.exec('INSERT OR REPLACE INTO fails (ip, count, until, last) VALUES (?, ?, 0, ?)', ip, count, now());
   }
   cookieSession(req, device) {
     const m = (req.headers.get('cookie') || '').match(/(?:^|;\s*)rd_session=([0-9a-f]{32})/);
@@ -143,6 +212,7 @@ export class Hub extends DurableObject {
     if (!b || typeof b.user !== 'string' || typeof b.password !== 'string' || !b.user) return err(400, 'bad_request', 'user and password required');
     if (this.locked(req)) return err(429, 'rate_limited', 'too many failed logins, try again later');
     if (!await this.password(req, b.user, b.password, false)) return err(401, 'unauthorized', 'wrong user name or password');
+    this.sweep();
     return new Response(JSON.stringify({ user: b.user }), { status: 200, headers: { 'content-type': 'application/json', 'set-cookie': this.newSession(b.user, false) } });
   }
   newSession(name, device) {
@@ -167,19 +237,25 @@ export class Hub extends DurableObject {
         cookie = this.newSession(name, true);
       }
       if (!this.one('SELECT id FROM devices WHERE id = ?', name)) return err(403, 'forbidden', 'unknown device');
-      return this.upgrade(req, { role: 'agent', id: name }, ['agent', 'agent:' + name], cookie);
+      const res = this.upgrade(req, { role: 'agent', id: name, since: now() }, ['agent', 'agent:' + name], cookie);
+      if (res.status === 101) await this.armAlarm();
+      return res;
     }
 
-    if (!this.configured()) { /* setup mode: only the wizard */
+    if (!this.configured()) { /* setup mode: only the wizard (setup.c setup_request) */
       if (p === '/api/v1/setup') {
-        if (this.env.SETUP_TOKEN && !timingSafeEqual(req.headers.get('x-setup-token') || '', this.env.SETUP_TOKEN)) {
-          this.fail(req);
-          return err(403, 'forbidden', 'wrong or missing setup code (the Worker\'s SETUP_TOKEN)');
+        if (this.env.SETUP_TOKEN) {
+          if (this.locked(req)) return err(429, 'rate_limited', 'too many wrong setup codes, try again later');
+          if (!timingSafeEqual(req.headers.get('x-setup-token') || '', this.env.SETUP_TOKEN)) {
+            this.fail(req);
+            return err(403, 'forbidden', 'wrong or missing setup code (the Worker\'s SETUP_TOKEN)');
+          }
         }
         return this.setup(req, null);
       }
       if (p === '/' || p === '/index.html' || p === '/login') return Response.redirect(new URL('/wizard.html' + url.search, url), 302);
-      return err(503, 'setup_required', 'finish the setup wizard first (/wizard.html)');
+      if (/^\/(api|ws|mcp|oauth|\.well-known)\//.test(p)) return err(503, 'setup_required', 'finish the setup wizard first (/wizard.html)');
+      return page(p); /* the wizard and its files hold no secrets */
     }
 
     /* AI assistants (mcp.js): OAuth metadata, registration and tokens, the MCP endpoint (API tokens,
@@ -187,7 +263,7 @@ export class Hub extends DurableObject {
     const oa = await oauthHandle(this, req, url);
     if (oa) return oa;
     if (p.startsWith('/mcp/') && p !== '/mcp/help') return mcpHandle(this, req, url, VERSION);
-    if (p === '/oauth/authorize' && m === 'GET') return new Response(null, { status: 200, headers: { 'x-rd-asset': '/oauth' } });
+    if (p === '/oauth/authorize' && m === 'GET') return page('/oauth');
 
     const sess = this.cookieSession(req, false);
     const user = sess && sess.name;
@@ -206,17 +282,19 @@ export class Hub extends DurableObject {
       }
       return this.api(req, url, user, sess);
     }
-    /* pages: the login page (web/login.html), or a cookie, or off to the login page */
+    /* pages (index.js sends every .html and extensionless path here; scripts, styles and icons are
+     * served as they are): the login page (web/login.html), or a cookie, or off to the login page */
     if (p === '/login') {
       if (m === 'POST') return this.login(req);
-      return new Response(null, { status: 200, headers: { 'x-rd-asset': '/login' } });
+      return page('/login');
     }
+    if (m !== 'GET' && m !== 'HEAD') return err(405, 'bad_request', 'method not allowed');
     if (!user) {
       const back = p + url.search;
       return new Response(null, { status: 302, headers: { location: back === '/' ? '/login' : '/login?next=' + encodeURIComponent(back).replace(/%2F/g, '/') } });
     }
-    if (p === '/mcp/help') return new Response(null, { status: 200, headers: { 'x-rd-asset': '/mcp' } }); /* web/mcp.html, the MCP guide */
-    return new Response(null, { status: 200, headers: { 'x-rd-asset': '/' } });
+    if (p === '/mcp/help') return page('/mcp'); /* web/mcp.html, the MCP guide */
+    return page(p);
   }
 
   /* ---------------- REST (api.c) ---------------- */
@@ -235,7 +313,9 @@ export class Hub extends DurableObject {
     if (p === '/api/v1/devices' && m === 'GET') return json({ devices: this.all('SELECT * FROM devices ORDER BY created').map(d => this.deviceJson(d)) });
     if (p === '/api/v1/enroll/codes' && m === 'POST') {
       const b = await body();
-      this.sql.exec('DELETE FROM codes WHERE expires < ?', now() - CODE_TTL);
+      this.sql.exec('DELETE FROM codes WHERE expires < ?', now() - CODE_TTL); /* a used one stays a while for the page */
+      if (this.one('SELECT COUNT(*) AS n FROM codes WHERE device IS NOT NULL OR expires >= ?', now()).n >= MAX_CODES)
+        return err(429, 'rate_limited', 'too many open codes; wait a few minutes');
       let code;
       do { code = normalizeCode([...rand(8)].map(x => CODE_ABC[x % CODE_ABC.length]).join('')); }
       while (this.one('SELECT code FROM codes WHERE code = ?', code));
@@ -292,25 +372,25 @@ export class Hub extends DurableObject {
 
   /* REST → agent request, answered by its ack/error (hub_forward_cmd) */
   forward(id, type, d) {
-    const ws = this.ctx.getWebSockets('agent:' + id)[0];
+    const ws = this.agentWs(id);
     if (!ws || !this.online(id)) return err(409, 'offline', 'the router agent is offline');
     const cid = this.nextCmd++;
     return new Promise(resolve => {
       const timer = setTimeout(() => { this.pending.delete(cid); resolve(err(504, 'timeout', 'the agent did not answer in time')); }, 15000);
-      this.pending.set(cid, { resolve, timer });
+      this.pending.set(cid, { resolve, timer, dev: id });
       ws.send(JSON.stringify({ t: type, id: cid, d }));
     });
   }
 
   /* REST → the phone's AI API through the agent (hub_forward_api): → {status, type, headers, body} */
   apiForward(id, op, args) {
-    const ws = this.ctx.getWebSockets('agent:' + id)[0];
+    const ws = this.agentWs(id);
     const fail = (status, code, m) => ({ status, type: 'application/json', headers: {}, body: enc.encode(JSON.stringify({ error: code, msg: m })) });
     if (!ws || !this.online(id)) return Promise.resolve(fail(409, 'offline', 'the router agent is offline'));
     const cid = this.nextCmd++;
     return new Promise(resolve => {
       const timer = setTimeout(() => { this.pending.delete(cid); resolve(fail(504, 'timeout', 'the agent did not answer in time')); }, 45000);
-      this.pending.set(cid, { resolve, timer, api: fail });
+      this.pending.set(cid, { resolve, timer, api: fail, dev: id });
       ws.send(JSON.stringify({ t: 'api', id: cid, d: { op, args: args || {} } }));
     });
   }
@@ -323,7 +403,7 @@ export class Hub extends DurableObject {
     let h;
     try { h = JSON.parse(new TextDecoder().decode(u8.subarray(4, 4 + hl))); } catch (_) { return; }
     const p = this.pending.get(h.id);
-    if (!p || !p.api) return;
+    if (!p || !p.api || p.dev !== a.id) return; /* only the agent that was asked answers */
     clearTimeout(p.timer);
     this.pending.delete(h.id);
     p.resolve({ status: +h.status || 502, type: String(h.type || 'application/octet-stream'), headers: h.headers || {}, body: u8.slice(4 + hl) });
@@ -348,7 +428,7 @@ export class Hub extends DurableObject {
     if (pw && pw.length < 8) return err(400, 'bad_request', 'the password needs at least 8 characters');
     const old = JSON.parse(this.kv('turn', '{}'));
     const t = b.turn || {};
-    const turn = t.cloudflare ? { cloudflare: true, key_id: String(t.key_id || '').trim(), api_token: String(t.api_token || '').trim() || old.api_token || '' } : { cloudflare: false };
+    const turn = t.cloudflare ? { cloudflare: true, key_id: String(t.key_id || '').trim(), api_token: String(t.api_token || '').trim() || old.api_token || '' } : off(old);
     if (turn.cloudflare && (!turn.key_id || !turn.api_token)) return err(400, 'bad_request', 'the Cloudflare TURN key ID and API token are both needed');
     const extra = String(b.ice_extra || '').replace(/[\r\n]+/g, ', ');
     if (!turn.cloudflare && !parseIce(extra).length) return err(400, 'bad_request', 'add at least one STUN or TURN server');
@@ -402,7 +482,7 @@ export class Hub extends DurableObject {
     let turn = old, extra = this.kv('ice_extra');
     if (has('turn')) {
       const t = b.turn || {};
-      turn = t.cloudflare ? { cloudflare: true, key_id: String(t.key_id ?? old.key_id ?? '').trim(), api_token: String(t.api_token || '').trim() || old.api_token || '' } : { cloudflare: false };
+      turn = t.cloudflare ? { cloudflare: true, key_id: String(t.key_id ?? old.key_id ?? '').trim(), api_token: String(t.api_token || '').trim() || old.api_token || '' } : off(old);
       if (turn.cloudflare && (!turn.key_id || !turn.api_token)) return err(400, 'bad_request', 'the Cloudflare TURN key ID and API token are both needed');
       if (turn.cloudflare && (turn.key_id !== old.key_id || turn.api_token !== old.api_token) && !(await this.cloudflareIce(turn)))
         return err(400, 'bad_request', 'Cloudflare refused the TURN key ID / API token');
@@ -469,7 +549,7 @@ export class Hub extends DurableObject {
   /* ---------------- devices and viewers (hub.c) ---------------- */
   online(id) {
     const d = this.one('SELECT hello FROM devices WHERE id = ?', id);
-    return !!(d && d.hello && this.ctx.getWebSockets('agent:' + id).length);
+    return !!(d && d.hello && this.agentWs(id));
   }
   deviceJson(d) {
     const online = this.online(d.id), hello = JSON.parse(d.hello || 'null'), status = JSON.parse(d.status || '{}');
@@ -494,7 +574,7 @@ export class Hub extends DurableObject {
     const vs = this.one('SELECT * FROM vsessions WHERE sid = ?', sid);
     if (!vs) return;
     this.sql.exec('DELETE FROM vsessions WHERE sid = ?', sid);
-    const agent = this.ctx.getWebSockets('agent:' + vs.device)[0];
+    const agent = this.agentWs(vs.device);
     if (tellAgent && agent) agent.send(msg('session.end', { sid, reason }, { sid }));
     const viewer = this.viewerOf(sid);
     if (viewer) {
@@ -511,7 +591,7 @@ export class Hub extends DurableObject {
     this.ctx.acceptWebSocket(server, tags);
     server.serializeAttachment({ ...att, ip: this.ip(req) });
     if (att.role === 'agent') { /* a reconnecting agent replaces its old socket */
-      for (const old of this.ctx.getWebSockets('agent:' + att.id)) if (old !== server) old.close(1000, 'replaced');
+      for (const old of this.ctx.getWebSockets('agent:' + att.id)) if (old !== server && old.readyState === 1) old.close(1000, 'replaced');
     } else {
       server.send(msg('devices', { devices: this.all('SELECT * FROM devices ORDER BY created').map(d => this.deviceJson(d)) }));
     }
@@ -519,16 +599,16 @@ export class Hub extends DurableObject {
   }
 
   async webSocketMessage(ws, data) {
-    if (typeof data !== 'string') {
-      const a = ws.deserializeAttachment() || {};
-      if (a.role === 'agent') return this.agentBinary(a, data);
+    const att = ws.deserializeAttachment() || {};
+    if (att.role === 'agent') {
+      this.sql.exec('UPDATE devices SET last_seen = ? WHERE id = ?', now(), att.id); /* the keepalive alarm reads it */
+      if (typeof data !== 'string') return this.agentBinary(att, data);
     }
     let m;
     try { m = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data)); } catch (_) { return; }
     if (!m || typeof m !== 'object') return;
-    const a = ws.deserializeAttachment() || {};
-    if (a.role === 'agent') return this.agentMessage(ws, a, m);
-    if (a.role === 'viewer') return this.viewerMessage(ws, a, m);
+    if (att.role === 'agent') return this.agentMessage(ws, att, m);
+    if (att.role === 'viewer') return this.viewerMessage(ws, att, m);
   }
 
   async viewerMessage(ws, a, m) {
@@ -547,17 +627,19 @@ export class Hub extends DurableObject {
       const sid = 's_' + hex(rand(8));
       this.sql.exec('INSERT INTO vsessions VALUES (?, ?, ?, ?)', sid, dev.id, a.user, now());
       ws.serializeAttachment({ ...a, sid });
-      const ice = await this.iceServers();
+      const choices = await this.iceServers(), ice = pickTurn(choices, d.turn);
       const start = { sid, viewer: a.user, ice_servers: ice }; // a computer shows who is watching
       if (d.quality) start.quality = d.quality;
       if (d.force_relay) start.force_relay = true;
-      this.ctx.getWebSockets('agent:' + dev.id)[0].send(msg('session.start', start, { sid }));
+      const agent = this.agentWs(dev.id); /* the Cloudflare TURN call above may have outlived it */
+      if (!agent) { this.endSession(sid, 'agent_offline', false, false); return reply('error', { code: 'offline', msg: 'the router agent is offline' }); }
+      agent.send(msg('session.start', start, { sid }));
       reply('ack', { sid });
-      ws.send(msg('session.ice', { ice_servers: ice }, { sid }));
+      ws.send(msg('session.ice', { ice_servers: ice, ice_choices: choices }, { sid })); // every server, for the Relay sheet's tests
       this.deviceChanged(dev.id);
     } else if (m.t === 'signal') {
       const vs = a.sid && this.one('SELECT * FROM vsessions WHERE sid = ?', a.sid);
-      const agent = vs && this.ctx.getWebSockets('agent:' + vs.device)[0];
+      const agent = vs && this.agentWs(vs.device);
       if (!agent) return reply('error', { code: 'offline', msg: 'no active session' });
       agent.send(msg('signal', d, { sid: a.sid }));
     } else if (m.t === 'session.end') {
@@ -572,7 +654,6 @@ export class Hub extends DurableObject {
 
   agentMessage(ws, a, m) {
     const id = a.id, d = m.d || {};
-    this.sql.exec('UPDATE devices SET last_seen = ? WHERE id = ?', now(), id);
     if (m.t === 'hello') {
       const was = this.online(id);
       this.sql.exec('UPDATE devices SET hello = ?, online_since = ?, public_ip = ?, platform = ? WHERE id = ?', JSON.stringify(d), now(), a.ip || '', String(d.platform || 'android').slice(0, 15), id);
@@ -581,7 +662,7 @@ export class Hub extends DurableObject {
         st.phone = d.phone;
         this.sql.exec('UPDATE devices SET status = ? WHERE id = ?', JSON.stringify(st), id);
       }
-      ws.send(msg('welcome', { proto: PROTO, server_time: now(), ping_s: 20, timeout_s: 60, heartbeat_s: 30 }));
+      ws.send(msg('welcome', { proto: PROTO, server_time: now(), ...this.keepalive() }));
       if (!was) this.event(id, 'agent.online');
       this.deviceChanged(id);
       return;
@@ -604,17 +685,14 @@ export class Hub extends DurableObject {
       if (sid && this.one('SELECT sid FROM vsessions WHERE sid = ? AND device = ?', sid, id)) this.endSession(sid, String(d.reason || 'phone_ended'), false, true);
     } else if (m.t === 'ack' || m.t === 'error') {
       const p = this.pending.get(m.id);
-      if (!p) return;
+      if (!p || p.dev !== id) return; /* only the agent that was asked answers */
       clearTimeout(p.timer);
       this.pending.delete(m.id);
       const code = d.code || 'io_error';
       if (p.api) p.resolve(m.t === 'ack' ? { status: 200, type: 'application/json', headers: {}, body: enc.encode(JSON.stringify(d)) }
-        : p.api({ bad_request: 400, not_found: 404, offline: 409, busy: 409, too_large: 413, timeout: 504, unsupported: 501 }[code] || 500, code, d.msg || code));
+        : p.api(codeStatus(code), code, d.msg || code));
       else if (m.t === 'ack') p.resolve(json({ result: d }));
-      else {
-        const status = { bad_request: 400, not_found: 404, offline: 409, busy: 409, adb_unauthorized: 409, too_large: 413, timeout: 504, unsupported: 501 }[code] || 500;
-        p.resolve(err(status, code, d.msg || code));
-      }
+      else p.resolve(err(codeStatus(code), code, d.msg || code));
     }
   }
 

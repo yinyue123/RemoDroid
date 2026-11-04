@@ -46,12 +46,14 @@ function wsConnect(port, pathname, headers = {}) {
   return new Promise((resolve, reject) => {
     const sock = net.connect(port, '127.0.0.1');
     let buf = Buffer.alloc(0), open = false;
+    const frame = (op, p) => {
+      const mask = crypto.randomBytes(4);
+      const h = p.length < 126 ? Buffer.from([0x80 | op, 0x80 | p.length]) : Buffer.from([0x80 | op, 0x80 | 126, p.length >> 8, p.length & 255]);
+      sock.write(Buffer.concat([h, mask, Buffer.from(p.map((b, i) => b ^ mask[i & 3]))]));
+    };
     const ws = { msgs: [], closed: false,
-      send(obj) {
-        const p = Buffer.from(JSON.stringify(obj)), mask = crypto.randomBytes(4);
-        const h = p.length < 126 ? Buffer.from([0x81, 0x80 | p.length]) : Buffer.from([0x81, 0x80 | 126, p.length >> 8, p.length & 255]);
-        sock.write(Buffer.concat([h, mask, Buffer.from(p.map((b, i) => b ^ mask[i & 3]))]));
-      },
+      send(obj) { frame(1, Buffer.from(JSON.stringify(obj))); },
+      sendBinary(buf) { frame(2, buf); },
       wait(pred, ms = 8000, what = 'message') { return until(async () => ws.msgs.find(pred), ms, what); },
       close() { sock.end(); },
     };
@@ -87,22 +89,44 @@ function wsConnect(port, pathname, headers = {}) {
 async function main() {
   const port = await freePort();
   const B = `http://127.0.0.1:${port}`;
-  const wr = start('wrangler', WRANGLER, ['dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', path.join(dir, 'state')],
-    { cwd: path.join(ROOT, 'worker'), env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
-  await until(() => fetch(B + '/wizard.html').then(r => r.status < 500), 60000, 'wrangler dev');
+  const TIMEOUT = 25; /* TIMEOUT_SECONDS: the agents' keepalive, the shortest the Worker takes, to see a silent one dropped */
+  const wrangler = async () => {
+    const p = start('wrangler', WRANGLER, ['dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', path.join(dir, 'state'),
+      '--var', 'SETUP_TOKEN:test-setup-code', '--var', `TIMEOUT_SECONDS:${TIMEOUT}`],
+      { cwd: path.join(ROOT, 'worker'), env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
+    await until(() => fetch(B + '/setup.css').then(r => r.status < 500), 60000, 'wrangler dev');
+    return p;
+  };
+  let wr = await wrangler();
 
   console.log('setup');
   let r = await fetch(B + '/', { redirect: 'manual' });
   ok(r.status === 302 && /\/wizard\.html$/.test(r.headers.get('location')), 'a fresh Worker sends / to the setup wizard');
   r = await fetch(B + '/api/v1/devices');
   ok(r.status === 503, 'the API is closed until setup is done');
-  let j = await (await fetch(B + '/api/v1/setup')).json();
+  const ST = { 'X-Setup-Token': 'test-setup-code' };
+  r = await fetch(B + '/api/v1/setup');
+  ok(r.status === 403, 'the setup API needs the SETUP_TOKEN (the wizard asks for it)');
+  let j = await (await fetch(B + '/api/v1/setup', { headers: ST })).json();
   ok(j.platform === 'worker' && j.configured === false, 'GET /api/v1/setup reports a Worker that is not set up');
-  r = await fetch(B + '/api/v1/setup', { method: 'POST', body: JSON.stringify({ username: 'admin', password: 'short', turn: { cloudflare: false }, ice_extra: 'stun:stun.cloudflare.com:3478' }) });
+  r = await fetch(B + '/wizard.html');
+  ok(r.status === 200 && /<html/i.test(await r.text()), 'the wizard page is served before setup');
+  const short = JSON.stringify({ username: 'admin', password: 'short', turn: { cloudflare: false }, ice_extra: 'stun:stun.cloudflare.com:3478' });
+  r = await fetch(B + '/api/v1/setup', { method: 'POST', body: short });
+  ok(r.status === 403, 'saving needs the SETUP_TOKEN');
+  const elsewhere = { 'CF-Connecting-IP': '203.0.113.9' };
+  const tries = [];
+  for (let i = 0; i < 6; i++) {
+    r = await fetch(B + '/api/v1/setup', { method: 'POST', headers: { ...elsewhere, 'X-Setup-Token': i < 5 ? 'guess-' + i : ST['X-Setup-Token'] }, body: short });
+    tries.push(`${r.status} ${(await r.json().catch(() => ({}))).error}`);
+  }
+  ok(tries.join() === '403 forbidden,403 forbidden,403 forbidden,403 forbidden,403 forbidden,429 rate_limited',
+    `five wrong setup codes lock that address out, even for the right one (${tries.join(', ')})`);
+  r = await fetch(B + '/api/v1/setup', { method: 'POST', headers: ST, body: short });
   ok(r.status === 400, 'a short password is refused');
-  r = await fetch(B + '/api/v1/setup', { method: 'POST', body: JSON.stringify({ username: 'admin', password: 'correct-horse', turn: { cloudflare: false }, ice_extra: '' }) });
+  r = await fetch(B + '/api/v1/setup', { method: 'POST', headers: ST, body: JSON.stringify({ username: 'admin', password: 'correct-horse', turn: { cloudflare: false }, ice_extra: '' }) });
   ok(r.status === 400, 'no TURN at all is refused');
-  r = await fetch(B + '/api/v1/setup', { method: 'POST', body: JSON.stringify({ username: 'admin', password: 'correct-horse', turn: { cloudflare: false },
+  r = await fetch(B + '/api/v1/setup', { method: 'POST', headers: ST, body: JSON.stringify({ username: 'admin', password: 'correct-horse', turn: { cloudflare: false },
     ice_extra: 'stun:stun.cloudflare.com:3478\nturn:turn.example.com:3478?transport=udp alice s3cret' }) });
   ok(r.status === 200, 'setup saves the admin account and ICE servers');
 
@@ -113,12 +137,18 @@ async function main() {
   ok(r.headers.get('location') === '/login?next=/%3Fdevice%3Dr1', 'the login page is told where to come back to');
   r = await fetch(B + '/login');
   ok(r.status === 200 && /id="password"/.test(await r.text()), 'the login page is served without a cookie');
+  r = await fetch(B + '/panel.html', { redirect: 'manual' });
+  ok(r.status === 302 && r.headers.get('location') === '/login?next=/panel.html', 'other pages need the login, as on remodroid-server');
+  r = await fetch(B + '/setup.css');
+  ok(r.status === 200, 'the stylesheet the login page uses is served without one');
   const login = pw => fetch(B + '/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: 'admin', password: pw }) });
   r = await login('correct-horse');
   const cookie = (r.headers.get('set-cookie') || '').split(';')[0];
   ok(r.status === 200 && /^rd_session=[0-9a-f]{32}$/.test(cookie), 'login sets the cookie');
   const H = { Cookie: cookie };
   r = await fetch(B + '/', { headers: H });
+  ok(r.status === 200 && /<html/i.test(await r.text()), 'the viewer page is served with the cookie');
+  r = await fetch(B + '/panel.html', { headers: H, redirect: 'manual' });
   ok(r.status === 200 && /<html/i.test(await r.text()), 'the panel page is served with the cookie');
   j = await (await fetch(B + '/api/v1/setup', { headers: H })).json();
   ok(j.configured && j.username === 'admin' && /alice/.test(j.ice_extra), 'settings can be read back after login');
@@ -150,7 +180,7 @@ async function main() {
   const ini = path.join(dir, 'agent.ini');
   fs.writeFileSync(ini, `[agent]\nadbkey = ${dir}/adbkey\nsocket = ${dir}/agent.sock\nlog_level = debug\n[phone]\nadb = tcp:127.0.0.1:1\n`);
   const agent = start('agent', path.join(BIN, 'remodroid-agent'), ['-c', ini]);
-  await sleep(800);
+  await until(async () => /url is empty/.test(agent.log), 20000, 'agent ready'); /* its key made, its socket open for enroll */
   const en = await run(path.join(BIN, 'remodroid-agent'), ['-c', ini, 'enroll', '--panel', B, '--code', code.toLowerCase()]);
   ok(en.code === 0 && /enrolled as "Living room" \(living-room\)/.test(en.out) && /bound — this router is online/.test(en.out), 'remodroid enroll binds the router and it comes online');
   const again = await run(path.join(BIN, 'remodroid-agent'), ['-c', path.join(dir, 'other.ini'), 'enroll', '--panel', B, '--code', code]);
@@ -172,6 +202,16 @@ async function main() {
     'session.request gets a sid and the configured ICE servers');
   const ended = await viewer.wait(m => m.t === 'session.ended', 8000, 'session.ended');
   ok(ended.d.reason === 'phone_unavailable', 'session.start reaches the agent, which answers (no phone attached)');
+  const relay2 = 'turn:relay2.example.com:3478', turn1 = 'turn:turn.example.com:3479?transport=udp';
+  r = await PATCH({ ice_servers: [{ url: 'stun:stun.cloudflare.com:3478' }, { url: turn1, username: 'alice' }, { url: 'stun:203.0.113.10:3478' }, { url: relay2 }] });
+  viewer.send({ t: 'session.request', id: 2, d: { device: 'living-room', turn: [relay2] } });
+  const ack2 = await viewer.wait(m => m.t === 'ack' && m.id === 2);
+  const ice2 = await viewer.wait(m => m.t === 'session.ice' && m.sid === ack2.d.sid);
+  const urls = list => list.flatMap(s => s.urls);
+  ok(r.status === 200 && urls(ice2.d.ice_servers).includes(relay2) && !urls(ice2.d.ice_servers).includes(turn1) &&
+    urls(ice2.d.ice_servers).filter(u => u.startsWith('stun:')).length === 2 && urls(ice2.d.ice_choices).length === 4,
+    'a relay picked in the viewer is the only TURN server; ice_choices still lists all of them');
+  await viewer.wait(m => m.t === 'session.ended' && m.sid === ack2.d.sid, 8000, 'second session.ended');
 
   console.log('commands and management');
   r = await fetch(B + '/api/v1/devices/living-room/cmd', { method: 'POST', headers: H, body: '{"cmd":"agent.config.get"}' });
@@ -187,6 +227,7 @@ async function main() {
   ok(true, 'viewers hear about the removal');
   await until(async () => /unauthorized|rejected|HTTP 40[13]/.test(agent.log), 10000, 'agent refused');
   ok(true, 'the removed router can no longer log in');
+  agent.kill('SIGTERM'); /* its retries would lock this address out */
   viewer.close();
 
   console.log('AI assistants: API tokens, MCP, OAuth (mcp.md)');
@@ -199,8 +240,8 @@ async function main() {
   const code2 = (await (await fetch(B + '/api/v1/enroll/codes', { method: 'POST', headers: H, body: '{"name":"Pixel"}' })).json()).code;
   const ini2 = path.join(dir, 'agent2.ini');
   fs.writeFileSync(ini2, `[agent]\nfiles_dir = ${dir}/files\nadbkey = ${keyPath}\nsocket = ${dir}/agent2.sock\nlog_level = debug\n[phone]\nadb = tcp:127.0.0.1:${adbPort}\n`);
-  start('agent2', path.join(BIN, 'remodroid-agent'), ['-c', ini2]);
-  await sleep(800);
+  const agent2 = start('agent2', path.join(BIN, 'remodroid-agent'), ['-c', ini2]);
+  await until(async () => /url is empty/.test(agent2.log), 20000, 'agent2 ready');
   const en2 = await run(path.join(BIN, 'remodroid-agent'), ['-c', ini2, 'enroll', '--panel', B, '--code', code2]);
   ok(en2.code === 0, 'a second router, with a phone, enrolls');
   await until(async () => (await (await fetch(B + '/api/v1/devices', { headers: H })).json()).devices.find(d => d.id === 'pixel' && d.phone.server === 'running'),
@@ -300,9 +341,71 @@ async function main() {
   ok(r.status === 204 && (await fetch(B + '/mcp/admin/devices', { headers: BT(tok) })).status === 401, 'tokens: revoke stops it at once');
   r = await fetch(B + '/mcp/help', { headers: H });
   ok(r.status === 200 && /AI assistants/.test(await r.text()), 'the guide is served at /mcp/help');
+
+  console.log('agents: keepalive, a reconnect, answers from the agent that was asked');
+  const connects = () => (agent2.log.match(/connected to the server at/g) || []).length;
+  const connectsBefore = connects();
+  const enrollRaw = async name => {
+    const c = (await (await fetch(B + '/api/v1/enroll/codes', { method: 'POST', headers: H, body: JSON.stringify({ name }) })).json()).code;
+    const e = await (await fetch(B + '/api/v1/enroll', { method: 'POST', body: JSON.stringify({ code: c }) })).json();
+    return { id: e.device_id, auth: 'Basic ' + Buffer.from(`${e.device_id}:${e.device_secret}`).toString('base64') };
+  };
+  const rawAgent = async dev => { /* says hello, then nothing: no status, no pings */
+    const a = await wsConnect(port, '/ws/agent', { Authorization: dev.auth });
+    a.send({ t: 'hello', d: { version: 'test', arch: 'test' } });
+    await a.wait(m => m.t === 'welcome');
+    return a;
+  };
+  const answer = (id, body) => { /* the agent's binary AI answer: u32 header length | header | body */
+    const h = Buffer.from(JSON.stringify({ id, status: 200, type: 'application/json', headers: {} })), n = Buffer.alloc(4);
+    n.writeUInt32BE(h.length);
+    return Buffer.concat([n, h, Buffer.from(body)]);
+  };
+  const one = await enrollRaw('Raw one'), two = await enrollRaw('Raw two');
+  const v2 = await wsConnect(port, '/ws/viewer', { ...H, Origin: B });
+  await v2.wait(m => m.t === 'devices');
+  const a1 = await rawAgent(one);
+  const welcome = a1.msgs.find(m => m.t === 'welcome').d;
+  ok(welcome.timeout_s === TIMEOUT && welcome.ping_s === 8 && welcome.heartbeat_s === 12, 'the welcome carries the keepalive timings (TIMEOUT_SECONDS)');
+  const a1b = await rawAgent(one); /* the same router again, while its first socket is still open */
+  v2.send({ t: 'session.request', id: 1, d: { device: one.id } });
+  const sr = await v2.wait(m => (m.t === 'ack' || m.t === 'error') && m.id === 1).catch(() => null);
+  const started = await a1b.wait(m => m.t === 'session.start', 3000).catch(() => null);
+  ok(sr && sr.t === 'ack' && started && !a1.msgs.some(m => m.t === 'session.start'), 'after a reconnect, a session starts on the new socket');
+  const a2 = await rawAgent(two);
+  const pend = fetch(B + `/api/v1/devices/${one.id}/ui`, { headers: H });
+  const apiReq = await a1b.wait(m => m.t === 'api');
+  a2.sendBinary(answer(apiReq.id, '{"from":"the wrong agent"}'));
+  a2.send({ t: 'ack', id: apiReq.id, d: { from: 'the wrong agent' } });
+  await sleep(300);
+  a1b.sendBinary(answer(apiReq.id, '{"from":"right"}'));
+  r = await pend;
+  ok(r.status === 200 && (await r.json()).from === 'right', 'an answer counts only from the agent that was asked');
+  const gone = await v2.wait(m => m.t === 'device.event' && m.d.id === one.id && m.d.kind === 'agent.offline', (TIMEOUT + 8) * 1000, 'agent.offline').catch(() => null);
+  j = await (await fetch(B + '/api/v1/devices', { headers: H })).json();
+  ok(gone && !j.devices.find(d => d.id === one.id).online && !j.devices.find(d => d.id === one.id).session.active,
+    'an agent silent for TIMEOUT_SECONDS is dropped: offline, its session ended');
+  ok(j.devices.find(d => d.id === 'pixel').online && connects() === connectsBefore, 'a real agent\'s status keeps it connected meanwhile');
+
+  console.log('a restart (as a deploy does)');
+  const a3 = await rawAgent(two);
+  v2.send({ t: 'session.request', id: 2, d: { device: two.id } });
+  await v2.wait(m => m.t === 'ack' && m.id === 2);
+  wr.kill('SIGTERM');
+  await new Promise(res => wr.exitCode !== null ? res() : wr.once('exit', res));
+  await sleep(1000);
+  wr = await wrangler();
+  j = await (await fetch(B + '/api/v1/devices', { headers: H })).json();
+  const t2 = j.devices.find(d => d.id === two.id);
+  ok(!t2.online && !t2.session.active, 'after a restart, a router whose socket went with it is offline and in no session');
+  const v3 = await wsConnect(port, '/ws/viewer', { ...H, Origin: B });
+  await v3.wait(m => m.t === 'devices');
+  await rawAgent(two);
+  ok(await v3.wait(m => m.t === 'device.event' && m.d.id === two.id && m.d.kind === 'agent.online', 5000).catch(() => null),
+    'and when it comes back, viewers hear it come online');
 }
 
-const timer = setTimeout(() => { console.log('  ✗ overall timeout'); failures++; finish(); }, 150000);
+const timer = setTimeout(() => { console.log('  ✗ overall timeout'); failures++; finish(); }, 240000);
 function finish() {
   clearTimeout(timer);
   for (const p of procs) p.kill('SIGTERM');
