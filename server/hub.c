@@ -222,6 +222,7 @@ static cJSON *ice_servers(const char *user)
 {
     cJSON *arr = cJSON_CreateArray();
     if (!S.turn_urls || !*S.turn_urls) {
+        cfturn_ice(arr);
         extra_ice(arr);
         return arr;
     }
@@ -243,6 +244,7 @@ static cJSON *ice_servers(const char *user)
         cJSON_AddStringToObject(srv, "credential", cred);
     }
     cJSON_AddItemToArray(arr, srv);
+    cfturn_ice(arr);
     extra_ice(arr);
     return arr;
 }

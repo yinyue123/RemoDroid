@@ -236,6 +236,12 @@ int  enroll_api(conn_t *c, const http_req_t *r, const char *user); /* 1 if handl
 
 /* turn.c: built-in TURN relay ([turn] listen); 0 when disabled or started */
 int turn_start(void);
+/* cfturn.c: Cloudflare TURN ([cloudflare_turn]), credentials fetched in the background */
+void cfturn_init(void);
+void cfturn_refresh(int force);       /* after its settings change: force */
+void cfturn_ice(cJSON *arr);          /* appends Cloudflare's TURN/STUN servers, when there are fresh credentials */
+int  cfturn_enabled(void);
+void cfturn_status(char *out, size_t cap); /* "working", an error, or "" */
 
 /* notify.c: push phone notifications to Bark (WebSocket delivery is in hub.c) */
 void notify_on_event(device_t *d, const char *kind, cJSON *info);

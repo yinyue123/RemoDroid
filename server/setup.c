@@ -289,6 +289,14 @@ static cJSON *settings_get(const http_req_t *r, const char *user)
             cJSON_AddItemToArray(bi, cJSON_CreateString(u));
         free(list);
     }
+    /* Cloudflare TURN, as the Worker's panel shows it; the API token never leaves server.ini */
+    cJSON *cf = cJSON_AddObjectToObject(j, "turn");
+    char st[200];
+    cfturn_status(st, sizeof st);
+    cJSON_AddBoolToObject(cf, "cloudflare", cfturn_enabled());
+    cJSON_AddStringToObject(cf, "key_id", rd_conf_get(S.conf, "cloudflare_turn", "key_id", ""));
+    cJSON_AddBoolToObject(cf, "has_token", *rd_conf_get(S.conf, "cloudflare_turn", "api_token", "") != 0);
+    cJSON_AddStringToObject(cf, "status", st);
     cJSON_AddBoolToObject(j, "https", tls_ready());
     return j;
 }
@@ -441,6 +449,27 @@ static void settings_patch(conn_t *c, cJSON *in, const char *user)
             turn_on = 0;
     }
 
+    /* Cloudflare TURN: {cloudflare, key_id, api_token}; no api_token keeps the saved one, and off keeps
+     * both, so turning it back on needs nothing typed again */
+    cJSON *cft = cJSON_GetObjectItemCaseSensitive(in, "turn");
+    int cf_on = 0;
+    char cf_key[128] = "", cf_tok[256] = "";
+    if (cft) {
+        cf_on = msg_bool(cft, "cloudflare", 0);
+        snprintf(cf_key, sizeof cf_key, "%s", msg_str(cft, "key_id", rd_conf_get(S.conf, "cloudflare_turn", "key_id", "")));
+        snprintf(cf_tok, sizeof cf_tok, "%s", msg_str(cft, "api_token", ""));
+        if (!*cf_tok)
+            snprintf(cf_tok, sizeof cf_tok, "%s", rd_conf_get(S.conf, "cloudflare_turn", "api_token", ""));
+        if (cf_on && (!*cf_key || !*cf_tok)) {
+            http_error(c, 400, "bad_request", "the Cloudflare TURN key ID and API token are both needed");
+            return;
+        }
+        if (!ice_token_ok(cf_key, 120) || !ice_token_ok(cf_tok, 250)) {
+            http_error(c, 400, "bad_request", "the Cloudflare TURN key ID or API token looks wrong");
+            return;
+        }
+    }
+
     int ok = 1, restart = 0, changed = 0;
     int web = HAS("http_port") || HAS("domain") || HAS("email") || HAS("tls_port") || HAS("redirect_http");
     int turn = HAS("turn_enabled") || HAS("turn_port") || HAS("public_ip") || HAS("domain") || bl; /* urls name the domain */
@@ -496,6 +525,16 @@ static void settings_patch(conn_t *c, cJSON *in, const char *user)
     }
     if (list) /* read for every new session: no restart */
         ok &= set_if_changed("ice", "extra", *extra ? extra : NULL, &changed) == 0;
+    if (cft) { /* fetched in the background from now on: no restart */
+        int cf_changed = 0;
+        ok &= set_if_changed("cloudflare_turn", "key_id", *cf_key ? cf_key : NULL, &cf_changed) == 0;
+        ok &= set_if_changed("cloudflare_turn", "api_token", *cf_tok ? cf_tok : NULL, &cf_changed) == 0;
+        ok &= set_if_changed("cloudflare_turn", "enabled", cf_on ? "true" : "false", &cf_changed) == 0;
+        if (cf_changed) {
+            changed = 1;
+            cfturn_refresh(1);
+        }
+    }
     if (tl_in) /* read by the TURN server for every allocation: no restart */
         ok &= set_if_changed("turn", "users", *tlogin ? tlogin : NULL, &changed) == 0;
     int relogin = 0;

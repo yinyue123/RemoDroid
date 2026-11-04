@@ -34,6 +34,7 @@ struct httpc {
     mbedtls_ssl_config conf;
     int tls_ready;
     char ca_file[512], ua[64];
+    char auth[512]; /* "Authorization: …\r\n" on every request, or "" */
 };
 
 static int seterr(char *err, size_t cap, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
@@ -54,6 +55,14 @@ static const char *mbed_err(int r)
 }
 
 int httpc_rng(void *h, unsigned char *out, size_t n) { return mbedtls_ctr_drbg_random(&((httpc_t *)h)->drbg, out, n); }
+
+void httpc_set_auth(httpc_t *h, const char *value)
+{
+    if (value && *value && !strpbrk(value, "\r\n"))
+        snprintf(h->auth, sizeof h->auth, "Authorization: %s\r\n", value);
+    else
+        h->auth[0] = 0;
+}
 
 httpc_t *httpc_new(const char *ca_file, const char *user_agent)
 {
@@ -262,8 +271,8 @@ int httpc_request(httpc_t *h, const char *method, const char *url, const char *c
         snprintf(ct, sizeof ct, "Content-Type: %s\r\n", ctype);
     int n = snprintf(req, sizeof req,
                      "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\nConnection: close\r\n"
-                     "%sContent-Length: %zu\r\n\r\n",
-                     method, path, hp, h->ua, ct, blen);
+                     "%s%sContent-Length: %zu\r\n\r\n",
+                     method, path, hp, h->ua, h->auth, ct, blen);
     if ((size_t)n >= sizeof req) {
         seterr(err, errcap, "request too long");
         goto out;

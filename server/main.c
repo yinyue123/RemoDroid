@@ -365,6 +365,7 @@ int main(int argc, char **argv)
     }
     if (turn_start() < 0)
         return 1;
+    cfturn_init();
     if (S.setup)
         setup_init();
     ev_timer_init(&S.ping_timer, on_ping, S.ping_s, S.ping_s);

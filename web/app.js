@@ -1219,19 +1219,21 @@ $$('[data-close]').forEach(b => b.addEventListener('click', closeSheet));
  * and one to use (or Auto: all of them, WebRTC takes the best). The pick goes with the next session
  * request, and the server hands the same narrowed list to the computer or phone, so both ends relay
  * through it. The list and credentials are the last session's (ice_choices). */
+/* the relays a pick can name: UDP TURN only, since the phone and the computer relay over UDP (Cloudflare
+ * also offers TCP and TLS, which they can't use) */
 function turnServers() {
   const out = [];
   for (const s of st.iceChoices || [])
     for (const url of [].concat(s.urls || []))
-      if (/^turns?:/.test(url) && !out.some(t => t.url === url)) out.push({ url, username: s.username, credential: s.credential });
+      if (/^turn:/.test(url) && !/transport=tcp/i.test(url) && !out.some(t => t.url === url)) out.push({ url, username: s.username, credential: s.credential });
   return out;
 }
 const turnMs = new Map(); /* url → ms, null (no answer) or 'testing' */
 const esc = v => String(v).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 function turnName(url) {
   const m = /^(turns?):(\[[^\]]+\]|[^:?]+)(?::(\d+))?(?:\?transport=(\w+))?/i.exec(url) || [];
-  const own = st.device && location.hostname && m[2] === location.hostname;
-  return { host: `${m[2] || url}${m[3] ? ':' + m[3] : ''}`, sub: `${(m[1] || 'turn').toUpperCase()} · ${(m[4] || (m[1] === 'turns' ? 'tcp' : 'udp')).toUpperCase()}${own ? ' · this server' : ''}` };
+  const own = st.device && location.hostname && m[2] === location.hostname, cf = /(^|\.)cloudflare\.com$/i.test(m[2] || '');
+  return { host: `${m[2] || url}${m[3] ? ':' + m[3] : ''}`, sub: `${(m[1] || 'turn').toUpperCase()} · ${(m[4] || (m[1] === 'turns' ? 'tcp' : 'udp')).toUpperCase()}${own ? ' · this server' : cf ? ' · Cloudflare' : ''}` };
 }
 /* The time to get a relay allocated from that server, alone: its round trip plus its answer. */
 function turnPing(t) {

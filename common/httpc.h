@@ -19,6 +19,8 @@ typedef struct {
 /* ca_file: trusted roots for https:// ("" or NULL = the system bundle, loaded on first use). */
 httpc_t *httpc_new(const char *ca_file, const char *user_agent);
 void     httpc_free(httpc_t *h);
+/* An Authorization header ("Bearer …") sent with every request from now on; NULL or "" = none. */
+void     httpc_set_auth(httpc_t *h, const char *value);
 /* Returns 0 with r filled (any HTTP status), or -1 with err set (DNS, connect, TLS, bad response).
  * ctype: Content-Type of body (NULL = no body). */
 int      httpc_request(httpc_t *h, const char *method, const char *url, const char *ctype, const char *body,

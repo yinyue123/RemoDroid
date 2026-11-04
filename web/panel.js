@@ -498,6 +498,11 @@ async function patch(body) {
   else cfg = r;
   toast('Saved');
   if (route().tab === 'server') renderServer();
+  /* a server asks Cloudflare in the background: show how that went a moment later */
+  if (body.turn && body.turn.cloudflare && cfg.platform !== 'worker')
+    setTimeout(async () => {
+      try { cfg = await api('GET', '/api/v1/settings'); if (route().tab === 'server') renderServer(); } catch (_) {}
+    }, 4000);
   return r;
 }
 /* Ports, domain or TURN changed: the server re-execs itself. If the page's own port moved, follow it. */
@@ -550,14 +555,15 @@ function renderServer() {
       cfg.turn_enabled ? item({ act: 'public_ip', html: '<span class="txt"><b>Public IPv4</b></span>', val: cfg.public_ip || 'not set' }) : '',
       cfg.turn_enabled ? item({ act: 'turn_login', html: '<span class="txt"><b>Fixed login</b><small>For another server\'s STUN/TURN list to use this relay</small></span>', val: cfg.turn_login || 'none' }) : '',
     ].filter(Boolean), cfg.turn_enabled ? `Open UDP ${esc(cfg.turn_port)} and UDP 49152–49252 (relay ports) in the firewall.` : '');
-  } else {
-    const t = cfg.turn || {};
-    html += group('Cloudflare TURN', [
-      item({ html: '<span class="txt"><b>Use Cloudflare TURN</b><small>1,000 GB a month free</small></span>', right: `<input class="sw" type="checkbox" data-k="cf" aria-label="Cloudflare TURN" ${t.cloudflare ? 'checked' : ''}>` }),
-      t.cloudflare ? item({ act: 'cf_key', html: '<span class="txt"><b>TURN key ID</b></span>', val: t.key_id || 'not set' }) : '',
-      t.cloudflare ? item({ act: 'cf_token', html: '<span class="txt"><b>API token</b></span>', val: t.has_token ? 'saved' : 'not set' }) : '',
-    ].filter(Boolean), '<a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare dashboard</a> → <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>: its Turn Token ID and API Token go here.');
   }
+  /* Cloudflare's TURN, on the Worker and on a server alike: the server also says how its last call went */
+  const t = cfg.turn || {};
+  const cfState = !worker && t.cloudflare && t.status ? (t.status === 'working' ? 'Working: handed out with every session' : t.status) : '1,000 GB a month free';
+  html += group('Cloudflare TURN', [
+    item({ html: `<span class="txt"><b>Use Cloudflare TURN</b><small>${esc(cfState)}</small></span>`, right: `<input class="sw" type="checkbox" data-k="cf" aria-label="Cloudflare TURN" ${t.cloudflare ? 'checked' : ''}>` }),
+    t.cloudflare ? item({ act: 'cf_key', html: '<span class="txt"><b>TURN key ID</b></span>', val: t.key_id || 'not set' }) : '',
+    t.cloudflare ? item({ act: 'cf_token', html: '<span class="txt"><b>API token</b></span>', val: t.has_token ? 'saved' : 'not set' }) : '',
+  ].filter(Boolean), '<a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare dashboard</a> → <b>Realtime</b> → <b>TURN Server</b> → <b>Create</b>: its Turn Token ID and API Token go here.');
   html += `<h2 class="gtitle">${builtinOn ? 'STUN / TURN servers' : 'Other STUN / TURN servers'}</h2><div id="ice"></div><p class="gfoot">Phones use UDP TURN; add your own coturn here, or a public STUN server such as stun.cloudflare.com.</p>`;
   html += group('AI assistants', [
     item({ href: '#server/tokens', html: '<span class="txt"><b>API tokens</b><small>How assistants and scripts sign in; revoke one at any time</small></span>' }),
