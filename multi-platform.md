@@ -380,8 +380,19 @@ on Windows 10. Nothing extra is built or shipped: `win/wv2.h` declares the few C
 slot as in the SDK's `WebView2.h`), and the runtime is found as `WebView2Loader.dll` finds it, through its
 EdgeUpdate `ClientState` key, whose folder holds `EmbeddedBrowserWebView.dll`. The profile, with the sign-in
 cookie, is in `%LOCALAPPDATA%\RemoDroid\WebView2`; other sites open in the default browser; WebView2 handles
-downloads and file pickers itself; the page's full screen fills the monitor; the window menu (Alt+Space) has
-**Reload** and **Open in browser**. Without the WebView2 Runtime, **Open window** opens the default browser.
+downloads and file pickers itself; the page's full screen fills the monitor (and hides the tab strip); the
+window menu (Alt+Space) has **New tab**, **New window**, **Reload** and **Open in browser**. Without the
+WebView2 Runtime, **Open window** opens the default browser.
+
+The Windows window has the same Chrome-style tabs as the Mac one: a strip drawn across the top of the client
+area (light or dark with the Windows app mode), **+** after the last tab or Ctrl+T for a tab on the device
+page, Ctrl+N for a window, Ctrl+W, the × or a middle click to close, Ctrl+Tab / Ctrl+PgDn / Ctrl+1…9 to switch,
+a double click on the empty strip for a new tab. Dragging works as on the Mac: along the strip to reorder, off
+it to tear the tab into a window of its own that follows the pointer, over another window's strip to join it;
+a window's only tab drags the window. All tabs are controllers of one WebView2 environment (one browser process,
+one profile). A tab that changes window takes its controller along (`put_ParentWindow`), so its page never
+reloads. The tab keys reach the app through the controller's `AcceleratorKeyPressed`, since the keyboard focus
+is inside the page.
 Linux opens the panel in the default browser (WebKitGTK would be an extra runtime dependency).
 
 **Show log** (also a button in the pairing window) opens a resizable log window: the agent's last 1000

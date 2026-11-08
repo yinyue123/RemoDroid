@@ -18,6 +18,8 @@ typedef struct ICoreWebView2NavigationStartingEventHandler ICoreWebView2Navigati
 typedef struct ICoreWebView2NewWindowRequestedEventHandler ICoreWebView2NewWindowRequestedEventHandler;
 typedef struct ICoreWebView2DocumentTitleChangedEventHandler ICoreWebView2DocumentTitleChangedEventHandler;
 typedef struct ICoreWebView2ContainsFullScreenElementChangedEventHandler ICoreWebView2ContainsFullScreenElementChangedEventHandler;
+typedef struct ICoreWebView2AcceleratorKeyPressedEventHandler ICoreWebView2AcceleratorKeyPressedEventHandler;
+typedef struct ICoreWebView2AcceleratorKeyPressedEventArgs ICoreWebView2AcceleratorKeyPressedEventArgs;
 
 struct ICoreWebView2EnvironmentVtbl {
     HRESULT(STDMETHODCALLTYPE *QueryInterface)(ICoreWebView2Environment *, REFIID, void **);
@@ -51,10 +53,10 @@ struct ICoreWebView2ControllerVtbl {
     void *remove_GotFocus;
     void *add_LostFocus;
     void *remove_LostFocus;
-    void *add_AcceleratorKeyPressed;
+    HRESULT(STDMETHODCALLTYPE *add_AcceleratorKeyPressed)(ICoreWebView2Controller *, ICoreWebView2AcceleratorKeyPressedEventHandler *, EventRegistrationToken *);
     void *remove_AcceleratorKeyPressed;
     void *get_ParentWindow;
-    void *put_ParentWindow;
+    HRESULT(STDMETHODCALLTYPE *put_ParentWindow)(ICoreWebView2Controller *, HWND);
     HRESULT(STDMETHODCALLTYPE *NotifyParentWindowPositionChanged)(ICoreWebView2Controller *);
     HRESULT(STDMETHODCALLTYPE *Close)(ICoreWebView2Controller *);
     HRESULT(STDMETHODCALLTYPE *get_CoreWebView2)(ICoreWebView2Controller *, ICoreWebView2 **);
@@ -203,6 +205,30 @@ struct ICoreWebView2ContainsFullScreenElementChangedEventHandlerVtbl {
 };
 struct ICoreWebView2ContainsFullScreenElementChangedEventHandler { const struct ICoreWebView2ContainsFullScreenElementChangedEventHandlerVtbl *lpVtbl; };
 
+/* COREWEBVIEW2_KEY_EVENT_KIND */
+#define COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN 0
+#define COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN 2
+struct ICoreWebView2AcceleratorKeyPressedEventArgsVtbl {
+    HRESULT(STDMETHODCALLTYPE *QueryInterface)(ICoreWebView2AcceleratorKeyPressedEventArgs *, REFIID, void **);
+    ULONG(STDMETHODCALLTYPE *AddRef)(ICoreWebView2AcceleratorKeyPressedEventArgs *);
+    ULONG(STDMETHODCALLTYPE *Release)(ICoreWebView2AcceleratorKeyPressedEventArgs *);
+    HRESULT(STDMETHODCALLTYPE *get_KeyEventKind)(ICoreWebView2AcceleratorKeyPressedEventArgs *, int *);
+    HRESULT(STDMETHODCALLTYPE *get_VirtualKey)(ICoreWebView2AcceleratorKeyPressedEventArgs *, UINT *);
+    void *get_KeyEventLParam;
+    void *get_PhysicalKeyStatus;
+    void *get_Handled;
+    HRESULT(STDMETHODCALLTYPE *put_Handled)(ICoreWebView2AcceleratorKeyPressedEventArgs *, BOOL);
+};
+struct ICoreWebView2AcceleratorKeyPressedEventArgs { const struct ICoreWebView2AcceleratorKeyPressedEventArgsVtbl *lpVtbl; };
+
+struct ICoreWebView2AcceleratorKeyPressedEventHandlerVtbl {
+    HRESULT(STDMETHODCALLTYPE *QueryInterface)(ICoreWebView2AcceleratorKeyPressedEventHandler *, REFIID, void **);
+    ULONG(STDMETHODCALLTYPE *AddRef)(ICoreWebView2AcceleratorKeyPressedEventHandler *);
+    ULONG(STDMETHODCALLTYPE *Release)(ICoreWebView2AcceleratorKeyPressedEventHandler *);
+    HRESULT(STDMETHODCALLTYPE *Invoke)(ICoreWebView2AcceleratorKeyPressedEventHandler *, ICoreWebView2Controller *, ICoreWebView2AcceleratorKeyPressedEventArgs *);
+};
+struct ICoreWebView2AcceleratorKeyPressedEventHandler { const struct ICoreWebView2AcceleratorKeyPressedEventHandlerVtbl *lpVtbl; };
+
 typedef struct ICoreWebView2EnvironmentOptions ICoreWebView2EnvironmentOptions;
 struct ICoreWebView2EnvironmentOptionsVtbl {
     HRESULT(STDMETHODCALLTYPE *QueryInterface)(ICoreWebView2EnvironmentOptions *, REFIID, void **);
@@ -225,6 +251,7 @@ static const IID IID_ICoreWebView2NavigationStartingEventHandler = {0x9adbe429,0
 static const IID IID_ICoreWebView2NewWindowRequestedEventHandler = {0xd4c185fe,0xc81c,0x4989,{0x97,0xaf,0x2d,0x3f,0xa7,0xab,0x56,0x51}};
 static const IID IID_ICoreWebView2DocumentTitleChangedEventHandler = {0xf5f2b923,0x953e,0x4042,{0x9f,0x95,0xf3,0xa1,0x18,0xe1,0xaf,0xd4}};
 static const IID IID_ICoreWebView2ContainsFullScreenElementChangedEventHandler = {0xe45d98b1,0xafef,0x45be,{0x8b,0xaf,0x6c,0x77,0x28,0x86,0x7f,0x73}};
+static const IID IID_ICoreWebView2AcceleratorKeyPressedEventHandler = {0xb29c7e28,0xfa79,0x41a8,{0x8e,0x44,0x65,0x81,0x1c,0x76,0xdc,0xb2}};
 static const IID IID_ICoreWebView2EnvironmentOptions = {0x2fde08a8,0x1e9a,0x4766,{0x8c,0x05,0x95,0xa9,0xce,0xb9,0xd1,0xc5}};
 
 #define COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC 0
