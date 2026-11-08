@@ -37,11 +37,26 @@ const save = () => {
 };
 /* The device being controlled is a cookie: set when you choose one (the device page's link, /?device=ID,
  * or the menu's Devices switcher) and deleted by the menu's Exit. Without it this page shows the device
- * page instead: it never picks a device by itself. */
+ * page instead: it never picks a device by itself.
+ * The cookie is shared by every tab, so it is only where a new tab starts. Each tab (a browser's, or one
+ * of the Mac app's) keeps its own choice in sessionStorage, which survives a reload, so choosing another
+ * device in one tab never moves the others. */
 const DEV_COOKIE = 'rd_device';
-const devCookie = () => { const c = document.cookie.split('; ').find(x => x.startsWith(DEV_COOKIE + '=')); return c ? decodeURIComponent(c.slice(DEV_COOKIE.length + 1)) : ''; };
-const setDevCookie = id => { document.cookie = `${DEV_COOKIE}=${encodeURIComponent(id)}; Max-Age=34560000; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`; };
-const clearDevCookie = () => { document.cookie = `${DEV_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`; };
+const cookieDev = () => { const c = document.cookie.split('; ').find(x => x.startsWith(DEV_COOKIE + '=')); return c ? decodeURIComponent(c.slice(DEV_COOKIE.length + 1)) : ''; };
+let tabDev = '';
+try { tabDev = sessionStorage.getItem(DEV_COOKIE) || ''; } catch (_) {}
+if (!tabDev && (tabDev = cookieDev())) try { sessionStorage.setItem(DEV_COOKIE, tabDev); } catch (_) {}
+const devCookie = () => tabDev;
+const setDevCookie = id => {
+  tabDev = id;
+  try { sessionStorage.setItem(DEV_COOKIE, id); } catch (_) {}
+  document.cookie = `${DEV_COOKIE}=${encodeURIComponent(id)}; Max-Age=34560000; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
+};
+const clearDevCookie = () => {
+  tabDev = '';
+  try { sessionStorage.removeItem(DEV_COOKIE); } catch (_) {}
+  document.cookie = `${DEV_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`;
+};
 delete S.device; /* where the choice lived before the cookie */
 { const want = new URLSearchParams(location.search).get('device'); if (want) { setDevCookie(want); history.replaceState(null, '', '/'); } }
 if (!DEMO && !devCookie()) location.replace('/panel.html#devices');
@@ -3020,6 +3035,8 @@ function renderComputerTab(add) {
     el('button', { class: 'btn', type: 'button', text: 'Lock the computer', onclick: () => cmd('phone.sleep', {}, 'Computer locked') }))));
 }
 function deviceChanged() {
+  /* the device names the page, so tabs (a browser's, the Mac app's) tell devices apart */
+  document.title = st.device ? `${st.device.name || st.device.id} · RemoDroid` : 'RemoDroid';
   if (desk() !== !!st.wasDesk) { st.wasDesk = desk(); renderQuickKeys(); video.style.cursor = desk() ? 'default' : ''; }
   tpSync();
   if (!menu.hidden) syncMenuStates();

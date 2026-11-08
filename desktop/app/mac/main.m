@@ -988,6 +988,10 @@ static NSMenu *main_menu(void)
     [appm addItemWithTitle:@"Quit RemoDroid" action:@selector(terminate:) keyEquivalent:@"q"];
     [bar addItemWithTitle:@"" action:nil keyEquivalent:@""].submenu = appm;
     NSMenu *file = [[NSMenu alloc] initWithTitle:@"File"];
+    /* tabs and windows of the panel (web.m): nil-targeted, they reach the panel window's delegate */
+    [file addItemWithTitle:@"New Tab" action:NSSelectorFromString(@"newTab:") keyEquivalent:@"t"];
+    [file addItemWithTitle:@"New Window" action:NSSelectorFromString(@"newWindow:") keyEquivalent:@"n"];
+    [file addItem:[NSMenuItem separatorItem]];
     [file addItemWithTitle:@"Close Window" action:@selector(performClose:) keyEquivalent:@"w"];
     [bar addItemWithTitle:@"File" action:nil keyEquivalent:@""].submenu = file;
     NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
@@ -1002,6 +1006,9 @@ static NSMenu *main_menu(void)
     [bar addItemWithTitle:@"View" action:nil keyEquivalent:@""].submenu = rd_web_menu();
     NSMenu *win = [[NSMenu alloc] initWithTitle:@"Window"];
     [win addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
+    [win addItem:[NSMenuItem separatorItem]];
+    [win addItemWithTitle:@"Show Next Tab" action:NSSelectorFromString(@"selectNextTab:") keyEquivalent:@"}"];
+    [win addItemWithTitle:@"Show Previous Tab" action:NSSelectorFromString(@"selectPreviousTab:") keyEquivalent:@"{"];
     [bar addItemWithTitle:@"Window" action:nil keyEquivalent:@""].submenu = win;
     NSApp.windowsMenu = win;
     return bar;

@@ -361,8 +361,19 @@ A system notification is shown when a session starts and when it ends ("alice is
 **Open window** on macOS (`app/mac/web.m`) shows the panel in a `WKWebView` window of its own, like a
 single-site browser: the default website data store keeps the sign-in cookie across launches; links to other
 sites open in the default browser; files the viewer downloads go to `~/Downloads`. While the window is open
-the app is a regular app (Dock icon, ⌘-Tab, a View menu with Reload, zoom and **Open in Browser**); when it
-closes, the app is menu-bar only again.
+the app is a regular app (Dock icon, ⌘-Tab, a View menu with Reload, zoom and **Open in Browser**); when the
+last window closes, the app is menu-bar only again.
+
+The window has tabs, as in Chrome, in a strip across the title bar: **+** after the last tab (or ⌘T) opens a
+tab on the device page, ⌘N a window, ⇧⌘] / ⇧⌘[ step through the tabs, a middle click or the × inside a tab
+closes it. Drag a tab along the strip to reorder it; pull it off the strip (24 points up or down) and it
+becomes a window of its own that follows the pointer; hold that over another window's strip and it joins
+that window where the pointer is. A window's only tab drags the whole window; a full-screen window only
+reorders. Each tab is really a window of its own with its own `WKWebView`, only the selected one of a group on
+screen, so moving a tab between windows never reloads it and a running viewer keeps going. The tabs share the
+persistent data store (sign-in, viewer settings); the device a tab shows is its own (`sessionStorage`, set
+from the shared `rd_device` cookie only when the tab first opens), and the viewer titles itself with the
+device's name, which is what the tab shows.
 
 On Windows (`app/win/web.c`) the window is WebView2, the Edge engine that comes with Windows 11 and with Edge
 on Windows 10. Nothing extra is built or shipped: `win/wv2.h` declares the few COM interfaces used (slot for
