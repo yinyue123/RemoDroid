@@ -19,6 +19,7 @@
 #define DCEP_ACK 0x02
 #define MAX_CH 16
 #define SNDBUF (1024 * 1024)
+#define SCTP_MTU 1130 /* an SCTP packet that fits a 1200-byte DTLS datagram (AES-GCM adds 37 bytes) */
 
 typedef struct {
     int used, open;
@@ -278,6 +279,18 @@ sctp_t *sctp_new(struct ev_loop *loop, int dtls_client, int local_port, int remo
         sctp_free(s);
         return NULL;
     }
+    /* Every SCTP packet goes into one DTLS record, and DTLS takes at most a 1200-byte datagram (dtls.c),
+     * record header and cipher overhead included. Left to itself usrsctp sends 1500-byte packets once a
+     * message has to be split, DTLS refuses them, and SCTP resends the same packet for ever: the message and
+     * everything after it on an ordered channel never arrives (seen 2026-11-10: any "dom" message over
+     * about 1.2 KB). So the path MTU is fixed, as libwebrtc does, and not probed. */
+    struct sctp_paddrparams pp;
+    memset(&pp, 0, sizeof pp);
+    memcpy(&pp.spp_address, &sc, sizeof sc);
+    pp.spp_flags = SPP_PMTUD_DISABLE;
+    pp.spp_pathmtu = SCTP_MTU;
+    if (usrsctp_setsockopt(s->sock, IPPROTO_SCTP, SCTP_PEER_ADDR_PARAMS, &pp, sizeof pp) < 0)
+        LOGW("sctp: cannot set the path MTU: %s", strerror(errno));
     return s;
 }
 

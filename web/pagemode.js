@@ -91,6 +91,7 @@ function build() {
     el('div', { id: 'pmMenu', hidden: true }), el('div', { id: 'pmList', hidden: true })]);
   document.body.append(root);
   mirror = new Mirror(frame, send);
+  window.__pmMirror = mirror; /* for tests and for looking at it from the console */
   mirror.hold = holdProp;
   mirror.ready.then(listen);
   new ResizeObserver(fit).observe(root.querySelector('#pmView'));

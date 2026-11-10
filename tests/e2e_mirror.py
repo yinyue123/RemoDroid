@@ -8,7 +8,8 @@ headless Chrome, showing the remote browser's page as elements instead of video,
      ▲ WebRTC: "dom" channel (the page), input, ctrl
   Chrome, 428x926 with touch: web/app.js + pagemode.js + mirror.js
 
-Checks: Page mode shows the page's own elements under the viewer's bar; a tap on a button in the mirror is
+Checks: Page mode shows the page's own elements under the viewer's bar; photos arrive, a big one made
+smaller as WebP; a tap on a button in the mirror is
 a real (trusted) tap on the real one; typing into the mirror's field arrives in the real field; a <select>
 picked in the mirror is picked on the real page; a confirm() is asked on the viewer; a playing video brings the picture
 for as long as it plays; scrolling the mirror to its end makes the real page load
@@ -41,6 +42,10 @@ from e2e_desktop import free_display, free_port  # noqa: E402
 from e2e_remote_browser import dummy_driver  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+class SiteDone(Exception):
+    """--url: the real site has been looked at; the rest of the checks are for the test page."""
 
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -84,7 +89,7 @@ socket = {d}/mirror.sock
 users = Alice Bob
 data = {d}/users
 cache = {d}/cache
-home = {origin}/ops.html
+home = {args.url or origin + "/ops.html"}
 browser = {site_chrome}
 args = --no-sandbox --disable-gpu
 mirror_socket = {d}/shell.sock
@@ -148,6 +153,27 @@ mirror_socket = {d}/shell.sock
             # Page mode on: the page's own elements, in the frame, under the viewer's bar
             await page.evaluate("() => PageMode.set(true)")
             fr = page.frame_locator("#pmFrame")
+            if args.url:  # a real site: does it show, pictures included, and does the session hold
+                await asyncio.sleep(args.watch)
+                res["site"] = await page.evaluate("""() => { const d = document.querySelector('#pmFrame').contentDocument;
+                    const imgs = [...d.querySelectorAll('img')], vis = imgs.filter(i => { const r = i.getBoundingClientRect(); return r.width > 20 && r.bottom > 0 && r.top < 860; });
+                    return { title: d.title, nodes: d.getElementsByTagName('*').length, imgs: imgs.length, with_src: imgs.filter(i => i.getAttribute('src')).length,
+                             loaded: imgs.filter(i => i.naturalWidth > 0).length, visible: vis.length, visible_loaded: vis.filter(i => i.naturalWidth > 0).length,
+                             visible_src: vis.slice(0, 6).map(i => (i.getAttribute('src') || '-').slice(0, 40)), log: PageMode.log.slice(-6),
+                             on: PageMode.on, pm_hidden: document.querySelector('#pm').hidden }; }""")
+                res["pictures"] = await page.evaluate("""() => { const f = document.querySelector('#pmFrame'), d = f.contentDocument, m = window.__pmMirror;
+                    const states = {}; if (m) for (const [u, v] of m.res) { const k = v === '' ? 'asked' : v === null ? 'none' : 'have'; states[k] = (states[k] || 0) + 1; }
+                    const big = [...d.querySelectorAll('img')].filter(i => i.getBoundingClientRect().width > 40).slice(0, 5)
+                      .map(i => ({ src: (i.getAttribute('src') || '-').slice(0, 30), nat: i.naturalWidth, w: Math.round(i.getBoundingClientRect().width),
+                                   cls: i.className.slice(0, 30), parent: i.parentNode && i.parentNode.localName }));
+                    return { states, waits: m ? m.waits.size : -1, big }; }""")
+                res["sessions"] = sum(1 for l in open(f"{d}/agent.log") if "connected: h26" in l)
+                res["ended"] = [l.strip()[-60:] for l in open(f"{d}/agent.log") if " ended: " in l]
+                if args.shot:
+                    await page.screenshot(path=args.shot)
+                ok = bool(res["site"]["visible_loaded"]) and res["sessions"] == 1
+                await browser.close()
+                raise SiteDone()
             txt = lambda sel: fr.locator(sel).inner_text(timeout=8000)
             async def until(sel, want, ms=8000):
                 try:
@@ -175,6 +201,18 @@ mirror_socket = {d}/shell.sock
                 await touch("touchStart", [await mid(sel)])
                 await asyncio.sleep(0.06)
                 await touch("touchEnd", [])
+
+            # photos: captured from the real browser's cache, made smaller (WebP, no wider than this screen), shown
+            await page.wait_for_function("""() => { const d = document.querySelector('#pmFrame').contentDocument;
+                return ['photo', 'photo2'].every(id => { const i = d.getElementById(id); return i && i.naturalWidth > 0; }); }""",
+                                         timeout=15000)
+            res["photos"] = await page.evaluate("""async () => { const d = document.querySelector('#pmFrame').contentDocument, out = {};
+                for (const id of ['photo', 'photo2']) { const i = d.getElementById(id), b = await (await fetch(i.src)).blob();
+                    out[id] = [i.naturalWidth, i.naturalHeight, b.type, b.size]; }
+                return out; }""")
+            p1, p2 = res["photos"]["photo"], res["photos"]["photo2"]
+            res["photos_ok"] = (p1[2] == "image/webp" and p1[0] <= 1284 and p1[3] < os.path.getsize(f"{ROOT}/browser/test/mirror/pages/photo.jpg")
+                                and p2[0] == 900 and p2[3] > 0)
 
             # a tap on the mirror's button: a real, trusted tap on the real one, and the new text comes back
             await tap("#btn")
@@ -275,10 +313,12 @@ mirror_socket = {d}/shell.sock
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
               and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("select") == "picked: blue"
-              and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
+              and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'
               and not res.get("requests_for_the_site") and res.get("video_again") and not res.get("errors"))
+    except SiteDone:
+        pass
     except Exception as e:  # what was reached is still worth printing
         res["stopped_at"] = repr(e)[:400]
         if "clog" in locals():
@@ -310,4 +350,7 @@ if __name__ == "__main__":
     ap.add_argument("--chrome", help="Chrome / headless shell for the viewer instead of Playwright's")
     ap.add_argument("--site-chrome", help="the Chrome that plays the remote browser (default: google-chrome)")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--url", help="a real site as the browser's home page: only check that it shows, pictures and all")
+    ap.add_argument("--watch", type=float, default=30, help="--url: seconds to watch it")
+    ap.add_argument("--shot", help="--url: a screenshot of the viewer here")
     sys.exit(asyncio.run(run(ap.parse_args())))

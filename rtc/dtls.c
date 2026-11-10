@@ -309,6 +309,11 @@ int dtls_write(dtls_t *d, const uint8_t *data, size_t n)
     if (!d->connected || d->closed)
         return -1;
     int r = mbedtls_ssl_write(&d->ssl, data, n);
+    if (r < 0) { /* the packet is lost: say so, once in a while, or the next one like it is a mystery */
+        static unsigned fails;
+        if (fails++ % 1000 == 0)
+            LOGW("dtls: a %zu-byte packet was refused (-0x%04x); %u so far", n, (unsigned)-r, fails);
+    }
     return r < 0 ? -1 : 0;
 }
 

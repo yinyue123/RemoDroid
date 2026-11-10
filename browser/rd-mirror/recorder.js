@@ -228,6 +228,12 @@
     late.clear();
     for (const r of recs) {
       const t = r.target;
+      if (t === document && r.type === 'childList') { /* the root itself came or went (the recorder went in
+                                                           before the parser made <html>): all of it again */
+        fresh = null;
+        start();
+        return;
+      }
       if (r.type === 'childList') {
         if (sheets.has(t)) css.add(t); /* a <style>'s text was replaced */
         else parents.add(t);
@@ -294,6 +300,8 @@
   /* what no mutation reports: rules added from script, and what the user or the page put into the form fields */
   const compare = guard('compare', () => {
     if (Date.now() - polled > 30000) return stop(); /* nobody is listening any more */
+    const root = document.documentElement;
+    if (root && !known(root)) return start(); /* a root the snapshot didn't have */
     const ops = [];
     for (const [el, sig] of sheets) {
       if (!el.isConnected || !known(el)) { sheets.delete(el); continue; }

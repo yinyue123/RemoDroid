@@ -9,8 +9,10 @@
  *       'T' an input message   → carried out here (input.c), as if the viewer had sent it
  *   viewer → here      a text message on "dom" → frame 'v' to rd-mirror
  *
- * A thread reads the socket, so megabytes of a page never hold up the session's loop; it slows down while
- * the data channel has more than BEHIND bytes waiting. */
+ * A thread reads the socket, so megabytes of a page never hold up the session's loop, and hands each frame
+ * to the loop. The loop sends it piece by piece, and a piece the channel has no room for (rtc_dc_send fails
+ * when the SCTP send buffer is full) is sent again a moment later, never dropped: the file channel works the
+ * same way (files.c). The thread waits while more than BEHIND bytes are queued. */
 #include "desk.h"
 
 #ifdef _WIN32
@@ -36,30 +38,88 @@ void mirror_message(const uint8_t *d, size_t n) {}
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0 /* macOS: the agent ignores SIGPIPE */
 #endif
-/* Under one packet: a "dom" message of 1538 bytes never reached the viewer (Chrome 157, 2026-11-10), while
- * those under about 1200 always did. Why the stack loses a message it has to split is not known yet. */
-#define CHUNK 1000
+#define CHUNK 16000
 #define BEHIND (512u << 10)
 #define FRAME_MAX (96u << 20)
+
+typedef struct out {
+    struct out *next;
+    size_t n, off; /* off: how much of it has gone */
+    uint8_t kind, d[];
+} out_t;
 
 typedef struct {
     int fd;
     volatile int stop;
-    volatile size_t buffered; /* the data channels' queue, as the loop last saw it */
-    volatile int asked;
+    size_t queued;           /* bytes handed to the loop and not yet sent: the thread waits above BEHIND */
     rd_thread_t th;
 } mirror_t;
 
 static mirror_t *M; /* loop thread only */
+static out_t *q_head, *q_tail; /* loop thread only: frames to send on "dom", oldest first */
+static ev_timer q_timer;
+static int q_timer_inited;
 
 int mirror_available(void) { return *desk_conf("mirror", "socket", "") != 0; }
 int mirror_is_on(void) { return M != NULL; }
 
-static void on_buffered(void *arg)
+static void q_clear(void)
 {
-    mirror_t *m = arg;
-    m->buffered = rtc_dc_buffered(rd_rtc_stack());
-    m->asked = 0;
+    while (q_head) {
+        out_t *o = q_head;
+        q_head = o->next;
+        free(o);
+    }
+    q_tail = NULL;
+    if (q_timer_inited && ev_is_active(&q_timer))
+        ev_timer_stop(D.loop, &q_timer);
+}
+
+/* as much of the queue as the channel takes now; the rest from the timer */
+static void q_pump(void)
+{
+    rtc_t *r = rd_rtc_stack();
+    static uint8_t msg[CHUNK + 2];
+    while (M && r && q_head) {
+        out_t *o = q_head;
+        size_t c = o->n - o->off < CHUNK ? o->n - o->off : CHUNK;
+        msg[0] = o->kind;
+        msg[1] = o->off + c < o->n;
+        memcpy(msg + 2, o->d + o->off, c);
+        int rc = rtc_dc_buffered(r) > BEHIND ? -2 : rtc_dc_send(r, "dom", 1, msg, c + 2);
+        if (rc < 0)
+            break; /* full: again in a moment */
+        o->off += c;
+        __atomic_sub_fetch(&M->queued, c, __ATOMIC_RELAXED);
+        if (o->off == o->n) {
+            q_head = o->next;
+            if (!q_head)
+                q_tail = NULL;
+            free(o);
+        }
+    }
+    if (q_head && !ev_is_active(&q_timer))
+        ev_timer_start(D.loop, &q_timer);
+    else if (!q_head && ev_is_active(&q_timer))
+        ev_timer_stop(D.loop, &q_timer);
+}
+
+static void on_q_timer(struct ev_loop *loop, ev_timer *w, int revents) { q_pump(); }
+
+static void on_frame(void *arg)
+{
+    out_t *o = arg;
+    if (!M) { /* Page mode ended meanwhile */
+        free(o);
+        return;
+    }
+    o->next = NULL;
+    if (q_tail)
+        q_tail->next = o;
+    else
+        q_head = o;
+    q_tail = o;
+    q_pump();
 }
 
 static void on_touch(void *arg)
@@ -94,9 +154,9 @@ static int read_all(mirror_t *m, uint8_t *d, size_t n)
 static void *reader(void *arg)
 {
     mirror_t *m = arg;
-    uint8_t *body = NULL, *msg = malloc(CHUNK + 2);
+    uint8_t *body = NULL;
     size_t cap = 0;
-    while (msg && !m->stop) {
+    while (!m->stop) {
         uint8_t h[5];
         if (read_all(m, h, 5) < 0)
             break;
@@ -112,7 +172,7 @@ static void *reader(void *arg)
         }
         if (read_all(m, body, n) < 0)
             break;
-        LOGD("mirror: frame '%c', %zu bytes (channel queue %zu)", h[0], n, (size_t)m->buffered);
+        LOGD("mirror: frame '%c', %zu bytes (queued %zu)", h[0], n, (size_t)__atomic_load_n(&m->queued, __ATOMIC_RELAXED));
         if (h[0] == 'T') {
             uint8_t *t = n && n < 64 ? malloc(n + 1) : NULL;
             if (t) {
@@ -122,32 +182,22 @@ static void *reader(void *arg)
             }
             continue;
         }
-        if (h[0] != 'J' && h[0] != 'R')
+        if ((h[0] != 'J' && h[0] != 'R') || !n)
             continue;
-        size_t off = 0;
-        do {
-            size_t c = n - off < CHUNK ? n - off : CHUNK;
-            msg[0] = h[0];
-            msg[1] = off + c < n;
-            memcpy(msg + 2, body + off, c);
-            rd_rtc_dc_send("dom", 1, msg, c + 2);
-            off += c;
-            m->buffered += c + 2;
-            if (!m->asked) {
-                m->asked = 1;
-                rd_rtc_call(on_buffered, m);
-            }
-            while (m->buffered > BEHIND && !m->stop) { /* a slow link: the page waits here, not in the loop's memory */
-                usleep(5000);
-                if (!m->asked) {
-                    m->asked = 1;
-                    rd_rtc_call(on_buffered, m);
-                }
-            }
-        } while (off < n && !m->stop);
+        out_t *o = malloc(sizeof *o + n);
+        if (!o)
+            break;
+        o->n = n;
+        o->off = 0;
+        o->kind = h[0];
+        memcpy(o->d, body, n);
+        __atomic_add_fetch(&m->queued, n, __ATOMIC_RELAXED);
+        rd_rtc_call(on_frame, o);
+        /* a slow link: the page waits here (and in rd-mirror), not in the agent's memory */
+        while (__atomic_load_n(&m->queued, __ATOMIC_RELAXED) > BEHIND && !m->stop)
+            usleep(5000);
     }
     free(body);
-    free(msg);
     if (!m->stop)
         rd_rtc_call(on_lost, m);
     return NULL;
@@ -177,6 +227,10 @@ int mirror_on(void)
         return -1;
     }
     m->fd = fd;
+    if (!q_timer_inited) {
+        ev_timer_init(&q_timer, on_q_timer, 0.005, 0.005);
+        q_timer_inited = 1;
+    }
     rd_rtc_dc_open("dom");
     if (rd_thread_start(&m->th, reader, m) < 0) {
         close(fd);
@@ -196,6 +250,7 @@ void mirror_off(void)
     if (!m)
         return;
     M = NULL;
+    q_clear();
     m->stop = 1;
     shutdown(m->fd, SHUT_RDWR); /* wakes the reader */
     pthread_join(m->th, NULL);
