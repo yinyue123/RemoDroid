@@ -1,5 +1,6 @@
-# Builds the remote browser's hqnode image (browser/hqnode/Dockerfile) for the OECT, natively on an
-# arm64 runner: MPP, the agent and rd-shell compile in minutes here instead of an hour under qemu.
+# Builds the remote browser's hqnode image (browser/hqnode/Dockerfile), each architecture natively on a
+# runner of its own: arm64 for the OECT (MPP, the agent and rd-shell compile in minutes here instead of an
+# hour under qemu), amd64 for the container on a PC.
 #
 # The image holds CloakBrowser, whose licence allows no redistribution, and this repository is public:
 # its artifacts can be downloaded by anyone. So the image leaves the runner only encrypted, with the
@@ -14,16 +15,24 @@ permissions:
   contents: read
 
 jobs:
-  arm64:
-    runs-on: ubuntu-24.04-arm
+  image:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - name: Build
         run: |
-          docker buildx build --platform linux/arm64 --build-arg CLOAKBROWSER=free \
-            -f browser/hqnode/Dockerfile -t localhost/remote-browser-hqnode:arm64 \
+          docker buildx build --platform linux/${{ matrix.arch }} --build-arg CLOAKBROWSER=free \
+            -f browser/hqnode/Dockerfile -t localhost/remote-browser-hqnode:${{ matrix.arch }} \
             --output type=oci,dest=image.tar .
           ls -la image.tar
       - name: Encrypt
@@ -32,14 +41,14 @@ jobs:
         run: |
           [ -n "$KEY" ] || { echo "BROWSER_IMAGE_KEY is not set: refusing to upload the image unencrypted" >&2; exit 1; }
           openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:KEY \
-            -in image.tar -out remote-browser-arm64.tar.enc
+            -in image.tar -out remote-browser-${{ matrix.arch }}.tar.enc
           rm image.tar
-          sha256sum remote-browser-arm64.tar.enc | tee remote-browser-arm64.tar.enc.sha256
+          sha256sum remote-browser-${{ matrix.arch }}.tar.enc | tee remote-browser-${{ matrix.arch }}.tar.enc.sha256
       - uses: actions/upload-artifact@v5
         with:
-          name: remote-browser-arm64
+          name: remote-browser-${{ matrix.arch }}
           path: |
-            remote-browser-arm64.tar.enc
-            remote-browser-arm64.tar.enc.sha256
+            remote-browser-${{ matrix.arch }}.tar.enc
+            remote-browser-${{ matrix.arch }}.tar.enc.sha256
           retention-days: 3
           compression-level: 0
