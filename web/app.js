@@ -389,7 +389,21 @@ function preferCodecs(pc, sdp) {
     tr.setCodecPreferences(pick);
   } catch (e) { logProto('·', 'note', 'setCodecPreferences: ' + e.message); }
 }
+/* Page mode (browser/dom-mirror.md): the remote browser's page as elements instead of video */
+const pageKey = () => 'remodroid-page:' + ((st.device && st.device.id) || '');
+const pagePref = () => { try { return localStorage.getItem(pageKey()); } catch (e) { return null; } };
+PageMode.init({
+  dom: () => st.ch.dom,
+  ctrl: (t, d) => sendCtrl(t, d).catch(() => {}),
+  key: hid => { sendKey(true, hid, 0); sendKey(false, hid, 0); },
+  toast: m => toast(m),
+  changed: on => {
+    try { if (PageMode.wanted === on) localStorage.setItem(pageKey(), on ? '1' : '0'); } catch (e) {}
+    syncMenuStates();
+  }
+});
 function closePeer() {
+  PageMode.end();
   if (st.pc) { try { st.pc.close(); } catch (_) {} }
   st.pc = null; st.ch = {}; st.connected = false; st.ready = null; st.ime = null;
   renderIme();
@@ -452,6 +466,7 @@ function sendCtrl(t, d, wait) {
 }
 function onChannel(label, data) {
   if (label === 'file') return onFileChunk(new Uint8Array(data));
+  if (label === 'dom') return PageMode.data(data); /* the remote browser's Page mode (pagemode.js) */
   if (label !== 'ctrl') return;
   let m; try { m = JSON.parse(data); } catch (_) { return; }
   if (m.t !== 'stats' && m.t !== 'logcat.lines') logProto('←', 'ctrl', data.slice(0, 400));
@@ -469,10 +484,14 @@ function onChannel(label, data) {
     if (tp.on) { tpPointer(); queueMove(tp.cx, tp.cy, 0); } /* the computer's pointer to where this one is */
     if (S.mode !== 'auto' || quality().preset !== '720p') sendCtrl('quality.set', quality());
     if (!S.sound && d.caps && d.caps.audio) sendCtrl('audio.set', { on: false }); /* keep the phone's speaker */
+    /* the remote browser's Page mode: offered when the agent has it, and on again if this viewer left it on (D7) */
+    PageMode.offered(!!(d.caps && d.caps.mirror));
+    if (PageMode.can && pagePref() === '1') PageMode.set(true);
     syncMenuStates();
     syncClip();
     break;
   case 'audio.state': st.audioOn = d.on; syncMenuStates(); break;
+  case 'mirror.state': PageMode.state(d); break;
   case 'quality.state': st.quality = d; break;
   case 'screen.changed': st.screen = d; break;
   case 'stats': st.phoneStats = d; st.panel = d.panel || st.panel; break;
@@ -1091,6 +1110,9 @@ function syncMenuStates() {
   for (const a of ['back', 'home', 'recents']) menu.querySelector(`[data-act="${a}"]`).hidden = dk;
   $('#menuSound').hidden = dk && !(st.ready && st.ready.caps && st.ready.caps.audio);
   $('#menuMonitor').hidden = !dk || screens.length < 2;
+  $('#menuPage').hidden = !PageMode.can;
+  $('#menuPage').classList.toggle('on', PageMode.on);
+  $('#menuPage').querySelector('span').textContent = PageMode.on ? 'Video mode' : 'Page mode';
   const sb = $('#menuScreen');
   sb.classList.toggle('on', st.panel === 'off');
   sb.querySelector('span').textContent = dk ? (st.panel === 'off' ? 'Display on' : 'Display off') : st.panel === 'off' ? 'Screen on' : 'Screen off';
@@ -1197,6 +1219,7 @@ menu.addEventListener('click', e => {
     else cmd('phone.sleep', {}, `${N} locked`).then(ok => { if (ok) { st.locked = true; syncMenuStates(); } });
   }
   else if (a === 'reconnect') { closeMenu(); reconnectStream(); }
+  else if (a === 'page') { closeMenu(); PageMode.set(!PageMode.on); }
   else if (a === 'fullscreen') { closeMenu(); toggleFullscreen(); }
   else if (a === 'devices') { closeMenu(); renderDevices(); openSheet('devices'); }
   else if (a === 'exit') { closeMenu(); exitDevice(); }

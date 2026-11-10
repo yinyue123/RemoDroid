@@ -202,6 +202,7 @@ void session_ended(const char *reason)
 {
     if (!S.active)
         return;
+    mirror_off();
     video_stop();
     audio_stop();
     input_release_all();
@@ -218,6 +219,28 @@ void session_ended(const char *reason)
 }
 
 void session_keyframe(void) { video_keyframe(); }
+
+/* Page mode on: rd-mirror sends the page on "dom" and the encoder rests (the sound goes on). Off, or
+ * rd-mirror lost (why): the picture again, from a key frame. */
+void session_mirror(int on, const char *why)
+{
+    if (!S.active)
+        return;
+    int was = mirror_is_on();
+    if (on && !was && mirror_on() == 0)
+        video_stop();
+    else if (!on && was) {
+        mirror_off();
+        start_video();
+    }
+    if (was != mirror_is_on() || why || on != mirror_is_on()) {
+        cJSON *m = msg_new("mirror.state", 0, NULL);
+        cJSON_AddBoolToObject(msg_d(m), "on", mirror_is_on());
+        if (why || (on && !mirror_is_on()))
+            cJSON_AddStringToObject(msg_d(m), "why", why ? why : "Page mode isn't running on the browser");
+        session_send(m);
+    }
+}
 
 void session_bitrate(int kbps)
 {
@@ -256,6 +279,7 @@ void session_channel_open(const char *label)
     cJSON_AddBoolToObject(caps, "keyboard", 1);
     cJSON_AddBoolToObject(caps, "mouse", 1);
     cJSON_AddNumberToObject(caps, "touch", dsk_touch_points()); /* > 0: send every finger as 0x01 */
+    cJSON_AddBoolToObject(caps, "mirror", mirror_available());  /* the remote browser's Page mode (mirror.set) */
     char why[160] = "";
     cJSON_AddBoolToObject(caps, "gamepad", dsk_pad_supported(why, sizeof why));
     if (*why)
@@ -488,6 +512,11 @@ static void control(cJSON *m)
             error(m, "unsupported", "cannot change the display power");
         else
             reply(m, NULL);
+    } else if (!strcmp(t, "mirror.set")) { /* Page mode: the page's elements on "dom", and no picture meanwhile */
+        session_mirror(msg_bool(d, "on", 0), NULL);
+        cJSON *r = cJSON_CreateObject();
+        cJSON_AddBoolToObject(r, "on", mirror_is_on());
+        reply(m, r);
     } else if (!strcmp(t, "cursor.show")) {
         dsk_capture_pointer(msg_bool(d, "show", 1));
         reply(m, NULL);
@@ -552,6 +581,8 @@ void session_message(const char *label, int binary, const uint8_t *d, size_t n)
         return;
     if (!strcmp(label, "input")) {
         input_handle(d, n);
+    } else if (!strcmp(label, "dom")) {
+        mirror_message(d, n);
     } else if (!strcmp(label, "file")) {
         files_chunk(d, n);
     } else if (!strcmp(label, "ctrl")) {

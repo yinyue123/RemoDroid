@@ -21,8 +21,13 @@
  * Back, forward and reload are keys through XTest (Alt+Left, Alt+Right, F5), as a person would press them.
  * The tabs go through DevTools on a pipe (--remote-debugging-pipe: no port a page could scan), and only
  * through browser-level calls: the Target calls to list, switch to, open and close a tab, Storage.clearCookies
- * and Browser.close. Nothing attaches to a page and no Runtime call is made, so a page has nothing to
- * notice. The history is rd-shell's own, from the tabs' addresses as DevTools reports them.
+ * and Browser.close. rd-shell itself attaches to no page and makes no Runtime call, so a page has nothing
+ * to notice. The history is rd-shell's own, from the tabs' addresses as DevTools reports them.
+ *
+ * Page mode (dom-mirror.md): rd-mirror, the one client of rd-shell's socket, sends the page's elements to
+ * the viewer instead of a picture. The DevTools pipe has one end, so its messages pass through here unread;
+ * it attaches to the tab in front, while a viewer is in Page mode, with no Runtime.enable. The same socket
+ * carries what the bar shows and takes the bar's commands, for the viewer's own bar.
  *
  *   rd-shell [-c /data/browser.conf]          DISPLAY from the environment
  */
@@ -48,6 +53,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -304,6 +310,7 @@ static double now_s(void)
     return t.tv_sec + t.tv_nsec / 1e9;
 }
 
+static int link_dirty; /* what the bar shows may have changed: rd-mirror is told (Page mode) */
 static void draw_bar(void);
 static void draw_menu(void);
 static void menu_layout(void);
@@ -627,11 +634,12 @@ static pid_t spawn(char **argv, int to, int from)
 /* ---------------- the tabs: DevTools' Target calls over the pipe ---------------- */
 
 #define MAX_TABS 16
+#define CDP_MAX ((size_t)64 << 20) /* the longest message taken from the browser (a page's picture, in base64) */
 
 static struct {
     int wfd, rfd;       /* to the browser, from it; -1 when it isn't running */
-    char buf[1 << 16];  /* what came so far: messages end with a NUL */
-    size_t n;
+    char *buf;          /* what came so far: messages end with a NUL. rd-mirror's can be megabytes */
+    size_t n, cap, seen; /* seen: how far it was searched for the NUL */
     int id;             /* the last request's */
     int create_id;      /* the createTarget whose answer closes `replace` (one tab) */
     int list_id;        /* the getTargets asked for when the menu opens: the titles as they are now */
@@ -646,6 +654,21 @@ static struct {
     double save_at;
 } T = { .wfd = -1, .rfd = -1, .ntabs = -1 };
 
+/* one message to the browser, its NUL included in len */
+static int pipe_write(const char *s, size_t len)
+{
+    size_t off = 0;
+    while (T.wfd >= 0 && off < len) {
+        ssize_t w = write(T.wfd, s + off, len - off);
+        if (w < 0 && errno == EINTR)
+            continue;
+        if (w <= 0)
+            break;
+        off += (size_t)w;
+    }
+    return len && off == len ? 0 : -1;
+}
+
 static int cdp_send(const char *method, cJSON *params)
 {
     if (T.wfd < 0) {
@@ -659,18 +682,14 @@ static int cdp_send(const char *method, cJSON *params)
         cJSON_AddItemToObject(m, "params", params);
     char *s = cJSON_PrintUnformatted(m);
     cJSON_Delete(m);
-    size_t len = s ? strlen(s) + 1 : 0, off = 0; /* the NUL ends the message */
-    while (off < len) {
-        ssize_t w = write(T.wfd, s + off, len - off);
-        if (w < 0 && errno == EINTR)
-            continue;
-        if (w <= 0)
-            break;
-        off += (size_t)w;
-    }
+    int r = s ? pipe_write(s, strlen(s) + 1) : -1; /* the NUL ends the message */
     free(s);
-    return len && off == len ? T.id : -1;
+    return r ? -1 : T.id;
 }
+
+static int link_wants(const char *m, size_t len);
+static void link_out(const char *d, size_t n);
+static void link_browser_gone(void);
 
 static cJSON *target(const char *key, const char *val)
 {
@@ -843,7 +862,8 @@ static void cdp_close(void)
     if (T.rfd >= 0)
         close(T.rfd);
     T.wfd = T.rfd = -1;
-    T.n = 0;
+    T.n = T.seen = 0;
+    link_browser_gone();
     T.ntabs = -1;
     T.cur[0] = T.replace[0] = 0;
     T.create_id = T.list_id = 0;
@@ -853,7 +873,18 @@ static void cdp_close(void)
 static void cdp_read(void)
 {
     for (;;) {
-        ssize_t r = read(T.rfd, T.buf + T.n, sizeof T.buf - 1 - T.n);
+        if (T.cap - T.n < (1 << 16)) {
+            size_t cap = T.cap ? T.cap * 2 : 1 << 17;
+            char *b = cap <= CDP_MAX ? realloc(T.buf, cap) : NULL;
+            if (!b) { /* no message is this long: the pipe is out of step, and only a new browser puts it right */
+                LOG("devtools: a message over %zu bytes", T.cap);
+                cdp_close();
+                return;
+            }
+            T.buf = b;
+            T.cap = cap;
+        }
+        ssize_t r = read(T.rfd, T.buf + T.n, T.cap - T.n);
         if (r < 0 && errno == EINTR)
             continue;
         if (r < 0 && errno == EAGAIN)
@@ -863,18 +894,20 @@ static void cdp_read(void)
             return;
         }
         T.n += (size_t)r;
-        T.buf[T.n] = 0;
         char *p = T.buf, *end;
-        while ((end = memchr(p, 0, (size_t)(T.buf + T.n - p))) && end < T.buf + T.n) {
-            cdp_message(p);
+        while ((end = memchr(p + T.seen, 0, (size_t)(T.buf + T.n - p) - T.seen))) {
+            if (link_wants(p, (size_t)(end - p)))
+                link_out(p, (size_t)(end - p) + 1); /* rd-mirror's: not read here */
+            else
+                cdp_message(p);
             p = end + 1;
+            T.seen = 0;
+            if (T.rfd < 0) /* a message that closed the pipe */
+                return;
         }
         T.n -= (size_t)(p - T.buf);
         memmove(T.buf, p, T.n);
-        if (T.n >= sizeof T.buf - 1) { /* one message too big for the buffer: none of ours is */
-            LOG("devtools: message over %zu bytes, dropped", sizeof T.buf);
-            T.n = 0;
-        }
+        T.seen = T.n;
     }
 }
 
@@ -1371,6 +1404,7 @@ static void page_title(char *out, size_t cap)
 
 static void draw_bar(void)
 {
+    link_dirty = 1;
     if (!bar)
         return;
     GC gc = DefaultGC(dpy, DefaultScreen(dpy));
@@ -2199,6 +2233,7 @@ static void publish_clients(void)
     for (int i = 0; i < nclients; i++)
         l[i] = clients[i].w;
     XChangeProperty(dpy, root, A[A_NET_CLIENTS], XA_WINDOW, 32, PropModeReplace, (unsigned char *)l, nclients);
+    link_dirty = 1;
 }
 
 static void read_title(void)
@@ -2374,6 +2409,44 @@ static void edit_begin(void)
     draw_bar();
 }
 
+/* What was typed where an address goes: an address is opened, anything else is searched for. */
+static void open_typed(const char *e)
+{
+    char url[1400];
+    while (*e == ' ')
+        e++;
+    if (!*e)
+        return;
+    int has_scheme = strstr(e, "://") || !strncmp(e, "about:", 6) || !strncmp(e, "data:", 5);
+    int looks_like_host = !strchr(e, ' ') && (strchr(e, '.') || !strncmp(e, "localhost", 9));
+    /* an address of its own (localhost, 192.168.…) is plain http; a name gets https */
+    int local = !strncmp(e, "localhost", 9) || (*e >= '0' && *e <= '9' && strspn(e, "0123456789.:") >= 7);
+    if (has_scheme)
+        snprintf(url, sizeof url, "%s", e);
+    else if (looks_like_host)
+        snprintf(url, sizeof url, "%s://%s", local ? "http" : "https", e);
+    else { /* a search: the words go into the template, URL-encoded */
+        char q[1200];
+        size_t n = 0;
+        for (const unsigned char *c = (const unsigned char *)e; *c && n + 4 < sizeof q; c++)
+            if ((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || strchr("-_.~", *c))
+                q[n++] = (char)*c;
+            else if (*c == ' ')
+                q[n++] = '+';
+            else
+                n += (size_t)snprintf(q + n, sizeof q - n, "%%%02X", *c);
+        q[n] = 0;
+        const char *t = conf("search", "https://duckduckgo.com/?q=%s");
+        const char *pct = strstr(t, "%s");
+        if (pct)
+            snprintf(url, sizeof url, "%.*s%s%s", (int)(pct - t), t, q, pct + 2);
+        else
+            snprintf(url, sizeof url, "%s%s", t, q);
+    }
+    LOG("open %s", url);
+    browser_open(url, 1);
+}
+
 static void edit_end(int go)
 {
     if (!editing)
@@ -2381,40 +2454,8 @@ static void edit_end(int go)
     editing = 0;
     if (xic)
         XUnsetICFocus(xic);
-    if (go && *edit) {
-        char url[1400];
-        const char *e = edit;
-        while (*e == ' ')
-            e++;
-        int has_scheme = strstr(e, "://") || !strncmp(e, "about:", 6) || !strncmp(e, "data:", 5);
-        int looks_like_host = !strchr(e, ' ') && (strchr(e, '.') || !strncmp(e, "localhost", 9));
-        /* an address of its own (localhost, 192.168.…) is plain http; a name gets https */
-        int local = !strncmp(e, "localhost", 9) || (*e >= '0' && *e <= '9' && strspn(e, "0123456789.:") >= 7);
-        if (has_scheme)
-            snprintf(url, sizeof url, "%s", e);
-        else if (looks_like_host)
-            snprintf(url, sizeof url, "%s://%s", local ? "http" : "https", e);
-        else { /* a search: the words go into the template, URL-encoded */
-            char q[1200];
-            size_t n = 0;
-            for (const unsigned char *c = (const unsigned char *)e; *c && n + 4 < sizeof q; c++)
-                if ((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || strchr("-_.~", *c))
-                    q[n++] = (char)*c;
-                else if (*c == ' ')
-                    q[n++] = '+';
-                else
-                    n += (size_t)snprintf(q + n, sizeof q - n, "%%%02X", *c);
-            q[n] = 0;
-            const char *t = conf("search", "https://duckduckgo.com/?q=%s");
-            const char *pct = strstr(t, "%s");
-            if (pct)
-                snprintf(url, sizeof url, "%.*s%s%s", (int)(pct - t), t, q, pct + 2);
-            else
-                snprintf(url, sizeof url, "%s%s", t, q);
-        }
-        LOG("open %s", url);
-        browser_open(url, 1);
-    }
+    if (go)
+        open_typed(edit);
     focus(active);
 }
 
@@ -2668,6 +2709,325 @@ static void bar_tap(int x)
         edit_begin();
 }
 
+/* ---------------- Page mode: rd-mirror's socket (dom-mirror.md §9, §11) ---------------- */
+
+/* One client, rd-mirror. Messages are JSON ending with a NUL, as on the DevTools pipe.
+ *   from it  {"rd":"<command>", …}   the bar's commands, done by the functions the bar's own taps call
+ *            anything else           a DevTools message of its own, passed to the browser as it is. Its ids
+ *                                    start at LINK_ID, so its answers can be told from ours
+ *   to it    its answers and every message of its DevTools sessions, unread
+ *            {"rd":"bar", …}         what the bar shows, whenever that changes
+ *            {"rd":"list", …}        the history or the favourites, when asked
+ *            {"rd":"gone"}           the browser closed: its sessions are no more */
+#define LINK_ID 1000000000
+#define LINK_MAX ((size_t)96 << 20)
+
+static struct {
+    int lfd, fd;         /* listening; the client, -1 without one */
+    char *in, *out, *last;
+    size_t in_n, in_cap, in_seen, out_n, out_cap;
+    char sess[8][64];    /* its DevTools sessions: detached when it goes without doing so */
+    int nsess;
+} LK = { .lfd = -1, .fd = -1 };
+
+static void link_drop(void)
+{
+    if (LK.fd < 0)
+        return;
+    close(LK.fd);
+    LK.fd = -1;
+    LK.in_n = LK.in_seen = LK.out_n = 0;
+    free(LK.last);
+    LK.last = NULL;
+    for (int i = 0; i < LK.nsess; i++)
+        cdp_send("Target.detachFromTarget", target("sessionId", LK.sess[i]));
+    LK.nsess = 0;
+    LOG("page mode: rd-mirror went");
+}
+
+static void link_flush(void)
+{
+    size_t off = 0;
+    while (LK.fd >= 0 && off < LK.out_n) {
+        ssize_t w = send(LK.fd, LK.out + off, LK.out_n - off, MSG_NOSIGNAL);
+        if (w < 0 && errno == EINTR)
+            continue;
+        if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            break;
+        if (w <= 0) {
+            link_drop();
+            return;
+        }
+        off += (size_t)w;
+    }
+    LK.out_n -= off;
+    memmove(LK.out, LK.out + off, LK.out_n);
+}
+
+static void link_out(const char *d, size_t n)
+{
+    if (LK.fd < 0)
+        return;
+    if (LK.out_n + n > LK.out_cap) {
+        size_t cap = LK.out_cap ? LK.out_cap : 1 << 16;
+        while (cap < LK.out_n + n)
+            cap *= 2;
+        char *b = cap <= LINK_MAX ? realloc(LK.out, cap) : NULL;
+        if (!b) { /* it stopped reading */
+            link_drop();
+            return;
+        }
+        LK.out = b;
+        LK.out_cap = cap;
+    }
+    memcpy(LK.out + LK.out_n, d, n);
+    LK.out_n += n;
+    link_flush();
+}
+
+static void link_json(cJSON *m)
+{
+    char *s = cJSON_PrintUnformatted(m);
+    cJSON_Delete(m);
+    if (s)
+        link_out(s, strlen(s) + 1);
+    free(s);
+}
+
+/* Is this message from the browser rd-mirror's? An answer to one of its ids, or anything of a DevTools
+ * session (rd-shell has none): the browser writes those as {…,"sessionId":"…"}, the id last. Megabytes are
+ * told apart by their first and last bytes, without parsing them. */
+static int link_wants(const char *m, size_t len)
+{
+    if (!strncmp(m, "{\"id\":", 6) && strtol(m + 6, NULL, 10) >= LINK_ID)
+        return 1;
+    if (len < 24 || m[len - 1] != '}' || m[len - 2] != '"')
+        return 0;
+    const char *k = NULL;
+    for (const char *p = m + (len > 120 ? len - 120 : 0); (p = strstr(p, ",\"sessionId\":\"")); p += 14)
+        k = p;
+    if (!k || strchr(k + 14, '"') != m + len - 2)
+        return 0;
+    size_t n = (size_t)(m + len - 2 - (k + 14));
+    if (LK.fd >= 0 && n && n < sizeof LK.sess[0]) {
+        int i = 0;
+        while (i < LK.nsess && (strlen(LK.sess[i]) != n || memcmp(LK.sess[i], k + 14, n)))
+            i++;
+        if (i == LK.nsess) {
+            if (LK.nsess == 8)
+                memmove(LK.sess[0], LK.sess[1], sizeof LK.sess[0] * (size_t)--LK.nsess);
+            memcpy(LK.sess[LK.nsess], k + 14, n);
+            LK.sess[LK.nsess++][n] = 0;
+        }
+    }
+    return 1;
+}
+
+static void link_browser_gone(void)
+{
+    LK.nsess = 0;
+    link_dirty = 1;
+    if (LK.fd >= 0)
+        link_out("{\"rd\":\"gone\"}", 14);
+}
+
+/* What the bar shows, and where the page is on the screen (rd-mirror turns a place in the page into a
+ * place on the screen for the touch). Sent when it differs from what was sent last. */
+static void link_state(void)
+{
+    link_dirty = 0;
+    if (LK.fd < 0)
+        return;
+    char ttl[512];
+    page_title(ttl, sizeof ttl);
+    const char *url = cur_url();
+    cJSON *m = cJSON_CreateObject(), *a;
+    cJSON_AddStringToObject(m, "rd", "bar");
+    cJSON_AddBoolToObject(m, "running", BR.pid > 0 && T.wfd >= 0);
+    cJSON_AddStringToObject(m, "front", T.ntabs > 0 ? T.cur : "");
+    cJSON_AddStringToObject(m, "url", url ? url : "");
+    cJSON_AddStringToObject(m, "title", ttl);
+    cJSON_AddStringToObject(m, "note", note);
+    cJSON_AddBoolToObject(m, "fav", fav_find(url) >= 0);
+    cJSON_AddStringToObject(m, "user", user());
+    a = cJSON_AddArrayToObject(m, "users");
+    for (int i = 0; i < U.n; i++)
+        cJSON_AddItemToArray(a, cJSON_CreateString(U.name[i]));
+    a = cJSON_AddArrayToObject(m, "tabs");
+    for (int i = 0; i < T.ntabs; i++) {
+        cJSON *t = cJSON_CreateObject();
+        cJSON_AddStringToObject(t, "id", T.tab[i].id);
+        cJSON_AddStringToObject(t, "title", T.tab[i].title);
+        cJSON_AddStringToObject(t, "url", T.tab[i].url);
+        cJSON_AddItemToArray(a, t);
+    }
+    cJSON_AddNumberToObject(m, "proxy", !*uconf("proxy", "") ? -2 : PX.ok); /* 1 ok, 0 down, -1 not known yet, -2 none set */
+    cJSON_AddNumberToObject(m, "windows", nclients); /* over one: a window of the browser's own is up (a prompt, a list) */
+    int page[4] = { 0, B, W, H - B };
+    cJSON_AddItemToObject(m, "screen", cJSON_CreateIntArray((int[]){ W, H }, 2));
+    cJSON_AddItemToObject(m, "page", cJSON_CreateIntArray(page, 4));
+    char *s = cJSON_PrintUnformatted(m);
+    cJSON_Delete(m);
+    if (s && (!LK.last || strcmp(s, LK.last))) {
+        link_out(s, strlen(s) + 1);
+        free(LK.last);
+        LK.last = s;
+    } else
+        free(s);
+}
+
+static void link_list(const char *kind)
+{
+    cJSON *m = cJSON_CreateObject(), *a;
+    cJSON_AddStringToObject(m, "rd", "list");
+    cJSON_AddStringToObject(m, "kind", kind);
+    a = cJSON_AddArrayToObject(m, "items");
+    int hist = !strcmp(kind, "history");
+    for (int i = hist ? nhist - 1 : 0, n = 0; hist ? i >= 0 && n < 300 : i < nfavs; hist ? i-- : i++, n++) {
+        cJSON *t = cJSON_CreateObject();
+        cJSON_AddStringToObject(t, "url", hist ? HI[i].url : FV[i].url);
+        cJSON_AddStringToObject(t, "title", hist ? HI[i].title : FV[i].title);
+        if (hist)
+            cJSON_AddNumberToObject(t, "t", (double)HI[i].t);
+        cJSON_AddItemToArray(a, t);
+    }
+    link_json(m);
+}
+
+static void link_command(const char *msg)
+{
+    cJSON *m = cJSON_Parse(msg);
+    const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(m, "rd"));
+    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(m, "text"));
+    const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(m, "id"));
+    const char *url = cJSON_GetStringValue(cJSON_GetObjectItem(m, "url"));
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(m, "name"));
+    KeySym alt = XK_Alt_L;
+    if (!c) {
+    } else if (!strcmp(c, "state")) { /* all of it again */
+        free(LK.last);
+        LK.last = NULL;
+    } else if (!strcmp(c, "go") && text) {
+        open_typed(text);
+    } else if (!strcmp(c, "back")) {
+        send_keys(&alt, 1, XK_Left);
+    } else if (!strcmp(c, "forward")) {
+        send_keys(&alt, 1, XK_Right);
+    } else if (!strcmp(c, "reload")) {
+        send_keys(NULL, 0, XK_F5);
+    } else if (!strcmp(c, "home")) {
+        browser_open(uconf("home", "about:blank"), 1);
+    } else if (!strcmp(c, "tab.new")) {
+        browser_open(uconf("home", "about:blank"), 0);
+    } else if (!strcmp(c, "tab.select") && id) {
+        tab_select(tab_find(id));
+    } else if (!strcmp(c, "tab.close")) {
+        if (id && T.ntabs > 1 && tab_find(id) >= 0) /* never the last one: that would end the browser */
+            cdp_send("Target.closeTarget", target("targetId", id));
+        else if (!id)
+            tab_close_current();
+    } else if (!strcmp(c, "user") && name) {
+        for (int i = 0; i < U.n; i++)
+            if (!strcmp(U.name[i], name))
+                user_switch(i);
+    } else if (!strcmp(c, "fav.toggle")) {
+        fav_toggle();
+    } else if (!strcmp(c, "fav.delete") && url) {
+        if (fav_find(url) >= 0)
+            fav_delete(fav_find(url));
+    } else if (!strcmp(c, "list")) {
+        link_list(cJSON_GetStringValue(cJSON_GetObjectItem(m, "kind")) ? cJSON_GetStringValue(cJSON_GetObjectItem(m, "kind")) : "");
+    } else if (!strcmp(c, "clear.cookies")) {
+        clear_cookies();
+    } else if (!strcmp(c, "clear.all")) {
+        clear_all();
+    } else if (!strcmp(c, "identity.new")) {
+        new_identity();
+    } else if (!strcmp(c, "restart") || !strcmp(c, "start")) {
+        if (!strcmp(c, "restart") || BR.pid <= 0) {
+            browser_stop();
+            BR.fails = 0;
+            browser_start();
+        }
+    } else if (!strcmp(c, "stop")) {
+        browser_stop();
+        title[0] = 0;
+        draw_bar();
+    }
+    cJSON_Delete(m);
+    link_dirty = 1;
+}
+
+static void link_read(void)
+{
+    for (;;) {
+        if (LK.in_cap - LK.in_n < (1 << 12)) {
+            size_t cap = LK.in_cap ? LK.in_cap * 2 : 1 << 14;
+            char *b = cap <= ((size_t)4 << 20) ? realloc(LK.in, cap) : NULL;
+            if (!b) {
+                link_drop();
+                return;
+            }
+            LK.in = b;
+            LK.in_cap = cap;
+        }
+        ssize_t r = recv(LK.fd, LK.in + LK.in_n, LK.in_cap - LK.in_n, 0);
+        if (r < 0 && errno == EINTR)
+            continue;
+        if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return;
+        if (r <= 0) {
+            link_drop();
+            return;
+        }
+        LK.in_n += (size_t)r;
+        char *p = LK.in, *end;
+        while ((end = memchr(p + LK.in_seen, 0, (size_t)(LK.in + LK.in_n - p) - LK.in_seen))) {
+            if (!strncmp(p, "{\"rd\":", 6))
+                link_command(p);
+            else
+                pipe_write(p, (size_t)(end - p) + 1);
+            p = end + 1;
+            LK.in_seen = 0;
+            if (LK.fd < 0)
+                return;
+        }
+        LK.in_n -= (size_t)(p - LK.in);
+        memmove(LK.in, p, LK.in_n);
+        LK.in_seen = LK.in_n;
+    }
+}
+
+static void link_accept(void)
+{
+    int fd = accept4(LK.lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    if (fd < 0)
+        return;
+    link_drop(); /* a new rd-mirror takes the old one's place */
+    LK.fd = fd;
+    link_dirty = 1;
+    LOG("page mode: rd-mirror is here");
+}
+
+/* mirror_socket in browser.conf; "off" for none. Its directory is rd-shell's own (the unit's
+ * RuntimeDirectory), so only this user reaches it. */
+static void link_listen(void)
+{
+    const char *path = conf("mirror_socket", "/run/rd-shell/sock");
+    struct sockaddr_un a = { .sun_family = AF_UNIX };
+    if (!strcmp(path, "off") || strlen(path) >= sizeof a.sun_path)
+        return;
+    snprintf(a.sun_path, sizeof a.sun_path, "%s", path);
+    unlink(path);
+    LK.lfd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (LK.lfd < 0 || bind(LK.lfd, (struct sockaddr *)&a, sizeof a) || chmod(path, 0600) || listen(LK.lfd, 2)) {
+        LOG("page mode: %s: %s (no Page mode)", path, strerror(errno));
+        if (LK.lfd >= 0)
+            close(LK.lfd);
+        LK.lfd = -1;
+    }
+}
+
 /* ---------------- main ---------------- */
 
 static void on_signal(int s)
@@ -2783,6 +3143,7 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
+    link_listen();
 
     users_load();
     user_open();
@@ -2965,13 +3326,25 @@ int main(int argc, char **argv)
         if (PX.fd >= 0 && PX.deadline < next)
             next = PX.deadline;
 
-        struct pollfd pf[4] = { { ConnectionNumber(dpy), POLLIN, 0 }, { sigpipe[0], POLLIN, 0 }, { T.rfd, POLLIN, 0 },
-                                { PX.fd, POLLOUT, 0 } };
+        if (link_dirty)
+            link_state();
+        /* poll() skips a negative fd, so every slot is always there */
+        struct pollfd pf[6] = { { ConnectionNumber(dpy), POLLIN, 0 }, { sigpipe[0], POLLIN, 0 }, { T.rfd, POLLIN, 0 },
+                                { PX.fd, POLLOUT, 0 }, { LK.lfd, POLLIN, 0 },
+                                { LK.fd, (short)(POLLIN | (LK.out_n ? POLLOUT : 0)), 0 } };
         int ms = (int)((next - now_s()) * 1000) + 1;
-        if (poll(pf, PX.fd >= 0 ? 4 : 3, ms < 0 ? 0 : ms) < 0 && errno != EINTR)
+        if (poll(pf, 6, ms < 0 ? 0 : ms) < 0 && errno != EINTR)
             break;
         if (T.rfd >= 0 && pf[2].revents)
             cdp_read();
+        if (LK.lfd >= 0 && pf[4].revents)
+            link_accept();
+        else if (LK.fd >= 0 && pf[5].revents) {
+            if (pf[5].revents & POLLOUT)
+                link_flush();
+            if (LK.fd >= 0 && (pf[5].revents & (POLLIN | POLLHUP | POLLERR)))
+                link_read();
+        }
         if (pf[1].revents) {
             char c[16];
             while (read(sigpipe[0], c, sizeof c) > 0) {

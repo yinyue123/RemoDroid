@@ -1,0 +1,30 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>ops test</title>
+<style>
+body{margin:0;font:16px sans-serif}
+header{position:sticky;top:0;background:#246;color:#fff;padding:10px}
+button,input,select{font:inherit;margin:8px;padding:8px}
+#rows div{height:60px;border-bottom:1px solid #ccc;padding:8px;box-sizing:border-box}
+#drag{width:200px;height:60px;margin:8px;background:#ddd;touch-action:none}
+</style></head><body>
+<header id=head>ops test</header>
+<button id=btn>taps: 0</button>
+<input id=in placeholder="type here"><div id=echo>echo:</div>
+<select id=sel><option>red<option>green<option>blue</select><div id=picked>picked: -</div>
+<a id=lnk href="ops.html?next=1">next page</a>
+<div id=drag>drag: -</div>
+<div id=rows></div><div id=more>loading more…</div>
+<script>
+const $ = id => document.getElementById(id);
+let taps = 0, rows = 0;
+$('btn').addEventListener('click', e => { $('btn').textContent = 'taps: ' + (++taps) + (e.isTrusted ? '' : ' (untrusted)'); });
+$('in').addEventListener('input', () => { $('echo').textContent = 'echo:' + $('in').value; });
+$('sel').addEventListener('change', () => { $('picked').textContent = 'picked: ' + $('sel').value; });
+let sx = 0;
+$('drag').addEventListener('touchstart', e => { sx = e.touches[0].clientX; $('drag').textContent = 'drag: start'; });
+$('drag').addEventListener('touchmove', e => { $('drag').textContent = 'drag: ' + Math.round(e.touches[0].clientX - sx); });
+$('drag').addEventListener('touchend', () => { $('drag').textContent += ' end'; });
+const add = n => { for (let i = 0; i < n; i++) { const d = document.createElement('div'); d.textContent = 'row ' + (rows++); d.id = 'row' + (rows - 1); $('rows').appendChild(d); } };
+add(20);
+if (location.search) { $('head').textContent = 'second page'; document.title = 'second ' + history.length + ' ' + performance.getEntriesByType('navigation')[0].type; }
+new IntersectionObserver(es => { if (es[0].isIntersecting && rows < 200) add(20); }).observe($('more'));
+</script></body></html>

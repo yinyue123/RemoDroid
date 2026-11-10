@@ -179,6 +179,14 @@ int  session_active(void);
 void session_send(cJSON *m);  /* ctrl channel; frees m */
 int  session_offer_files(const char *const *paths, int n); /* file.offer to the viewer; -1: no viewer */
 void session_tick(void);      /* 1 s: stats, clipboard */
+void session_mirror(int on, const char *why); /* Page mode on or off; the viewer is told (mirror.state) */
+
+/* mirror.c: the remote browser's Page mode (browser/dom-mirror.md), the "dom" channel ⇄ rd-mirror's socket */
+int  mirror_available(void);  /* [mirror] socket is set */
+int  mirror_on(void);         /* 0, or -1: rd-mirror isn't there */
+void mirror_off(void);
+int  mirror_is_on(void);
+void mirror_message(const uint8_t *d, size_t n); /* the viewer's, from "dom" */
 
 /* input.c */
 void input_handle(const uint8_t *d, size_t n);

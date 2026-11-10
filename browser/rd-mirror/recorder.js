@@ -16,6 +16,17 @@
  *                   {k:'shadow', i, sr}                a shadow root attached to a node already sent
  *                   {k:'gone', i:[id…]} ]              these nodes (and all inside them) no longer exist
  *   {k:'err', what, e}                                 the recorder failed; start() again
+ *   {k:'scroll', i, top, left, a, off}                 the page scrolled by itself (i: the scroller, 0 = the
+ *                                                      window; a, off: an element in it and how far down it is)
+ *
+ *   rd.op(json)  → a JSON string {t: [[action, finger, x, y, delay ms]…]}: what the viewer did, by element.
+ *                  t are the touches rd-mirror has the agent make (x, y: 0…1 across the window; action 0 down,
+ *                  1 up, 2 move, 3 cancel), so the page gets real, trusted touch events
+ *     {o:'tap', i, fx, fy, hold}             a tap on node i, at that fraction of its box
+ *     {o:'touch', ph, id, i, fx, fy, dx, dy} a finger down on a node, then moved by dx, dy from there
+ *     {o:'view', i, a, off, offx, top, left, lead}   where the viewer is looking: scroller i shows node a
+ *                                            off pixels below its top edge (lead: ahead by so much)
+ *     {o:'set', i, value | sel}              a value picked on the viewer's own control
  *
  *   a node: {i, x} text, or {i, t: tag, ns: 1 svg | 2 mathml, a: {attributes}, c: [children],
  *            x: css (a <style>), u: url (a stylesheet this world may not read), p: {live properties},
@@ -315,12 +326,16 @@
   };
 
   const stop = () => {
+    /* a waiter from before (a page back from the back/forward cache still has the one its last poll left,
+     * and nobody is listening to it any more) must not be given what comes next */
+    if (wake) { const w = wake; wake = null; w('[]'); }
     for (const o of observers) o.mo.disconnect();
     observers.length = 0;
     clearInterval(tick);
     clearTimeout(timer);
     tick = timer = 0;
     document.removeEventListener('load', onLoad, true);
+    document.removeEventListener('scroll', onScroll, true);
     pending = [];
     out = [];
   };
@@ -330,15 +345,102 @@
     ids = new WeakMap(); nodes = new Map(); kids = new Map(); sheets = new Map(); props = new WeakMap();
     polled = Date.now();
     const root = document.documentElement;
-    out.push({ k: 'doc', url: location.href, title: document.title, w: innerWidth, h: innerHeight, sx: scrollX, sy: scrollY,
-               quirks: document.compatMode === 'BackCompat', n: root ? ser(root) : null, as: adopted(document) });
+    const doc = { k: 'doc', url: location.href, title: document.title, w: innerWidth, h: innerHeight, sx: scrollX, sy: scrollY,
+               quirks: document.compatMode === 'BackCompat', n: root ? ser(root) : null, as: adopted(document) };
     watch(document);
     tick = setInterval(compare, 250);
     document.addEventListener('load', onLoad, true);
+    document.addEventListener('scroll', onScroll, true);
+    push(doc); /* whoever waits in next() gets it at once */
     return 1;
   };
 
+  /* ---------------- the viewer's operations ---------------- */
+  const fingers = new Map(); /* finger → where it went down, in the window */
+  let ours = 0;              /* until when a scroll is one we made */
+  const frac = (x, y) => [Math.min(0.999, Math.max(0.001, x / innerWidth)), Math.min(0.999, Math.max(0.001, y / innerHeight))];
+  /* a place in a node's box → a place in the window, the node scrolled into view if it has to be */
+  const place = m => {
+    const el = nodes.get(m.i);
+    if (!el || el.nodeType !== 1 || !el.isConnected) return null;
+    const at = () => { const r = el.getBoundingClientRect(); return [r.left + m.fx * r.width, r.top + m.fy * r.height]; };
+    let p = at();
+    if (p[0] < 0 || p[1] < 0 || p[0] > innerWidth || p[1] > innerHeight) {
+      ours = Date.now() + 300;
+      el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+      p = at();
+    }
+    return p;
+  };
+  const scrollerBox = (sc, isDoc) => isDoc ? { top: 0, left: 0, width: innerWidth, height: innerHeight } : sc.getBoundingClientRect();
+  const op = json => {
+    const m = JSON.parse(json), t = [];
+    if (m.o === 'tap') {
+      const p = place(m);
+      if (p) { const f = frac(p[0], p[1]); t.push([0, 0, f[0], f[1], 0], [1, 0, f[0], f[1], Math.min(900, Math.max(40, m.hold | 0))]); }
+    } else if (m.o === 'touch') {
+      const id = m.id & 7;
+      if (m.ph === 'down') {
+        const p = place(m);
+        if (p) { fingers.set(id, p); const f = frac(p[0], p[1]); t.push([0, id, f[0], f[1], 0]); }
+      } else if (fingers.has(id)) {
+        const b = fingers.get(id), f = frac(b[0] + (m.dx || 0), b[1] + (m.dy || 0));
+        t.push([m.ph === 'move' ? 2 : m.ph === 'up' ? 1 : 3, id, f[0], f[1], 0]);
+        if (m.ph !== 'move') fingers.delete(id);
+      }
+    } else if (m.o === 'view') {
+      const isDoc = !m.i, sc = isDoc ? document.scrollingElement : nodes.get(m.i), a = m.a && nodes.get(m.a);
+      if (sc && sc.nodeType === 1) {
+        ours = Date.now() + 250;
+        if (a && a.nodeType === 1 && a.isConnected) {
+          const box = scrollerBox(sc, isDoc), r = a.getBoundingClientRect();
+          const dy = r.top - box.top - m.off + (m.lead || 0), dx = r.left - box.left - (m.offx || 0);
+          if (Math.abs(dy) >= 1 || Math.abs(dx) >= 1) sc.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+        } else sc.scrollTo({ left: m.left || 0, top: (m.top || 0) + (m.lead || 0), behavior: 'instant' });
+      }
+    } else if (m.o === 'set') {
+      const el = nodes.get(m.i);
+      if (el && el.nodeType === 1 && el.isConnected) {
+        if (m.sel && el.options) for (const o of el.options) o.selected = m.sel.includes(o.index);
+        else if ('value' in m) el.value = m.value;
+        props.set(el, live(el)); /* ours: not sent back as the page's */
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+    return JSON.stringify({ t });
+  };
+  /* the page scrolled by itself (a "back to top", an anchor link, a script): the viewer follows */
+  let scrolled = null, scrollTimer = 0;
+  const onScroll = e => {
+    if (Date.now() < ours) return;
+    (scrolled = scrolled || new Set()).add(e.target === document ? document.scrollingElement : e.target);
+    if (!scrollTimer) scrollTimer = setTimeout(guard('scroll', () => {
+      scrollTimer = 0;
+      const set = scrolled;
+      scrolled = null;
+      if (Date.now() < ours) return;
+      for (const sc of set) {
+        if (!sc || sc.nodeType !== 1 || !sc.isConnected) continue;
+        const isDoc = sc === document.scrollingElement, i = isDoc ? 0 : known(sc);
+        if (i === 0 && !isDoc) continue;
+        const m = { k: 'scroll', i, top: Math.round(sc.scrollTop), left: Math.round(sc.scrollLeft) };
+        const box = scrollerBox(sc, isDoc);
+        for (const e2 of document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2)) {
+          if (e2 === sc || !sc.contains(e2) || !known(e2)) continue;
+          const pos = getComputedStyle(e2).position;
+          if (pos === 'fixed' || pos === 'sticky') continue;
+          m.a = known(e2);
+          m.off = Math.round(e2.getBoundingClientRect().top - box.top);
+          break;
+        }
+        push(m);
+      }
+    }), 60);
+  };
+
   window.rd = {
+    op,
     start,
     stop,
     poll: () => take(), /* what there is, without waiting */

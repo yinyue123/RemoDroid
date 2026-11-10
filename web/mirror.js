@@ -121,6 +121,7 @@ class Mirror {
   }
 
   prop(n, p) {
+    if (this.hold && this.hold(n, p)) return; /* the person is typing in it (pagemode.js) */
     if ('value' in p && n.value !== p.value) n.value = p.value;
     if ('checked' in p) n.checked = p.checked;
     if (p.sel && n.options) for (const o of n.options) o.selected = p.sel.includes(o.index);
