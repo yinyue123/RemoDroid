@@ -1570,6 +1570,7 @@ static struct {
     int vol[MAX_OUTS]; /* percent */
     int lan;         /* the container has its LAN port: speakers can be found */
     double next;     /* the Sound page looks again then: speakers come and go */
+    double guard_at; /* when to look whether a speaker came back at full volume (sound_guard) */
 } SO = { .cur = -1 };
 static char pa_out[1 << 17];
 static const char *raop_host(const char *name);
@@ -1688,20 +1689,134 @@ static const char *raop_host(const char *name)
     return NULL;
 }
 
+/* ---- a speaker's volume, kept on disk: <data>/sound-volumes, "speaker \t percent" a line ----
+ * A speaker's sink is made anew each time it connects, at 100 %, which AirPlay makes the speaker's loudest.
+ * So each speaker gets the volume it was last given, kept across restarts and images (/data), and one never
+ * given a volume gets airplay_volume (browser.conf, 40 by default). */
+#define MAX_VOLS 32
+static struct {
+    char key[MAX_VOLS][96];
+    int pct[MAX_VOLS], n, loaded;
+} VOL;
+
+/* a speaker's name without its address, which can change: raop_sink.Living-Room.local.192.168.10.31.7000 → Living-Room */
+static void vol_key(const char *sink, char *out, size_t cap)
+{
+    const char *h = raop_host(sink) ? raop_host(sink) : sink;
+    const char *e = strstr(h, ".local");
+    snprintf(out, cap, "%.*s", (int)(e ? (size_t)(e - h) : strlen(h)), h);
+    out[strcspn(out, "\t\n")] = 0;
+}
+
+static void vol_path(char *out, size_t cap) { snprintf(out, cap, "%s/sound-volumes", U.dir); }
+
+static void vol_load(void)
+{
+    char p[PATH_MAX], line[160];
+    VOL.n = 0;
+    VOL.loaded = 1;
+    vol_path(p, sizeof p);
+    FILE *f = fopen(p, "r");
+    while (f && VOL.n < MAX_VOLS && fgets(line, sizeof line, f)) {
+        char *tab = strchr(line, '\t');
+        if (!tab)
+            continue;
+        *tab = 0;
+        snprintf(VOL.key[VOL.n], sizeof VOL.key[0], "%s", line);
+        VOL.pct[VOL.n++] = atoi(tab + 1);
+    }
+    if (f)
+        fclose(f);
+}
+
+/* the volume to give this speaker: its own, or the default */
+static int vol_for(const char *sink)
+{
+    char k[96];
+    if (!VOL.loaded)
+        vol_load();
+    vol_key(sink, k, sizeof k);
+    for (int i = 0; i < VOL.n; i++)
+        if (!strcmp(VOL.key[i], k))
+            return VOL.pct[i];
+    int d = atoi(conf("airplay_volume", "40"));
+    return d < 0 ? 0 : d > 100 ? 100 : d;
+}
+
+static void vol_save(const char *sink, int pct)
+{
+    char k[96], p[PATH_MAX], tmp[PATH_MAX + 8];
+    if (!VOL.loaded)
+        vol_load();
+    vol_key(sink, k, sizeof k);
+    int i = 0;
+    while (i < VOL.n && strcmp(VOL.key[i], k))
+        i++;
+    if (i < VOL.n && VOL.pct[i] == pct)
+        return; /* nothing new */
+    if (i == VOL.n) {
+        if (VOL.n == MAX_VOLS) { /* the oldest goes */
+            VOL.n--;
+            memmove(VOL.key, VOL.key + 1, sizeof VOL.key[0] * (size_t)VOL.n);
+            memmove(VOL.pct, VOL.pct + 1, sizeof VOL.pct[0] * (size_t)VOL.n);
+            i = VOL.n;
+        }
+        snprintf(VOL.key[i], sizeof VOL.key[0], "%s", k);
+        VOL.n++;
+    }
+    VOL.pct[i] = pct;
+    vol_path(p, sizeof p);
+    FILE *f = save_begin(p, tmp, sizeof tmp);
+    for (int j = 0; f && j < VOL.n; j++)
+        fprintf(f, "%s\t%d\n", VOL.key[j], VOL.pct[j]);
+    save_end(f, tmp, p);
+}
+
 static void sound_volume(int i, int pct)
 {
     char v[16];
     pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
     snprintf(v, sizeof v, "%d%%", pct);
-    if (!pactl("set-sink-volume", SO.name[i], v, NULL))
+    if (!pactl("set-sink-volume", SO.name[i], v, NULL)) {
         SO.vol[i] = pct;
+        if (is_speaker(i))
+            vol_save(SO.name[i], pct);
+    }
+}
+
+/* Every few seconds: a speaker in use that is at 100 % has just (re)connected by itself (the sound goes back
+ * to the last speaker after a restart, or the speaker came back): its own volume, not the loudest. */
+static void sound_guard(void)
+{
+    char sink[160], v[16];
+    SO.guard_at = now_s() + 5;
+    if (pactl("get-default-sink", NULL))
+        return;
+    snprintf(sink, sizeof sink, "%s", pa_out);
+    sink[strcspn(sink, "\n")] = 0;
+    if (!raop_host(sink) || pactl("get-sink-volume", sink, NULL))
+        return;
+    const char *pc = strchr(pa_out, '%'); /* "Volume: front-left: 65536 / 100% / 0.00 dB, …" */
+    int now = -1;
+    if (pc) {
+        const char *b = pc;
+        while (b > pa_out && b[-1] >= '0' && b[-1] <= '9')
+            b--;
+        now = atoi(b);
+    }
+    int want = vol_for(sink);
+    if (now >= 100 && want < 100) {
+        snprintf(v, sizeof v, "%d%%", want);
+        if (!pactl("set-sink-volume", sink, v, NULL))
+            LOG("sound: %s came back at 100 %%, set to %d %%", sink, want);
+    }
 }
 
 static void sound_pick(int i)
 {
-    /* a speaker's sink starts at 100 %, which AirPlay makes the speaker's loudest */
-    if (is_speaker(i) && SO.vol[i] >= 100)
-        sound_volume(i, 30);
+    /* a speaker gets its own volume, or the default (vol_for): never AirPlay's loudest by accident */
+    if (is_speaker(i))
+        sound_volume(i, vol_for(SO.name[i]));
     if (pactl("set-default-sink", SO.name[i], NULL)) {
         show_note("The sound server didn't answer");
         return;
@@ -3295,6 +3410,8 @@ int main(int argc, char **argv)
             P.confirm = 0;
             panel_draw();
         }
+        if (t >= SO.guard_at)
+            sound_guard();
         if (P.kind == P_SOUND && t >= SO.next) {
             SO.next = t + 3;
             sound_load();
@@ -3319,6 +3436,8 @@ int main(int argc, char **argv)
             next = ST.next;
         if (P.kind == P_SOUND && SO.next < next)
             next = SO.next;
+        if (SO.guard_at < next)
+            next = SO.guard_at;
         if (BR.restart_at && BR.restart_at < next)
             next = BR.restart_at;
         if (PX.fd < 0 && PX.next < next)

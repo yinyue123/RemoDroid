@@ -54,6 +54,10 @@ renderer_process_limit = 2
 # A URL opened from the bar replaces the tab (1), or opens beside it (0).
 one_tab = 1
 
+# AirPlay: a speaker's volume the first time it is used, in percent. Each speaker then keeps the volume last
+# set for it, in <data>/sound-volumes; one that connects again at full volume is put back to it.
+#airplay_volume = 40
+
 # AirPlay: the container's own LAN port (lan0, a macvlan; see remote-browser-plan.md). Only the sound
 # server and avahi use it, never the browser. Its address is best set on the container's Network card
 # (hqnode sets it at start); these are for an hqnode without that. Without either, DHCP (no gateway then
