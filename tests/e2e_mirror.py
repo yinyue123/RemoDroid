@@ -207,15 +207,15 @@ mirror_socket = {d}/shell.sock
 
             # photos: captured from the real browser's cache, made smaller (WebP, no wider than this screen), shown
             await page.wait_for_function("""() => { const d = document.querySelector('#pmFrame').contentDocument;
-                return ['photo', 'photo2'].every(id => { const i = d.getElementById(id); return i && i.naturalWidth > 0; }); }""",
+                return ['photo', 'photo2', 'logo'].every(id => { const i = d.getElementById(id); return i && i.naturalWidth > 0; }); }""",
                                          timeout=15000)
             res["photos"] = await page.evaluate("""async () => { const d = document.querySelector('#pmFrame').contentDocument, out = {};
-                for (const id of ['photo', 'photo2']) { const i = d.getElementById(id), b = await (await fetch(i.src)).blob();
+                for (const id of ['photo', 'photo2', 'logo']) { const i = d.getElementById(id), b = await (await fetch(i.src)).blob();
                     out[id] = [i.naturalWidth, i.naturalHeight, b.type, b.size]; }
                 return out; }""")
             p1, p2 = res["photos"]["photo"], res["photos"]["photo2"]
             res["photos_ok"] = (p1[2] == "image/webp" and p1[0] <= 1284 and p1[3] < os.path.getsize(f"{ROOT}/browser/test/mirror/pages/photo.jpg")
-                                and p2[0] == 900 and p2[3] > 0)
+                                and p2[0] == 900 and p2[3] > 0 and res["photos"]["logo"][2] == "image/svg+xml")
 
             # a tap on the mirror's button: a real, trusted tap on the real one, and the new text comes back
             await tap("#btn")

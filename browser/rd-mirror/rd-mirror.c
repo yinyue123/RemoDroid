@@ -373,11 +373,12 @@ static const char *sniff(const unsigned char *d, size_t n, int text)
     if (n >= 4 && (!memcmp(d, "\0\1\0\0", 4) || !memcmp(d, "true", 4))) return "font/ttf";
     if (n >= 4 && !memcmp(d, "OTTO", 4)) return "font/otf";
     if (n >= 4 && !memcmp(d, "\0\0\1\0", 4)) return "image/x-icon";
-    if (text) {
-        size_t look = n < 1024 ? n : 1024;
-        if (memmem(d, look, "<svg", 4)) return "image/svg+xml";
+    /* SVG is text, but Chrome hands a picture over in base64 whatever it is: look for it either way. Without
+     * the right type the viewer's browser won't draw it (a logo shown as a broken picture, 2026-11-10). */
+    size_t look = n < 2048 ? n : 2048;
+    if (memmem(d, look, "<svg", 4) || memmem(d, look, "<SVG", 4)) return "image/svg+xml";
+    if (text)
         return "text/css";
-    }
     return "application/octet-stream";
 }
 
