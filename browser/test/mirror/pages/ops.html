@@ -10,6 +10,7 @@ button,input,select{font:inherit;margin:8px;padding:8px}
 <button id=btn>taps: 0</button>
 <input id=in placeholder="type here"><div id=echo>echo:</div>
 <select id=sel><option>red<option>green<option>blue</select><div id=picked>picked: -</div>
+<button id=ask>ask</button><button id=play>play</button><video id=vid width=120 height=68 muted playsinline></video>
 <a id=lnk href="ops.html?next=1">next page</a>
 <div id=drag>drag: -</div>
 <div id=rows></div><div id=more>loading more…</div>
@@ -19,6 +20,13 @@ let taps = 0, rows = 0;
 $('btn').addEventListener('click', e => { $('btn').textContent = 'taps: ' + (++taps) + (e.isTrusted ? '' : ' (untrusted)'); });
 $('in').addEventListener('input', () => { $('echo').textContent = 'echo:' + $('in').value; });
 $('sel').addEventListener('change', () => { $('picked').textContent = 'picked: ' + $('sel').value; });
+$('ask').addEventListener('click', () => { $('ask').textContent = confirm('Are you sure?') ? 'said yes' : 'said no'; });
+$('play').addEventListener('click', () => { /* a video that really plays, with no file: a canvas's stream; it pauses after 3 s */
+  const c = document.createElement('canvas'); c.width = 120; c.height = 68; const g = c.getContext('2d'); let n = 0;
+  const t = setInterval(() => { g.fillStyle = n++ % 2 ? '#c33' : '#3c3'; g.fillRect(0, 0, 120, 68); }, 100);
+  $('vid').srcObject = c.captureStream(10); $('vid').play();
+  setTimeout(() => { $('vid').pause(); clearInterval(t); $('play').textContent = 'played'; }, 3000);
+});
 let sx = 0;
 $('drag').addEventListener('touchstart', e => { sx = e.touches[0].clientX; $('drag').textContent = 'drag: start'; });
 $('drag').addEventListener('touchmove', e => { $('drag').textContent = 'drag: ' + Math.round(e.touches[0].clientX - sx); });

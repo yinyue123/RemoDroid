@@ -6,7 +6,8 @@
  *   rd.next()    → a promise of a JSON string: the messages since the last call ([] after 20 s of nothing)
  *   rd.poll()    → the same string now, without waiting
  *
- *   {k:'doc', url, title, w, h, sx, sy, n: <html>, as: [css…]}
+ *   {k:'doc', url, title, w, h, sx, sy, n: <html>, as: [css…]}     (big: its element count, and no n, for a
+ *                                                      page over MAX_NODES: it is shown as video)
  *   {k:'diff', o: [ {k:'add', p, n:[node…]}            new children at the end of p
  *                   {k:'kids', p, c:[id | node…]}      p's children are now exactly these, in this order
  *                   {k:'attr', i, n, v | null}
@@ -16,6 +17,8 @@
  *                   {k:'shadow', i, sr}                a shadow root attached to a node already sent
  *                   {k:'gone', i:[id…]} ]              these nodes (and all inside them) no longer exist
  *   {k:'err', what, e}                                 the recorder failed; start() again
+ *   {k:'media', playing}                               a <video> began to play, or the last one stopped: the
+ *                                                      viewer shows the picture meanwhile
  *   {k:'scroll', i, top, left, a, off}                 the page scrolled by itself (i: the scroller, 0 = the
  *                                                      window; a, off: an element in it and how far down it is)
  *
@@ -44,6 +47,7 @@
   let ids = new WeakMap(), nodes = new Map(), kids = new Map(), sheets = new Map(), props = new WeakMap();
   let seq = 0, out = [], wake = null, pending = [], timer = 0, tick = 0, polled = 0, fresh = null;
   const observers = [], late = new Set();
+  const MAX_NODES = 20000; /* dom-mirror.md §14: a page past this is not mirrored */
   let turns = 0;
 
   const abs = (u, base) => {
@@ -325,6 +329,14 @@
     }
   };
 
+  /* a <video> that plays can't be sent as elements: the viewer is told, and shows the picture while it does */
+  let playing = false;
+  const onMedia = () => {
+    let now = false;
+    for (const v of document.querySelectorAll('video')) now = now || (!v.paused && !v.ended && v.readyState > 1 && v.offsetWidth > 0);
+    if (now !== playing) push({ k: 'media', playing: playing = now });
+  };
+
   const stop = () => {
     /* a waiter from before (a page back from the back/forward cache still has the one its last poll left,
      * and nobody is listening to it any more) must not be given what comes next */
@@ -336,6 +348,8 @@
     tick = timer = 0;
     document.removeEventListener('load', onLoad, true);
     document.removeEventListener('scroll', onScroll, true);
+    for (const e of ['play', 'playing', 'pause', 'ended', 'emptied']) document.removeEventListener(e, onMedia, true);
+    playing = false;
     pending = [];
     out = [];
   };
@@ -345,13 +359,19 @@
     ids = new WeakMap(); nodes = new Map(); kids = new Map(); sheets = new Map(); props = new WeakMap();
     polled = Date.now();
     const root = document.documentElement;
+    const count = document.getElementsByTagName('*').length;
     const doc = { k: 'doc', url: location.href, title: document.title, w: innerWidth, h: innerHeight, sx: scrollX, sy: scrollY,
-               quirks: document.compatMode === 'BackCompat', n: root ? ser(root) : null, as: adopted(document) };
+                  quirks: document.compatMode === 'BackCompat' };
+    tick = setInterval(compare, 250); /* it also notices that nobody listens any more */
+    if (count > MAX_NODES) { doc.big = count; push(doc); return 1; }
+    doc.n = root ? ser(root) : null;
+    doc.as = adopted(document);
     watch(document);
-    tick = setInterval(compare, 250);
     document.addEventListener('load', onLoad, true);
     document.addEventListener('scroll', onScroll, true);
-    push(doc); /* whoever waits in next() gets it at once */
+    for (const e of ['play', 'playing', 'pause', 'ended', 'emptied']) document.addEventListener(e, onMedia, true);
+    push(doc);
+    onMedia(); /* whoever waits in next() gets it at once */
     return 1;
   };
 

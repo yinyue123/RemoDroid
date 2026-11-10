@@ -10,7 +10,8 @@ headless Chrome, showing the remote browser's page as elements instead of video,
 
 Checks: Page mode shows the page's own elements under the viewer's bar; a tap on a button in the mirror is
 a real (trusted) tap on the real one; typing into the mirror's field arrives in the real field; a <select>
-picked in the mirror is picked on the real page; scrolling the mirror to its end makes the real page load
+picked in the mirror is picked on the real page; a confirm() is asked on the viewer; a playing video brings the picture
+for as long as it plays; scrolling the mirror to its end makes the real page load
 more rows, which arrive; a finger dragged over something that doesn't scroll reaches the page as a touch;
 an address typed in the viewer's bar opens there; back goes back; a link tapped in the mirror navigates the
 real page and never the viewer; the viewer's browser asks the network for nothing of the page's; and Video
@@ -199,6 +200,22 @@ mirror_socket = {d}/shell.sock
             await until("#picked", "picked: blue")
             res["select"] = await txt("#picked")
 
+            # confirm(): the real page waits, the viewer's own dialog asks, the answer goes back
+            page.on("dialog", lambda dlg: asyncio.ensure_future(dlg.accept()))
+            await tap("#ask")
+            await until("#ask", "said yes")
+            res["dialog"] = await txt("#ask")
+
+            # a video that plays can't be sent as elements: the picture while it plays, the page again after
+            f0 = await page.evaluate("() => document.querySelector('#video').getVideoPlaybackQuality().totalVideoFrames")
+            await tap("#play")
+            await page.wait_for_function("f0 => document.querySelector('#pm').hidden && PageMode.on && "
+                                         "document.querySelector('#video').getVideoPlaybackQuality().totalVideoFrames > f0 + 2",
+                                         arg=f0, timeout=8000)
+            await page.wait_for_function("() => !document.querySelector('#pm').hidden", timeout=10000)
+            await until("#play", "played")
+            res["video_while_playing"] = True
+
             # a finger dragged across something that doesn't scroll: the page gets it as a touch
             a = await mid("#drag", 0.2)
             await touch("touchStart", [a])
@@ -258,7 +275,7 @@ mirror_socket = {d}/shell.sock
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
               and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("select") == "picked: blue"
-              and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
+              and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'
               and not res.get("requests_for_the_site") and res.get("video_again") and not res.get("errors"))

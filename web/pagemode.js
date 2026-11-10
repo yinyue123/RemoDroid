@@ -45,6 +45,19 @@ const CSS = `
 const TEXTY = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number', '']);
 let api = null, root = null, frame = null, mirror = null, bar = null, wanted = false, on = false;
 let parts = [], chain = Promise.resolve(), doc = null, confirmAct = '', confirmAt = 0;
+/* why the picture is shown for now although Page mode is on (dom-mirror.md §7): what can't be sent as elements */
+const WHY = { media: 'A video is playing', windows: 'The browser is asking something', big: 'This page is too big for Page mode' };
+const video = new Set();
+let videoNow = false;
+function fallback(reason, yes) {
+  yes ? video.add(reason) : video.delete(reason);
+  const v = video.size > 0;
+  if (v === videoNow || !on) return;
+  videoNow = v;
+  api.ctrl('mirror.video', { on: v });
+  root.hidden = v;
+  if (v) api.toast(WHY[reason] + ' · Video for now');
+}
 const el = (tag, props, kids) => {
   const e = Object.assign(document.createElement(tag), props || {});
   for (const k of kids || []) e.append(k);
@@ -181,6 +194,9 @@ function message(m) {
   if (PageMode.log.length > 40) PageMode.log.shift();
   switch (m.k) {
   case 'doc':
+    fallback('media', false);
+    fallback('big', !!m.big);
+    if (m.big) break;
     doc = { w: m.w, h: m.h };
     view.sent = '';
     mirror.on(m);
@@ -196,11 +212,14 @@ function message(m) {
     if (nav) frame.classList.add('old'); /* the old page, dimmed, until the new one's snapshot */
     if (!m.running) { note('The browser is stopped'); frame.classList.add('old'); }
     showBar();
+    fallback('windows', m.windows > 1); /* a prompt, a list, a download: only the picture can show it */
     break;
   }
   case 'list': list(m); break;
   case 'res.none': mirror.resource(m.u, null); break;
   case 'scroll': pageScrolled(m); break;
+  case 'media': fallback('media', !!m.playing); break;
+  case 'dialog': setTimeout(() => dialog(m), 30); break;
   }
 }
 function data(buf) {
@@ -218,6 +237,17 @@ function data(buf) {
     chain = chain.then(() => mirror.resource(u, new Blob([all.subarray(3 + ul + ml)], { type })));
   } else if (kind === 0x4a) /* 'J': in the order sent, though inflating takes a moment */
     chain = chain.then(() => inflate(all)).then(t => { for (const m of JSON.parse(t)) message(m); }).catch(e => console.warn('page mode', e));
+}
+
+/* alert, confirm, prompt: the real page waits; this device's own dialog asks, and the answer goes back */
+function dialog(m) {
+  let accept = true, text;
+  const host = (m.url || '').replace(/^https?:\/\/([^/]+).*/, '$1');
+  const msg = (host ? host + ' says:\n\n' : '') + (m.message || '');
+  if (m.type === 'confirm') accept = window.confirm(msg);
+  else if (m.type === 'prompt') { text = window.prompt(msg, m.defaultPrompt || ''); accept = text !== null; }
+  else window.alert(msg);
+  send(accept && text !== undefined ? { k: 'dialog.answer', accept, text } : { k: 'dialog.answer', accept });
 }
 
 /* ---------------- what the person does ---------------- */
@@ -408,7 +438,8 @@ const PageMode = {
     const was = on;
     on = !!d.on;
     if (on && !root) build();
-    if (root) root.hidden = !on;
+    if (!on || !was) { video.clear(); videoNow = false; }
+    if (root) root.hidden = !on || videoNow;
     document.documentElement.classList.toggle('page-mode', on);
     if (on && !was) { /* the agent opens "dom" as it switches: say hello once it is open */
       parts = [];

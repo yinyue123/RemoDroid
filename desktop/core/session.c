@@ -517,6 +517,15 @@ static void control(cJSON *m)
         cJSON *r = cJSON_CreateObject();
         cJSON_AddBoolToObject(r, "on", mirror_is_on());
         reply(m, r);
+    } else if (!strcmp(t, "mirror.video")) { /* Page mode stays, and the picture runs beside it for a while: a
+                                                * playing video, a window of the browser's own (dom-mirror.md §7) */
+        if (mirror_is_on()) {
+            if (msg_bool(d, "on", 0))
+                start_video();
+            else
+                video_stop();
+        }
+        reply(m, NULL);
     } else if (!strcmp(t, "cursor.show")) {
         dsk_capture_pointer(msg_bool(d, "show", 1));
         reply(m, NULL);

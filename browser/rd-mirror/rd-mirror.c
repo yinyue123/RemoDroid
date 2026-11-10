@@ -9,7 +9,8 @@
  * differences, which go to the viewers deflated. It answers their requests for a picture, a font or a
  * stylesheet from what the page itself loaded (Page.getResourceContent), never by fetching. Only these
  * DevTools calls are made, and no Runtime.enable: Target.attachToTarget / detachFromTarget, Page.enable,
- * Page.createIsolatedWorld, Runtime.evaluate (in that world), Page.getResourceContent.
+ * Page.createIsolatedWorld, Runtime.evaluate (in that world), Page.getResourceContent,
+ * Page.handleJavaScriptDialog (with Page enabled the browser shows no alert of its own: the viewer does).
  *
  * Towards rd-shell (its socket, mirror_socket in browser.conf): JSON messages ending with a NUL; ours carry
  * ids from 1 000 000 000 and pass through it to the browser, {"rd":…} ones are for rd-shell itself.
@@ -650,6 +651,21 @@ static void shell_message(char *s, size_t len)
                 M.wrong = 0;
                 inject(); /* a new document: the recorder goes in as it begins, and the viewer sees it build up */
             }
+        } else if (!strcmp(method, "Page.javascriptDialogOpening")) { /* alert, confirm, prompt: the page waits for the viewer */
+            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(params, "type"));
+            if (type && !strcmp(type, "beforeunload")) { /* "Leave site?": yes, the person asked to go */
+                cJSON *p = cJSON_CreateObject();
+                cJSON_AddBoolToObject(p, "accept", 1);
+                call(P_QUIET, "Page.handleJavaScriptDialog", p, 1, NULL, 0);
+            } else {
+                cJSON *o = cJSON_Duplicate(params, 1);
+                cJSON_AddStringToObject(o, "k", "dialog");
+                send_obj(NULL, o);
+            }
+        } else if (!strcmp(method, "Page.javascriptDialogClosed")) {
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "k", "dialog.closed");
+            send_obj(NULL, o);
         } else if (!strcmp(method, "Page.navigatedWithinDocument")) { /* pushState, #fragment: the same document */
             const char *fid = cJSON_GetStringValue(cJSON_GetObjectItem(params, "frameId"));
             const char *u = cJSON_GetStringValue(cJSON_GetObjectItem(params, "url"));
@@ -731,6 +747,12 @@ static void viewer_message(struct viewer *v, const char *s, size_t len)
         if (M.ctx)
             evaluate(P_QUIET, "rd.start()", 0, NULL, 0); /* everyone gets the snapshot again; the poll brings it */
         follow();
+    } else if (!strcmp(k, "dialog.answer") && M.sid[0]) {
+        cJSON *p = cJSON_CreateObject();
+        cJSON_AddBoolToObject(p, "accept", cJSON_IsTrue(cJSON_GetObjectItem(m, "accept")));
+        if (cJSON_GetStringValue(cJSON_GetObjectItem(m, "text")))
+            cJSON_AddStringToObject(p, "promptText", cJSON_GetStringValue(cJSON_GetObjectItem(m, "text")));
+        call(P_QUIET, "Page.handleJavaScriptDialog", p, 1, NULL, 0);
     } else if (!strcmp(k, "res.get")) {
         const char *u = cJSON_GetStringValue(cJSON_GetObjectItem(m, "u"));
         if (u && M.sid[0] && strlen(u) < 8192) {
