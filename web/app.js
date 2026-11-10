@@ -391,16 +391,19 @@ function preferCodecs(pc, sdp) {
 }
 /* Page mode (browser/dom-mirror.md): the remote browser's page as elements instead of video */
 const pageKey = () => 'remodroid-page:' + ((st.device && st.device.id) || '');
-const pagePref = () => { try { return localStorage.getItem(pageKey()); } catch (e) { return null; } };
+/* this device's view: 'auto', 'page' or 'video' (pagemode.js); '1' and '0' are from before there were three */
+const pagePref = () => {
+  let v = null;
+  try { v = localStorage.getItem(pageKey()); } catch (e) {}
+  return v === '1' ? 'page' : v === '0' || !v ? 'video' : v;
+};
 PageMode.init({
   dom: () => st.ch.dom,
   ctrl: (t, d) => sendCtrl(t, d).catch(() => {}),
   key: hid => { sendKey(true, hid, 0); sendKey(false, hid, 0); },
   toast: m => toast(m),
-  changed: on => {
-    try { if (PageMode.wanted === on) localStorage.setItem(pageKey(), on ? '1' : '0'); } catch (e) {}
-    syncMenuStates();
-  }
+  saveMode: m => { try { localStorage.setItem(pageKey(), m); } catch (e) {} },
+  changed: () => syncMenuStates()
 });
 function closePeer() {
   PageMode.end();
@@ -486,7 +489,8 @@ function onChannel(label, data) {
     if (!S.sound && d.caps && d.caps.audio) sendCtrl('audio.set', { on: false }); /* keep the phone's speaker */
     /* the remote browser's Page mode: offered when the agent has it, and on again if this viewer left it on (D7) */
     PageMode.offered(!!(d.caps && d.caps.mirror));
-    if (PageMode.can && pagePref() === '1') PageMode.set(true);
+    PageMode.mode = pagePref();
+    if (PageMode.can && PageMode.mode !== 'video') PageMode.set(true);
     syncMenuStates();
     syncClip();
     break;
@@ -1112,7 +1116,7 @@ function syncMenuStates() {
   $('#menuMonitor').hidden = !dk || screens.length < 2;
   $('#menuPage').hidden = !PageMode.can;
   $('#menuPage').classList.toggle('on', PageMode.on);
-  $('#menuPage').querySelector('span').textContent = PageMode.on ? 'Video mode' : 'Page mode';
+  $('#menuPage').querySelector('span').textContent = 'View: ' + ({ auto: 'Auto', page: 'Page', video: 'Video' }[PageMode.mode] || 'Video');
   const sb = $('#menuScreen');
   sb.classList.toggle('on', st.panel === 'off');
   sb.querySelector('span').textContent = dk ? (st.panel === 'off' ? 'Display on' : 'Display off') : st.panel === 'off' ? 'Screen on' : 'Screen off';
@@ -1219,7 +1223,13 @@ menu.addEventListener('click', e => {
     else cmd('phone.sleep', {}, `${N} locked`).then(ok => { if (ok) { st.locked = true; syncMenuStates(); } });
   }
   else if (a === 'reconnect') { closeMenu(); reconnectStream(); }
-  else if (a === 'page') { closeMenu(); PageMode.set(!PageMode.on); }
+  else if (a === 'page') { /* Video → Auto → Page → Video */
+    closeMenu();
+    const next = { video: 'auto', auto: 'page', page: 'video' }[PageMode.mode] || 'auto';
+    PageMode.choose(next);
+    toast({ auto: 'Auto: the page, and the picture while it can\'t show something', page: 'Page: the page only',
+            video: 'Video: the picture' }[next]);
+  }
   else if (a === 'fullscreen') { closeMenu(); toggleFullscreen(); }
   else if (a === 'devices') { closeMenu(); renderDevices(); openSheet('devices'); }
   else if (a === 'exit') { closeMenu(); exitDevice(); }

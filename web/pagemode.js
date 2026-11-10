@@ -5,7 +5,10 @@
  *
  *   PageMode.init({ dom(), ctrl(t, d), key(hid), toast(msg), video() })   app.js's side
  *   PageMode.offered(yes)    this device has it (caps.mirror)
- *   PageMode.set(on)         ask for it, or for the video again
+ *   PageMode.choose(mode)    'auto': the page, and the picture by itself while the page can't show something
+ *                            (a playing video, a prompt of the browser's, a page too big); 'page': the page
+ *                            only, never the picture unless chosen; 'video': the picture
+ *   PageMode.set(on)         ask for the page, or for the video again
  *   PageMode.state(d)        the agent's mirror.state
  *   PageMode.data(buf)       a "dom" channel message: a kind byte, a "more follows" byte, the bytes
  *   PageMode.end()           the session ended
@@ -43,13 +46,21 @@ const CSS = `
   background:rgba(20,22,26,.9);color:#fff;font-size:13px;pointer-events:none}
 `;
 const TEXTY = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number', '']);
-let api = null, root = null, frame = null, mirror = null, bar = null, wanted = false, on = false;
+let api = null, root = null, frame = null, mirror = null, bar = null, wanted = false, on = false, mode = 'video';
+const MODES = { auto: 'Auto', page: 'Page', video: 'Video' };
 let parts = [], chain = Promise.resolve(), doc = null, confirmAct = '', confirmAt = 0;
 /* why the picture is shown for now although Page mode is on (dom-mirror.md §7): what can't be sent as elements */
 const WHY = { media: 'A video is playing', windows: 'The browser is asking something', big: 'This page is too big for Page mode' };
 const video = new Set();
 let videoNow = false;
+const STAY = { media: 'A video is playing on the browser', windows: 'The browser is asking something',
+               big: 'A big page: it may take a moment' };
 function fallback(reason, yes) {
+  if (mode === 'page') { /* never the picture by itself: say what can't be seen, and how to see it */
+    if (yes && reason === 'big') { send({ k: 'full' }); note(STAY.big); return; }
+    if (yes) api.toast(STAY[reason] + ' · choose Video in the menu to see it');
+    return;
+  }
   yes ? video.add(reason) : video.delete(reason);
   const v = video.size > 0;
   if (v === videoNow || !on) return;
@@ -138,7 +149,8 @@ function drawMenu() {
     twice('id', 'New identity', () => cmd('identity.new')), item('Restart browser', () => cmd('restart')),
     item(s.running ? 'Stop browser' : 'Start browser', () => cmd(s.running ? 'stop' : 'start')), el('hr'),
     item('Proxy: ' + (s.proxy === 1 ? 'ok' : s.proxy === 0 ? 'down' : s.proxy === -2 ? 'none set' : '…'), () => {}, true),
-    item('Video mode', () => PageMode.set(false)));
+    ...Object.keys(MODES).map(k => Object.assign(item((k === mode ? '● ' : '○ ') + MODES[k] + ' mode', () => PageMode.choose(k)),
+      { className: k === mode ? 'cur' : '' })));
 }
 function users() {
   const l = root.querySelector('#pmList');
@@ -428,6 +440,15 @@ function pageScrolled(m) {
 const PageMode = {
   init(a) { api = a; },
   offered(yes) { PageMode.can = !!yes && typeof DecompressionStream === 'function'; if (!yes) PageMode.end(); },
+  choose(m) {
+    if (!MODES[m]) return;
+    mode = m;
+    if (api.saveMode) api.saveMode(m);
+    PageMode.set(m !== 'video');
+    if (api.changed) api.changed(on);
+  },
+  get mode() { return mode; },
+  set mode(m) { if (MODES[m]) mode = m; },
   set(want) {
     wanted = !!want;
     if (want && !PageMode.can) return;
@@ -453,11 +474,18 @@ const PageMode = {
         /* pw: how many of this screen's pixels the page is across; no picture is sent wider */
         if (c && c.readyState === 'open') send({ k: 'hello', pw: Math.round(root.clientWidth * Math.min(3, window.devicePixelRatio || 1)) });
         else if (++tries < 100) setTimeout(hello, 50);
+        else if (mode === 'page') { note('Page mode is not answering · trying again'); tries = 0; setTimeout(hello, 2000); }
         else PageMode.set(false);
       };
       chain.then(hello);
     }
-    if (!on && was && d.why) api.toast(d.why + ' · Video mode');
+    if (!on && was && d.why) {
+      if (mode === 'page' && wanted) { /* it stopped on the browser's side: ask again, and stay on the page */
+        if (root) root.hidden = false;
+        note(d.why + ' · trying again');
+        setTimeout(() => { if (mode === 'page' && wanted && !on) api.ctrl('mirror.set', { on: true }); }, 3000);
+      } else api.toast(d.why + ' · Video mode');
+    }
     if (api.changed) api.changed(on);
   },
   data,

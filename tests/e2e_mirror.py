@@ -12,7 +12,7 @@ Checks: Page mode shows the page's own elements under the viewer's bar; photos a
 smaller as WebP; a tap on a button in the mirror is
 a real (trusted) tap on the real one; typing into the mirror's field arrives in the real field; a <select>
 picked in the mirror is picked on the real page; a confirm() is asked on the viewer; a playing video brings the picture
-for as long as it plays; scrolling the mirror to its end makes the real page load
+for as long as it plays in Auto, and never in Page; scrolling the mirror to its end makes the real page load
 more rows, which arrive; a finger dragged over something that doesn't scroll reaches the page as a touch;
 an address typed in the viewer's bar opens there; back goes back; a link tapped in the mirror navigates the
 real page and never the viewer; the viewer's browser asks the network for nothing of the page's; and Video
@@ -154,7 +154,7 @@ mirror_socket = {d}/shell.sock
             res["offered"] = await page.evaluate("() => PageMode.can")
 
             # Page mode on: the page's own elements, in the frame, under the viewer's bar
-            await page.evaluate("() => PageMode.set(true)")
+            await page.evaluate("() => PageMode.choose('auto')")
             fr = page.frame_locator("#pmFrame")
             if args.url:  # a real site: does it show, pictures included, and does the session hold
                 await asyncio.sleep(args.watch)
@@ -257,6 +257,23 @@ mirror_socket = {d}/shell.sock
             await until("#play", "played")
             res["video_while_playing"] = True
 
+            # Page: the video plays on the browser and the page stays; the picture never comes by itself
+            await page.evaluate("() => PageMode.choose('page')")
+            await page.wait_for_function("() => PageMode.on && !document.querySelector('#pm').hidden", timeout=10000)
+            await asyncio.sleep(1)
+            f1 = await page.evaluate("() => document.querySelector('#video').getVideoPlaybackQuality().totalVideoFrames")
+            await tap("#play")
+            stayed = True
+            for _ in range(8):
+                await asyncio.sleep(0.5)
+                stayed = stayed and await page.evaluate("() => !document.querySelector('#pm').hidden")
+            f2 = await page.evaluate("() => document.querySelector('#video').getVideoPlaybackQuality().totalVideoFrames")
+            res["page_only"] = {"page_stayed": stayed, "video_frames": f2 - f1,
+                                "remembered": await page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('remodroid-page:')).map(k => localStorage.getItem(k))")}
+            res["page_only_ok"] = stayed and f2 - f1 <= 2 and res["page_only"]["remembered"] == ["page"]
+            await page.evaluate("() => PageMode.choose('auto')")
+            await page.wait_for_function("() => PageMode.on && !document.querySelector('#pm').hidden", timeout=10000)
+
             # a finger dragged across something that doesn't scroll: the page gets it as a touch
             a = await mid("#drag", 0.2)
             await touch("touchStart", [a])
@@ -306,7 +323,7 @@ mirror_socket = {d}/shell.sock
 
             # Video mode again: the picture comes back
             f0 = await page.evaluate("() => document.querySelector('#video').getVideoPlaybackQuality().totalVideoFrames")
-            await page.evaluate("() => PageMode.set(false)")
+            await page.evaluate("() => PageMode.choose('video')")
             await page.wait_for_function("f0 => document.querySelector('#pm').hidden && "
                                          "document.querySelector('#video').getVideoPlaybackQuality().totalVideoFrames > f0 + 2",
                                          arg=f0, timeout=15000)
@@ -316,7 +333,7 @@ mirror_socket = {d}/shell.sock
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
               and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("select") == "picked: blue"
-              and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
+              and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("page_only_ok") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'
               and not res.get("requests_for_the_site") and res.get("video_again") and not res.get("errors"))

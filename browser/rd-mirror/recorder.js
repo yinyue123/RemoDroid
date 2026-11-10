@@ -371,7 +371,7 @@
     const doc = { k: 'doc', url: location.href, title: document.title, w: innerWidth, h: innerHeight, sx: scrollX, sy: scrollY,
                   quirks: document.compatMode === 'BackCompat' };
     tick = setInterval(compare, 250); /* it also notices that nobody listens any more */
-    if (count > MAX_NODES) { doc.big = count; push(doc); return 1; }
+    if (count > ((window.rd && window.rd.max) || MAX_NODES)) { doc.big = count; push(doc); return 1; }
     doc.n = root ? ser(root) : null;
     doc.as = adopted(document);
     watch(document);

@@ -856,6 +856,8 @@ static void viewer_message(struct viewer *v, const char *s, size_t len)
         if (M.ctx)
             evaluate(P_QUIET, "rd.start()", 0, NULL, 0); /* everyone gets the snapshot again; the poll brings it */
         follow();
+    } else if (!strcmp(k, "full") && M.ctx) { /* Page only: a page over the size limit is sent all the same */
+        evaluate(P_QUIET, "rd.max = 1e9, rd.start()", 0, NULL, 0);
     } else if (!strcmp(k, "dialog.answer") && M.sid[0]) {
         cJSON *p = cJSON_CreateObject();
         cJSON_AddBoolToObject(p, "accept", cJSON_IsTrue(cJSON_GetObjectItem(m, "accept")));
