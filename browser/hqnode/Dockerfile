@@ -10,6 +10,7 @@
 #   rd-pipewire         PipeWire (+ rd-pipewire-pulse, rd-wireplumber): the sink   /run/pulse/native
 #                       the browser plays into, and the AirPlay speakers avahi finds on lan0
 #   rd-shell            the bar, the window manager, the browser supervisor        user browser
+#   rd-mirror           Page mode: the page's elements instead of a picture        user browser
 #   remodroid-desktopd  capture → Rockchip MPP H.265 → WebRTC; touch and keys in   user rdagent
 #                       the sink's monitor → Opus, the sound
 #
@@ -34,7 +35,7 @@ ARG MPP_COMMIT=20959ec3dabb313b8c33ca0b7b09c06ffd2a9caa
 ARG TARGETARCH
 RUN set -eux; apt-get update; \
     apt-get install -y --no-install-recommends build-essential cmake git ca-certificates pkg-config \
-        libx11-dev libxext-dev libxtst-dev libxrandr-dev libxdamage-dev libxfixes-dev libxft-dev libfontconfig-dev libva-dev libxi-dev
+        libx11-dev libxext-dev libxtst-dev libxrandr-dev libxdamage-dev libxfixes-dev libxft-dev libfontconfig-dev libva-dev libxi-dev zlib1g-dev
 # MPP: only the library and its encoder test; Debian has no package of it. arm64 only: elsewhere
 # there is no Rockchip encoder, and the agent uses VA-API or software.
 RUN set -eux; mkdir -p /opt/mpp/lib /opt/mpp/bin; [ "$TARGETARCH" = arm64 ] || exit 0; \
@@ -99,7 +100,7 @@ RUN set -eux; apt-get update; \
         fonts-freefont-ttf fonts-unifont fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf \
         libx11-6 libxext6 libxtst6 libxrandr2 libxdamage1 libxfixes3 libxft2 libfontconfig1 \
         libnss3 libgbm1 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 libxkbcommon0 libpango-1.0-0 \
-        libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 curl ca-certificates \
+        libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 zlib1g curl ca-certificates \
         pipewire pipewire-pulse wireplumber libpipewire-0.3-modules libspa-0.2-modules libpulse0 pulseaudio-utils \
         avahi-daemon dbus busybox iproute2; \
     if [ "$CLOAKBROWSER" = chromium ]; then apt-get install -y --no-install-recommends chromium; fi; \
@@ -129,6 +130,7 @@ RUN set -eux; url=$CLOAKBROWSER_URL sum=$CLOAKBROWSER_SHA256; \
 COPY --from=build /src/remodroid/build/host/desktop/libremodroid.so /usr/lib/remodroid/libremodroid.so
 COPY --from=build /src/remodroid/build/host/desktop/remodroid-desktopd /usr/bin/remodroid-desktopd
 COPY --from=build /src/remodroid/build/host/browser/rd-shell /usr/bin/rd-shell
+COPY --from=build /src/remodroid/build/host/browser/rd-mirror /usr/bin/rd-mirror
 COPY --from=build /opt/mpp/lib/ /usr/local/lib/
 COPY --from=pipewire-raop /out/ /tmp/pipewire-raop/
 COPY --from=build /opt/mpp/bin/ /usr/local/bin/
@@ -148,7 +150,7 @@ RUN set -eux; v=$(dpkg-query -W -f '${source:Version}' libpipewire-0.3-modules);
     rm -rf /tmp/pipewire-raop
 RUN set -eux; ldconfig; mkdir -p /etc/X11/rd-xorg.conf.d; chmod 0755 /usr/lib/rd-browser/*; \
     systemctl enable rd-xorg.service rd-lan.service rd-pipewire.service rd-pipewire-pulse.service \
-        rd-wireplumber.service rd-video.service rd-shell.service \
+        rd-wireplumber.service rd-video.service rd-shell.service rd-mirror.service \
         remodroid-desktopd.service
 
 # Inherited from the system image, restated because a wrong one turns every stop into 30 s and a kill.

@@ -36,7 +36,9 @@ void mirror_message(const uint8_t *d, size_t n) {}
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0 /* macOS: the agent ignores SIGPIPE */
 #endif
-#define CHUNK 16000
+/* Under one packet: a "dom" message of 1538 bytes never reached the viewer (Chrome 157, 2026-11-10), while
+ * those under about 1200 always did. Why the stack loses a message it has to split is not known yet. */
+#define CHUNK 1000
 #define BEHIND (512u << 10)
 #define FRAME_MAX (96u << 20)
 
@@ -110,6 +112,7 @@ static void *reader(void *arg)
         }
         if (read_all(m, body, n) < 0)
             break;
+        LOGD("mirror: frame '%c', %zu bytes (channel queue %zu)", h[0], n, (size_t)m->buffered);
         if (h[0] == 'T') {
             uint8_t *t = n && n < 64 ? malloc(n + 1) : NULL;
             if (t) {

@@ -171,8 +171,10 @@ static void send_json(struct viewer *one, const char *s, size_t n)
         zs.avail_in = (uInt)n;
         zs.next_out = (Bytef *)z.d;
         zs.avail_out = (uInt)z.cap;
-        if (deflate(&zs, Z_FINISH) == Z_STREAM_END)
+        if (deflate(&zs, Z_FINISH) == Z_STREAM_END) {
+            DBG("to the viewer%s: %.40s… %zu bytes, %lu deflated", one ? "" : "s", s, n, (unsigned long)zs.total_out);
             frame(one, 'J', z.d, zs.total_out, NULL, 0);
+        }
     }
     deflateEnd(&zs);
 }
@@ -505,8 +507,8 @@ static void answer(struct pending *p, const cJSON *m)
             M.inject_at = now_s() + 0.5;
             break;
         }
-        /* Just after a page comes back from the back/forward cache, the world made is still the one of the
-         * page that was left (seen with Chrome 157): its address isn't the one the tab reports. Again, then. */
+        /* The world must be the document the tab says it shows. Around a navigation (and a page coming back
+         * from the back/forward cache) it could still be the one being left: again, then. */
         size_t ul = strcspn(M.url, "#"); /* the two are compared without their #fragment */
         if (M.url[0] && cJSON_IsString(val) && M.wrong < 20 &&
             (strcspn(val->valuestring, "#") != ul || strncmp(val->valuestring, M.url, ul))) {

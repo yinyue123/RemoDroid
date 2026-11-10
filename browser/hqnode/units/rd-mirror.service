@@ -1,0 +1,19 @@
+# Page mode (browser/dom-mirror.md): the page's elements to the viewer instead of a picture of them.
+# It talks to the browser through rd-shell's socket and to the agent through its own.
+[Unit]
+Description=Remote browser: Page mode
+After=rd-shell.service
+PartOf=rd-xorg.service
+
+[Service]
+User=browser
+Group=browser
+# /run/rd-mirror/sock: the agent (another user) connects to it
+RuntimeDirectory=rd-mirror
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/rd-mirror -s /run/rd-shell/sock -l /run/rd-mirror/sock
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

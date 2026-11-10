@@ -155,7 +155,7 @@ mirror_socket = {d}/shell.sock
                     res["mirror_now"] = await page.evaluate(
                         "() => { const d = document.querySelector('#pmFrame').contentDocument; return [d.title, d.body ? "
                         "d.body.innerText.slice(0, 100) : null, document.querySelector('#pmAddr').value, "
-                        "document.querySelector('#pmNote').textContent]; }")
+                        "document.querySelector('#pmNote').textContent, PageMode.log.slice(-8)]; }")
                     raise
             await until("#head", "ops test", 15000)
             res["shown"] = await txt("#btn")
@@ -241,8 +241,9 @@ mirror_socket = {d}/shell.sock
             await until("#h", "Mirror test", 12000)
             await asyncio.sleep(1.5)
             res["address"] = await page.input_value("#pmAddr")
-            res["picture"] = await page.evaluate("() => { const i = document.querySelector('#pmFrame').contentDocument.getElementById('im');"
-                                                 " return i ? [i.naturalWidth, i.getAttribute('src').slice(0, 5)] : null; }")
+            # a picture of the page's (a CSS background): its bytes came over the channel, as a blob
+            res["picture"] = await page.evaluate("() => { const f = document.querySelector('#pmFrame'), e = f.contentDocument.getElementById('bg');"
+                                                 " return e ? f.contentWindow.getComputedStyle(e).backgroundImage.slice(0, 10) : null; }")
             res["requests_for_the_site"] = asked[:5]
 
             # Video mode again: the picture comes back
@@ -259,7 +260,7 @@ mirror_socket = {d}/shell.sock
               and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("select") == "picked: blue"
               and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
-              and "mirror test" in res.get("address", "").lower() and res.get("picture") == [120, "blob:"]
+              and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'
               and not res.get("requests_for_the_site") and res.get("video_again") and not res.get("errors"))
     except Exception as e:  # what was reached is still worth printing
         res["stopped_at"] = repr(e)[:400]

@@ -22,6 +22,9 @@ ExecStartPre=+/usr/bin/chown -R browser:browser /data/users
 # (rd-shell read nothing, then saved that). New files and directories are open too (UMask).
 ExecStartPre=+/usr/bin/chmod -R a+rwX /data/users
 UMask=0000
+# /run/rd-shell/sock: rd-mirror's way to the browser's DevTools pipe and to the bar (Page mode). This user only.
+RuntimeDirectory=rd-shell
+RuntimeDirectoryMode=0700
 ExecStart=/usr/bin/rd-shell -c /data/browser.conf
 Restart=always
 RestartSec=2

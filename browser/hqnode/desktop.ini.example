@@ -22,3 +22,8 @@ max_mb = 0
 
 [video]
 max_fps = 30
+
+[mirror]
+; Page mode: the page's elements instead of video (browser/dom-mirror.md). rd-mirror's socket; without
+; this line the viewer isn't offered it.
+socket = /run/rd-mirror/sock

@@ -177,6 +177,8 @@ async function inflate(u8) {
   return new Response(ds.readable).text();
 }
 function message(m) {
+  PageMode.log.push(m.k === 'doc' ? 'doc ' + m.url : m.k === 'diff' ? 'diff ' + m.o.length : m.k);
+  if (PageMode.log.length > 40) PageMode.log.shift();
   switch (m.k) {
   case 'doc':
     doc = { w: m.w, h: m.h };
@@ -204,6 +206,7 @@ function message(m) {
 function data(buf) {
   const u8 = new Uint8Array(buf);
   if (u8.length < 2) return;
+  PageMode.log.push('raw ' + String.fromCharCode(u8[0]) + u8[1] + ' ' + u8.length);
   parts.push(u8.subarray(2));
   if (u8[1]) return; /* more follows */
   const kind = u8[0], all = parts.length === 1 ? parts[0] : new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
@@ -428,7 +431,8 @@ const PageMode = {
   end() { if (on) PageMode.state({ on: false }); },
   get on() { return on; },
   get wanted() { return wanted; },
-  can: false
+  can: false,
+  log: [] /* the last messages, by kind: for whoever is finding out why the page isn't what it should be */
 };
 window.PageMode = PageMode;
 })();

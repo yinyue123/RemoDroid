@@ -60,3 +60,7 @@ one_tab = 1
 # unless lan_gateway is given).
 #lan_address = 192.168.10.44/24
 #lan_gateway = 192.168.10.2
+
+# Page mode (browser/dom-mirror.md): the socket rd-mirror reaches the browser and the bar through.
+# "off": no Page mode, and nothing ever attaches to a page.
+#mirror_socket = /run/rd-shell/sock
