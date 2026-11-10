@@ -449,7 +449,8 @@ const PageMode = {
       const hello = () => {
         const c = api.dom();
         if (!on) return;
-        if (c && c.readyState === 'open') send({ k: 'hello' });
+        /* pw: how many of this screen's pixels the page is across; no picture is sent wider */
+        if (c && c.readyState === 'open') send({ k: 'hello', pw: Math.round(root.clientWidth * Math.min(3, window.devicePixelRatio || 1)) });
         else if (++tries < 100) setTimeout(hello, 50);
         else PageMode.set(false);
       };

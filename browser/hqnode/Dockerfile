@@ -35,7 +35,7 @@ ARG MPP_COMMIT=20959ec3dabb313b8c33ca0b7b09c06ffd2a9caa
 ARG TARGETARCH
 RUN set -eux; apt-get update; \
     apt-get install -y --no-install-recommends build-essential cmake git ca-certificates pkg-config \
-        libx11-dev libxext-dev libxtst-dev libxrandr-dev libxdamage-dev libxfixes-dev libxft-dev libfontconfig-dev libva-dev libxi-dev zlib1g-dev
+        libx11-dev libxext-dev libxtst-dev libxrandr-dev libxdamage-dev libxfixes-dev libxft-dev libfontconfig-dev libva-dev libxi-dev zlib1g-dev libwebp-dev libpng-dev libjpeg62-turbo-dev
 # MPP: only the library and its encoder test; Debian has no package of it. arm64 only: elsewhere
 # there is no Rockchip encoder, and the agent uses VA-API or software.
 RUN set -eux; mkdir -p /opt/mpp/lib /opt/mpp/bin; [ "$TARGETARCH" = arm64 ] || exit 0; \
@@ -100,7 +100,7 @@ RUN set -eux; apt-get update; \
         fonts-freefont-ttf fonts-unifont fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf \
         libx11-6 libxext6 libxtst6 libxrandr2 libxdamage1 libxfixes3 libxft2 libfontconfig1 \
         libnss3 libgbm1 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 libxkbcommon0 libpango-1.0-0 \
-        libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 zlib1g curl ca-certificates \
+        libxcomposite1 libdrm2 libcairo2 libva2 libva-drm2 libxi6 libdbus-1-3 zlib1g libwebp7 libpng16-16t64 libjpeg62-turbo curl ca-certificates \
         pipewire pipewire-pulse wireplumber libpipewire-0.3-modules libspa-0.2-modules libpulse0 pulseaudio-utils \
         avahi-daemon dbus busybox iproute2; \
     if [ "$CLOAKBROWSER" = chromium ]; then apt-get install -y --no-install-recommends chromium; fi; \

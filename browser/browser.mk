@@ -21,8 +21,10 @@ $(BROWSER_OUT)/recorder.h: browser/rd-mirror/recorder.js
 	@mkdir -p $(@D)
 	(echo 'static const char RECORDER[] = {'; od -An -v -tx1 $< | sed 's/ \([0-9a-f][0-9a-f]\)/0x\1,/g'; echo '0 };') > $@
 
-$(BROWSER_OUT)/rd-mirror: browser/rd-mirror/rd-mirror.c third_party/cjson/cJSON.c $(BROWSER_OUT)/recorder.h
-	$(CC) $(BROWSER_CFLAGS) -Ithird_party/cjson -I$(BROWSER_OUT) -o $@ browser/rd-mirror/rd-mirror.c third_party/cjson/cJSON.c -lz
+$(BROWSER_OUT)/rd-mirror: browser/rd-mirror/rd-mirror.c browser/rd-mirror/picture.c browser/rd-mirror/picture.h \
+                          third_party/cjson/cJSON.c $(BROWSER_OUT)/recorder.h
+	$(CC) $(BROWSER_CFLAGS) -Ithird_party/cjson -I$(BROWSER_OUT) -o $@ browser/rd-mirror/rd-mirror.c browser/rd-mirror/picture.c \
+	    third_party/cjson/cJSON.c -lz -lwebp -lpng -ljpeg -lpthread
 
 $(BROWSER_OUT)/mpptest: browser/test/mpptest.c browser/agent/video_mpp.c browser/agent/mpp_api.h browser/agent/mppenc.h
 	@mkdir -p $(@D)

@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -44,6 +45,7 @@
 #include <zlib.h>
 
 #include "cJSON.h"
+#include "picture.h"
 #include "recorder.h" /* recorder.js as RECORDER[], made by the build */
 
 #define LOG(...) (fprintf(stderr, "rd-mirror: " __VA_ARGS__), fputc('\n', stderr))
@@ -102,6 +104,8 @@ static struct viewer {
     int fd;
     buf_t in, out;
     int hello; /* it said it is in Page mode: it gets the page */
+    int serial; /* which connection this slot holds: a picture made for an earlier one is dropped */
+    int max_w;  /* the widest it can show a picture, in its own pixels (hello's "pw"); 0: not said */
 } V[MAX_VIEWERS];
 static int listen_fd = -1;
 
@@ -397,6 +401,87 @@ static size_t unbase64(char *s)
     return (size_t)(o - s);
 }
 
+/* ---------------- pictures: made smaller on a thread of their own, so a big one holds nothing up ---------------- */
+
+static struct job {
+    struct job *next;
+    int viewer, serial, max_w;
+    char *url;
+    uint8_t *d;
+    size_t n;
+    const char *mime;
+} *jobs_in, *jobs_in_tail, *jobs_out, *jobs_out_tail;
+static pthread_mutex_t jobs_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t jobs_cv = PTHREAD_COND_INITIALIZER;
+static int jobs_pipe[2] = { -1, -1 };
+static size_t saved_in, saved_out; /* -v: what the pictures were, and what was sent */
+
+static void *picture_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&jobs_mu);
+        while (!jobs_in)
+            pthread_cond_wait(&jobs_cv, &jobs_mu);
+        struct job *j = jobs_in;
+        jobs_in = j->next;
+        pthread_mutex_unlock(&jobs_mu);
+        size_t wn = 0;
+        uint8_t *w = picture_smaller(j->d, j->n, j->max_w, &wn);
+        __atomic_add_fetch(&saved_in, j->n, __ATOMIC_RELAXED);
+        if (w) {
+            free(j->d);
+            j->d = w;
+            j->n = wn;
+            j->mime = "image/webp";
+        }
+        __atomic_add_fetch(&saved_out, j->n, __ATOMIC_RELAXED);
+        j->next = NULL;
+        pthread_mutex_lock(&jobs_mu);
+        if (jobs_out)
+            jobs_out_tail->next = j;
+        else
+            jobs_out = j;
+        jobs_out_tail = j;
+        pthread_mutex_unlock(&jobs_mu);
+        while (write(jobs_pipe[1], "", 1) < 0 && errno == EINTR) {
+        }
+    }
+    return NULL;
+}
+
+static void resource_out(int viewer, const char *url, const char *mime, const void *d, size_t n)
+{
+    static buf_t h;
+    size_t ul = strlen(url);
+    uint8_t l[2] = { (uint8_t)(ul >> 8), (uint8_t)ul }, ml = (uint8_t)strlen(mime);
+    h.n = 0;
+    if (ul < 65536 && !buf_add(&h, l, 2) && !buf_add(&h, url, ul) && !buf_add(&h, &ml, 1) && !buf_add(&h, mime, ml))
+        frame(&V[viewer], 'R', h.d, h.n, d, n);
+}
+
+/* the pictures the thread has finished, to their viewers */
+static void pictures_done(void)
+{
+    char c[64];
+    while (read(jobs_pipe[0], c, sizeof c) > 0) {
+    }
+    pthread_mutex_lock(&jobs_mu);
+    struct job *j = jobs_out;
+    jobs_out = NULL;
+    pthread_mutex_unlock(&jobs_mu);
+    while (j) {
+        struct job *next = j->next;
+        if (V[j->viewer].fd >= 0 && V[j->viewer].serial == j->serial)
+            resource_out(j->viewer, j->url, j->mime, j->d, j->n);
+        free(j->url);
+        free(j->d);
+        free(j);
+        j = next;
+    }
+    DBG("pictures so far: %zu bytes as the site sent them, %zu sent", saved_in, saved_out);
+}
+
 static void res_none(int viewer, const char *u)
 {
     cJSON *o = cJSON_CreateObject();
@@ -559,13 +644,33 @@ static void answer(struct pending *p, const cJSON *m)
             break;
         }
         int b64 = cJSON_IsTrue(cJSON_GetObjectItem(res, "base64Encoded"));
-        size_t n = b64 ? unbase64(c->valuestring) : strlen(c->valuestring), ul = strlen(p->arg);
+        size_t n = b64 ? unbase64(c->valuestring) : strlen(c->valuestring);
         const char *mime = sniff((const unsigned char *)c->valuestring, n, !b64);
-        static buf_t h;
-        h.n = 0;
-        uint8_t l[2] = { (uint8_t)(ul >> 8), (uint8_t)ul }, ml = (uint8_t)strlen(mime);
-        if (ul < 65536 && !buf_add(&h, l, 2) && !buf_add(&h, p->arg, ul) && !buf_add(&h, &ml, 1) && !buf_add(&h, mime, ml))
-            frame(&V[p->viewer], 'R', h.d, h.n, c->valuestring, n);
+        struct job *j = NULL;
+        /* a JPEG, a PNG or a WebP worth making smaller goes to the thread; everything else as it is, now */
+        if (jobs_pipe[0] >= 0 && n >= (20u << 10) && (!strcmp(mime, "image/jpeg") || !strcmp(mime, "image/png") || !strcmp(mime, "image/webp")) &&
+            (j = calloc(1, sizeof *j)) && (j->d = malloc(n)) && (j->url = strdup(p->arg))) {
+            memcpy(j->d, c->valuestring, n);
+            j->n = n;
+            j->mime = mime;
+            j->viewer = p->viewer;
+            j->serial = V[p->viewer].serial;
+            j->max_w = V[p->viewer].max_w;
+            pthread_mutex_lock(&jobs_mu);
+            if (jobs_in)
+                jobs_in_tail->next = j;
+            else
+                jobs_in = j;
+            jobs_in_tail = j;
+            pthread_cond_signal(&jobs_cv);
+            pthread_mutex_unlock(&jobs_mu);
+            break;
+        }
+        if (j) {
+            free(j->d);
+            free(j);
+        }
+        resource_out(p->viewer, p->arg, mime, c->valuestring, n);
         break;
     }
     case P_OP: /* the recorder's answer to an operation: {t: touches for the agent, r: a reply for the viewer} */
@@ -743,6 +848,9 @@ static void viewer_message(struct viewer *v, const char *s, size_t len)
     } else if (!k) {
     } else if (!strcmp(k, "hello")) { /* Page mode is on here: the bar, then the page from its beginning */
         v->hello = 1;
+        v->max_w = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(m, "pw")); /* NaN → 0 on every platform we build for */
+        if (v->max_w < 0 || v->max_w > 16384)
+            v->max_w = 0;
         bar_to(v);
         if (M.ctx)
             evaluate(P_QUIET, "rd.start()", 0, NULL, 0); /* everyone gets the snapshot again; the poll brings it */
@@ -840,6 +948,11 @@ int main(int argc, char **argv)
         LOG("%s: %s", lpath, strerror(errno));
         return 1;
     }
+    pthread_t th;
+    if (pipe2(jobs_pipe, O_NONBLOCK | O_CLOEXEC) || pthread_create(&th, NULL, picture_thread, NULL)) {
+        LOG("no thread for the pictures: they go as the site sent them");
+        jobs_pipe[0] = jobs_pipe[1] = -1;
+    }
     LOG("listening at %s", lpath);
     for (;;) {
         double t = now_s();
@@ -851,23 +964,29 @@ int main(int argc, char **argv)
             M.polling = 0;
             inject();
         }
-        struct pollfd pf[2 + MAX_VIEWERS] = { { listen_fd, POLLIN, 0 }, { SH.fd, (short)(POLLIN | (SH.out.n ? POLLOUT : 0)), 0 } };
+        struct pollfd pf[3 + MAX_VIEWERS] = { { listen_fd, POLLIN, 0 }, { SH.fd, (short)(POLLIN | (SH.out.n ? POLLOUT : 0)), 0 } };
         for (int i = 0; i < MAX_VIEWERS; i++)
             pf[2 + i] = (struct pollfd){ V[i].fd, (short)(POLLIN | (V[i].out.n ? POLLOUT : 0)), 0 };
+        pf[2 + MAX_VIEWERS] = (struct pollfd){ jobs_pipe[0], POLLIN, 0 };
         int ms = 1000;
         double due = touches_due(t);
         if (due && (due - t) * 1000 < ms)
             ms = (int)((due - t) * 1000) + 1;
         if (M.inject_at && (M.inject_at - t) * 1000 < ms)
             ms = (int)((M.inject_at - t) * 1000) + 1;
-        if (poll(pf, 2 + MAX_VIEWERS, ms < 0 ? 0 : ms) < 0 && errno != EINTR)
+        if (poll(pf, 3 + MAX_VIEWERS, ms < 0 ? 0 : ms) < 0 && errno != EINTR)
             return 1;
+        if (pf[2 + MAX_VIEWERS].revents)
+            pictures_done();
         if (pf[0].revents) {
             int fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC), i = 0;
             while (i < MAX_VIEWERS && V[i].fd >= 0)
                 i++;
             if (fd >= 0 && i < MAX_VIEWERS) {
+                static int serial;
                 V[i].fd = fd;
+                V[i].serial = ++serial;
+                V[i].max_w = 0;
                 LOG("viewer %d: here", i);
             } else if (fd >= 0)
                 close(fd);

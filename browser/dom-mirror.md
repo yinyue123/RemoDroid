@@ -507,3 +507,59 @@ What it showed that the plan didn't say:
   once a second, so such content can be up to a second late.
 - **`Page.captureScreenshot` of a tab that isn't in front never answers.** The same rule: the tab in front
   only, and a timeout on every DevTools call in rd-mirror.
+
+### Wired through and passing on this PC (2026-11-10)
+
+Steps 1–4 are built, and parts of 5. Nothing has run in a container or on an iPhone yet.
+
+| piece | where | state |
+|---|---|---|
+| rd-shell's socket: DevTools relay, the bar's state out, its commands in | `browser/rd-shell/rd-shell.c` (`link_*`) | built; tested on Xvfb and Xorg with kiosk Chrome |
+| rd-mirror: attach to the tab in front, the recorder, resources, pictures, dialogs, touches | `browser/rd-mirror/rd-mirror.c`, `picture.c`, `recorder.js` | built |
+| the agent: `dom` channel ⇄ rd-mirror's socket, `mirror.set`, `mirror.video`, touches | `desktop/core/mirror.c`, `session.c` | built (Linux here; the Mac and Windows builds only in CI) |
+| the viewer: Page / Video in the menu, the bar in HTML, operations | `web/pagemode.js`, `mirror.js`, `app.js` | built |
+| the image: rd-mirror, its unit, the runtime directories, `[mirror]` added to an existing `desktop.ini` | `browser/hqnode/` | builds in the browser-image Action; not installed anywhere |
+
+`tests/e2e_mirror.py` runs all of it for real — Xorg with the touch screen, rd-shell, Chrome in kiosk as
+the remote browser, rd-mirror, the agent, the server, and the web viewer at an iPhone's size with touch:
+
+| check | result |
+|---|---|
+| Page mode shows the page's elements under the viewer's bar; the frame is 440 × 860, sandboxed, no scripts in it | ✔ |
+| a tap on the mirror's button | a trusted click on the real one (`isTrusted`), twice |
+| typing into the mirror's field, with three characters deleted and retyped | the real field has it; the page's echo comes back |
+| a `<select>` picked in the mirror | picked on the real page |
+| `confirm()` on the real page | asked on the viewer, answered to the page |
+| a `<video>` that plays for 3 s | the picture while it plays, the page again after |
+| a finger dragged 96 px over something that doesn't scroll | the page's own touch handler saw it move 99 px |
+| the mirror scrolled to its end | the real page went there and loaded more: 20 rows → 80 |
+| a link tapped | the real page navigated; the viewer's frame stayed `about:srcdoc` |
+| the bar: Back, then an address typed | the page before; then the page asked for |
+| a CSS background picture | arrived over the channel, shown from a `blob:` |
+| requests from the viewer's browser for anything of the site's | none |
+| Video mode again | the picture came back |
+
+Pictures (`browser/test/mirror/picture_test.c`): a 2400 × 1600 JPEG of 186 KB → a 1320 × 880 WebP of 28 KB
+for a viewer 1320 pixels across; a 1200 × 800 PNG of 108 KB → 26 KB; under 20 KB, truncated files and junk
+go as they are. D6 as recommended (quality 75), except the size: no wider than the viewer's screen, not the
+size each one is shown at — the viewer doesn't know that before it has the picture.
+
+What this showed that the plan didn't say:
+
+- **A data-channel message over about 1200 bytes from the agent never reached the viewer** (one of 1538
+  bytes, every run; smaller ones always arrived). The agent now sends `dom` in 1000-byte pieces, which
+  works. Why the stack loses a message it has to split is not known; the `file` channel may have the same
+  fault and deserves a look.
+- **With `Page.enable`, the browser shows no `alert` of its own**: it waits for DevTools. So dialogs are
+  the viewer's to ask (done), not a window that would bring the video.
+- **A page back from the back/forward cache still holds the recorder it had**, with a waiter nobody
+  listens to. A restart of the recorder drops that waiter first.
+- **`mirror.video`** is new: the picture beside Page mode for a while (a playing video, a window of the
+  browser's own, a page over 20 000 elements), without leaving Page mode — the bar's state has to keep
+  arriving to know when to come back.
+
+Not built: frames from other sites and `<canvas>` (blank boxes for now), a mouse's hover on computer
+viewers, the per-site "always Video" list (D8), the limits by size and by rate of change (§14; only the
+element count is checked), the cache of converted pictures, a second viewer's own snapshot without
+resending everyone's. Not tested: Safari (every test here has Chrome on both sides), the OECT's four A55
+cores, the cost against video (T5), and what a detection page sees (T7).
