@@ -1,0 +1,44 @@
+<!doctype html><html lang=en><head><meta charset=utf-8><title>mirror test</title>
+<base target=_blank>
+<link rel=stylesheet href="same.css">
+<link rel=stylesheet href="http://127.0.0.1:8472/cross.css">
+<style id=s>.a{color:rgb(0,0,255)} #bg{width:120px;height:80px;background:url(pic.png)}</style>
+<script>window.pageSecret = 1;</script>
+</head><body onload="window.loaded=1">
+<h1 id=h class=same>Mirror test</h1>
+<p id=p class=cross onclick="alert(1)">A paragraph with a <a id=lnk href="https://example.com/secret?x=1">link</a>.</p>
+<div id=bg></div>
+<img id=im src="http://127.0.0.1:8472/pic.png" width=60 height=40>
+<ul id=list><li>one</li><li>two</li><li>three</li></ul>
+<div id=box><span id=mv>movable</span></div><div id=box2></div>
+<form id=f action="https://example.com/post"><input id=in value=initial><input id=cb type=checkbox>
+<textarea id=ta>text</textarea><select id=sel><option>a<option>b<option>c</select></form>
+<noscript><img src="http://127.0.0.1:8472/noscript.png"></noscript>
+<iframe id=fr src="about:blank" width=50 height=20></iframe>
+<div id=dyn></div><div id=host></div>
+<script>
+const $ = id => document.getElementById(id);
+window.steps = [
+  () => { for (let i = 0; i < 5; i++) { const li = document.createElement('li'); li.textContent = 'new ' + i; $('list').appendChild(li); } },
+  () => { $('list').children[1].remove(); },
+  () => { $('list').insertBefore($('list').lastElementChild, $('list').firstElementChild); },
+  () => { $('h').className = 'a'; $('h').setAttribute('data-x', '1'); $('p').style.background = 'url(pic.png)'; $('p').removeAttribute('class'); },
+  () => { $('h').firstChild.data = 'Changed'; },
+  () => { $('s').sheet.insertRule('.injected{color:rgb(0,128,0)}', 0); $('h').className = 'injected'; },
+  () => { $('dyn').innerHTML = '<p class=a onclick="x()">in <b>bold</b></p><script>window.evil=1<\/script><img src="http://127.0.0.1:8472/pic.png" srcset="http://127.0.0.1:8472/pic.png 2x"><a href="javascript:alert(1)">js</a>'; },
+  () => { $('box2').appendChild($('mv')); },
+  () => { const sr = $('host').attachShadow({ mode: 'open' }); sr.innerHTML = '<style>span{color:rgb(255,0,0)}</style><span id=inner>shadow</span>'; $('host').setAttribute('data-sr', 1); const d = document.createElement('div'); d.id = 'host2'; d.attachShadow({ mode: 'open' }).innerHTML = '<i>s2</i>'; document.body.appendChild(d); },
+  () => { $('host2').shadowRoot.appendChild(document.createElement('u')).textContent = 'later'; },
+  () => { $('in').value = 'typed'; $('cb').checked = true; $('ta').value = 'more'; $('sel').selectedIndex = 2; },
+  () => { for (const u of ['late.css', 'http://127.0.0.1:8472/late-cross.css']) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = u; document.head.appendChild(l); } },
+  () => { $('dyn').insertAdjacentHTML('beforeend', '<svg id=sv width=40 height=40 viewBox="0 0 40 40"><defs><linearGradient id=g><stop offset=0 stop-color=red /><stop offset=1 stop-color=blue /></linearGradient></defs><circle cx=20 cy=20 r=18 fill="url(#g)"/></svg>'); },
+  () => { const n = $('box2'); window.kept = n; n.remove(); },
+  () => { document.body.insertBefore(window.kept, $('f')); window.kept.appendChild(document.createElement('em')).textContent = 'back'; },
+  () => { $('s').textContent = '.a{color:rgb(9,9,9)} #bg{width:120px;height:80px;background:url(pic.png)}'; $('h').className = 'a'; },
+  () => { const t = document.createElement('p'); document.body.appendChild(t); t.remove(); const k = document.createElement('p'); k.id = 'kept'; k.textContent = 'k'; document.body.appendChild(k); },
+  () => { const l = $('list'); l.textContent = ''; for (let i = 0; i < 300; i++) { const li = document.createElement('li'); li.textContent = 'row ' + i; l.appendChild(li); } },
+  () => { const l = $('list'); for (let i = 0; i < 100; i++) l.firstChild.remove(); for (let i = 0; i < 50; i++) { const li = document.createElement('li'); li.textContent = 'tail ' + i; l.appendChild(li); } l.children[3].textContent = 'edited'; },
+  () => { document.documentElement.setAttribute('data-theme', 'dark'); document.body.className = 'b'; document.title = 'new title'; },
+];
+</script>
+</body></html>

@@ -1,0 +1,14 @@
+<!doctype html><meta charset=utf-8><title>viewer</title><body style="margin:0">
+<iframe id=f style="border:0"></iframe>
+<script src="mirror.js"></script>
+<script>
+const Q = [];
+const M = new Mirror(document.getElementById('f'), m => Q.push(m));
+function feed(s) { for (const m of JSON.parse(s)) M.on(m); return 1; }
+function give(u, b64, mime) {
+  if (b64 === null) return M.resource(u, null);
+  const bin = atob(b64), a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  M.resource(u, new Blob([a], { type: mime }));
+}
+</script>
