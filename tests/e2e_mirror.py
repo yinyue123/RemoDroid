@@ -89,7 +89,7 @@ socket = {d}/mirror.sock
 users = Alice Bob
 data = {d}/users
 cache = {d}/cache
-home = {args.url or origin + "/ops.html"}
+home = {origin + "/ops.html" if args.url in (None, "local") else args.url}
 browser = {site_chrome}
 args = --no-sandbox --disable-gpu
 mirror_socket = {d}/shell.sock
@@ -127,10 +127,13 @@ mirror_socket = {d}/shell.sock
                                   stderr=logs["agent"], stdout=logs["agent"]))
     try:
         async with async_playwright() as p:
-            launch = {"args": ["--autoplay-policy=no-user-gesture-required"]}
-            if args.chrome:
-                launch["executable_path"] = args.chrome
-            browser = await p.chromium.launch(**launch)
+            if args.webkit:  # Safari's engine: what the iPhone and the Mac app run
+                browser = await p.webkit.launch()
+            else:
+                launch = {"args": ["--autoplay-policy=no-user-gesture-required"]}
+                if args.chrome:
+                    launch["executable_path"] = args.chrome
+                browser = await p.chromium.launch(**launch)
             ctx = await browser.new_context(viewport={"width": 428, "height": 926}, device_scale_factor=3,
                                             has_touch=True, is_mobile=True)
             page = await ctx.new_page()
@@ -350,6 +353,7 @@ if __name__ == "__main__":
     ap.add_argument("--chrome", help="Chrome / headless shell for the viewer instead of Playwright's")
     ap.add_argument("--site-chrome", help="the Chrome that plays the remote browser (default: google-chrome)")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--webkit", action="store_true", help="the viewer in WebKit (Safari's engine) instead of Chrome")
     ap.add_argument("--url", help="a real site as the browser's home page: only check that it shows, pictures and all")
     ap.add_argument("--watch", type=float, default=30, help="--url: seconds to watch it")
     ap.add_argument("--shot", help="--url: a screenshot of the viewer here")
