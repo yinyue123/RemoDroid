@@ -28,7 +28,7 @@ const CSS = `
 #pmAddr{flex:1;min-width:0;height:34px;border:0;border-radius:9px;padding:0 10px;background:#2a2d35;color:inherit;font:inherit;
   text-overflow:ellipsis}
 #pmAddr:focus{outline:2px solid #4c8dff}
-#pmView{flex:1;position:relative;overflow:hidden;background:#fff}
+#pmView{flex:1;position:relative;overflow:hidden;background:#101114}
 #pmFrame{position:absolute;left:0;top:0;border:0;transform-origin:0 0;background:#fff}
 #pmFrame.old{opacity:.45}
 #pmMenu,#pmList{position:absolute;z-index:2;right:6px;top:calc(env(safe-area-inset-top,0px) + 48px);width:min(300px,calc(100% - 12px));
@@ -194,6 +194,14 @@ function fit() {
   frame.style.height = doc.h + 'px';
   frame.style.transform = `scale(${s})`;
   frame.style.left = Math.max(0, (v.clientWidth - doc.w * s) / 2) + 'px';
+  /* a page shaped unlike this screen (the browser in desktop mode on a phone) leaves room around it: the
+   * page's own background there, not a white band */
+  try {
+    const d = frame.contentDocument, w = frame.contentWindow, clear = c => !c || c === 'transparent' || /rgba\(.*,\s*0\)$/.test(c);
+    let bg = d.body && w.getComputedStyle(d.body).backgroundColor;
+    if (clear(bg) && d.documentElement) bg = w.getComputedStyle(d.documentElement).backgroundColor;
+    v.style.background = clear(bg) ? '' : bg;
+  } catch (e) {}
 }
 
 /* ---------------- what arrives ---------------- */
@@ -218,7 +226,10 @@ function message(m) {
     note('');
     setTimeout(() => sendView(true), 0); /* where this viewer is, to the page that has just been sent */
     break;
-  case 'diff': mirror.on(m); break;
+  case 'diff':
+    mirror.on(m);
+    if (!fit.later) fit.later = setTimeout(() => { fit.later = 0; fit(); }, 500); /* the page's colours arrive late */
+    break;
   case 'bar': {
     const nav = bar && (bar.front !== m.front || bar.url !== m.url);
     bar = m;
