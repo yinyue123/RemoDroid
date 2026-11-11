@@ -15,6 +15,7 @@
 #define MAX_PAIRS 64
 #define MAX_PEERS 16
 #define TICK 0.02
+#define DIRECT_GRACE 2.0 /* how long a relayed pair that works waits for a direct one still being checked */
 
 enum { C_HOST, C_SRFLX, C_PRFLX, C_RELAY };
 static const char *CTYPE[] = { "host", "srflx", "prflx", "relay" };
@@ -37,7 +38,7 @@ typedef struct {
 } rcand_t;
 
 typedef struct {
-    int path, remote, state, tries, nominating, nominated;
+    int path, remote, state, tries, nominating, nominated, triggered;
     uint64_t prio;
     uint8_t tid[12];
     ev_tstamp next_tx, sent_at;
@@ -83,7 +84,7 @@ struct ice {
     struct sockaddr_storage stun;
     int have_stun, stun_state, stun_tries; /* stun_state: 0 none, 1 pending, 2 done */
     uint8_t stun_tid[12];
-    ev_tstamp stun_tx, gather_deadline, nominate_at, consent_rx, consent_tx, checking_since;
+    ev_tstamp stun_tx, gather_deadline, nominate_at, consent_rx, consent_tx, checking_since, first_ok;
     int gathering, gather_done;
     ev_timer tick;
     uint8_t consent_tid[12];
@@ -502,15 +503,29 @@ static int pair_ready(ice_t *ice, pair_t *p)
     return peer && peer->perm;
 }
 
+static int relayed(const ice_t *ice, const pair_t *p)
+{
+    return p->path == PATH_RELAY || ice->remote[p->remote].type == C_RELAY;
+}
+
 static void nominate(ice_t *ice)
 {
-    int best = -1;
-    for (int i = 0; i < ice->npairs; i++)
-        if (ice->pairs[i].state == P_SUCCEEDED && (best < 0 || ice->pairs[i].prio > ice->pairs[best].prio))
+    int best = -1, direct_pending = 0;
+    for (int i = 0; i < ice->npairs; i++) {
+        const pair_t *q = &ice->pairs[i];
+        if (q->state == P_SUCCEEDED && (best < 0 || q->prio > ice->pairs[best].prio))
             best = i;
+        direct_pending |= (q->state == P_WAITING || q->state == P_INPROGRESS) && !relayed(ice, q);
+    }
     if (best < 0)
         return;
     pair_t *p = &ice->pairs[best];
+    /* A relay answers first when the direct path needs both NATs opened, which takes the far end's
+     * checks and our next retry: settling then kept every such session on the relay. */
+    if (relayed(ice, p) && direct_pending && now(ice) - ice->first_ok < DIRECT_GRACE) {
+        ice->nominate_at = now(ice) + 0.1;
+        return;
+    }
     p->nominating = 1;
     p->tries = 0;
     char s[64];
@@ -562,6 +577,8 @@ static void handle_check_response(ice_t *ice, const stun_view_t *v, int path, co
         }
         if (p->state != P_SUCCEEDED) {
             p->state = P_SUCCEEDED;
+            if (!ice->first_ok)
+                ice->first_ok = now(ice);
             if (!ice->nominate_at && ice->selected < 0)
                 ice->nominate_at = now(ice) + 0.12; /* wait briefly for a better pair */
         }
@@ -605,8 +622,13 @@ static void handle_check_request(ice_t *ice, const stun_view_t *v, int path, con
     }
     for (int i = 0; i < ice->npairs; i++) { /* triggered check */
         pair_t *p = &ice->pairs[i];
-        if (p->remote == ri && p->path == path && p->state != P_SUCCEEDED && p->state != P_INPROGRESS) {
+        if (p->remote != ri || p->path != path)
+            continue;
+        if (p->state == P_WAITING || p->state == P_FAILED) {
             p->state = P_WAITING;
+            p->next_tx = now(ice);
+        } else if (p->state == P_INPROGRESS && !p->triggered) { /* the far end got through: retry now, not after the backoff */
+            p->triggered = 1;
             p->next_tx = now(ice);
         }
     }
