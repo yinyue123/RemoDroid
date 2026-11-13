@@ -27,7 +27,10 @@ agent_route() {
 	while ip rule del pref 102 2>/dev/null; do :; done
 	if [ "$(conf lan_webrtc)" = 1 ]; then
 		# The slim image need not have /etc/protocols; use UDP's protocol number.
-		id=$(id -u rdagent) && ip rule add uidrange "$id-$id" ipproto 17 lookup "$1" pref 102
+		id=$(id -u rdagent) || return 1
+		# pasta's synthetic resolver exists on tap0, not on the physical LAN.
+		ip rule add to 169.254.1.1/32 uidrange "$id-$id" ipproto 17 lookup main pref 102
+		ip rule add uidrange "$id-$id" ipproto 17 lookup "$1" pref 102
 	fi
 }
 

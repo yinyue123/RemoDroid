@@ -118,6 +118,9 @@ def prepare_lan(cid):
             browser_route = inside('ip', '-4', 'route', 'get', '1.1.1.1', 'uid', '995', 'ipproto', '6', capture=True)
             if 'dev tap0' not in browser_route:
                 raise RuntimeError('the browser unexpectedly acquired the LAN route')
+            dns_route = inside('ip', '-4', 'route', 'get', '169.254.1.1', 'uid', '994', 'ipproto', '17', capture=True)
+            if 'dev tap0' not in dns_route:
+                raise RuntimeError('the agent lost access to pasta DNS')
             print('Verified agent UDP via lan0; browser via tap0', flush=True)
             return
         time.sleep(1)
