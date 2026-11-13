@@ -238,7 +238,9 @@ function message(m) {
     setTimeout(() => sendView(true), 0); /* where this viewer is, to the page that has just been sent */
     break;
   case 'diff':
+    composeWatch(false); /* the real page's changes are not the input method's to take back */
     mirror.on(m);
+    composeWatch(true);
     undim();
     richCaret();
     if (!fit.later) fit.later = setTimeout(() => { fit.later = 0; fit(); }, 500); /* the page's colours arrive late */
@@ -310,6 +312,35 @@ const rich = t => {
   return null;
 };
 const richly = { at: 0 }; /* when the last key went to such a box */
+const compose = { box: null, mo: null, recs: [], caret: null }; /* an input method at work in one (listen()) */
+function composeWatch(on) {
+  if (!compose.mo) return;
+  if (on) compose.mo.observe(compose.box, { childList: true, characterData: true, characterDataOldValue: true, subtree: true });
+  else { compose.recs.push(...compose.mo.takeRecords()); compose.mo.disconnect(); }
+}
+function composeUndo() {
+  if (!compose.mo) return;
+  composeWatch(false);
+  const recs = compose.recs, caret = compose.caret;
+  compose.mo = compose.box = compose.caret = null;
+  compose.recs = [];
+  for (let i = recs.length - 1; i >= 0; i--) {
+    const r = recs[i];
+    try {
+      if (r.type === 'characterData') r.target.data = r.oldValue;
+      else {
+        for (const n of r.addedNodes) if (n.parentNode === r.target) r.target.removeChild(n);
+        const next = r.nextSibling && r.nextSibling.parentNode === r.target ? r.nextSibling : null;
+        for (const n of r.removedNodes) r.target.insertBefore(n, next);
+      }
+    } catch (e) {}
+  }
+  try {
+    const s = frame.contentDocument.getSelection();
+    if (caret && caret[0] && caret[0].isConnected)
+      s.collapse(caret[0], Math.min(caret[1], caret[0].nodeType === 3 ? caret[0].data.length : caret[0].childNodes.length));
+  } catch (e) {}
+}
 function richText(text) {
   if (!text) return;
   richly.at = performance.now();
@@ -430,9 +461,29 @@ function listen() {
       richText(text);
     }
   }, true);
-  d.addEventListener('compositionend', e => { if (rich(e.target)) richText(e.data); }, true);
+  /* An input method writes into the mirror's box while it composes, and nothing can stop it. What it did
+   * there is taken back when it ends (each change undone, last first), so the box is again the one the real
+   * page's differences are made for; then its finished word goes over and comes back as one of those. Left
+   * in, the word stayed in the mirror after the real box was emptied (a message sent), and no key took it out. */
+  d.addEventListener('compositionstart', e => {
+    const box = rich(e.target);
+    if (!box) return;
+    composeUndo();
+    const s = d.getSelection();
+    compose.box = box;
+    compose.recs = [];
+    compose.caret = s && s.rangeCount ? [s.anchorNode, s.anchorOffset] : null;
+    compose.mo = new MutationObserver(r => compose.recs.push(...r));
+    composeWatch(true);
+  }, true);
+  d.addEventListener('compositionend', e => {
+    if (!compose.box && !rich(e.target)) return;
+    const word = e.data;
+    setTimeout(() => { composeUndo(); richText(word); }, 0); /* after the browser's own last change to the box */
+  }, true);
   d.addEventListener('keydown', e => {
-    if (!typing.el && rich(e.target) && !e.isComposing && e.keyCode !== 229) {
+    if (e.isComposing || e.keyCode === 229) return; /* the input method's own keys (Enter takes its word, no more) */
+    if (!typing.el && rich(e.target)) {
       const mods = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
       const key = { Enter: 0x28, Backspace: 0x2a, Delete: 0x4c }[e.key];
       if (key) { e.preventDefault(); richKey(key, mods); return; }
