@@ -35,7 +35,9 @@ def api(method, path, body=None):
     if body is not None:
         args += ['--data-binary', '@-']
     result = subprocess.run(args, input=json.dumps(body) if body is not None else None,
-                            check=True, text=True, capture_output=True)
+                            text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError(f'hqnode {method} {path}: {result.stderr.strip()}')
     return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
@@ -46,7 +48,7 @@ def inside(*args, capture=False):
 def pair():
     login = STATE / 'panel-login.json'
     if not login.exists():
-        inside('sh', '-ec', 'grep -q "^secret *=" /data/remodroid/desktop.ini')
+        inside('sh', '-ec', 'grep -q "^device_secret *=" /data/remodroid/desktop.ini')
         return
     settings = json.loads(login.read_text())
     panel = settings['panel'].rstrip('/')
