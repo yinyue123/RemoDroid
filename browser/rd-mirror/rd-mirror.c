@@ -208,13 +208,24 @@ static struct {
     double page[4], screen[2]; /* where the page is on the X screen, in pixels */
 } SH = { .path = "/run/rd-shell/sock", .fd = -1 };
 
-enum { P_NONE, P_ATTACH, P_WORLD, P_INJECT, P_POLL, P_RES, P_OP, P_QUIET };
+enum { P_NONE, P_ATTACH, P_WORLD, P_INJECT, P_POLL, P_RES, P_LOAD, P_READ, P_OP, P_QUIET };
 static struct pending {
     int id, kind, gen;
-    char *arg; /* P_RES: the address asked for */
+    char *arg; /* P_RES, P_LOAD, P_READ: the address asked for */
     int viewer;
-} PD[128];
+    int load;     /* P_RES: if the page's own copy can't be had, the browser may load it (a file of icons) */
+    char *stream; /* P_READ: the browser's handle on what it loaded */
+    buf_t body;   /* P_READ: what has been read of it */
+} PD[128], *called; /* called: the one the last call() filled in */
 static int next_id = FIRST_ID;
+
+static void pending_free(struct pending *p)
+{
+    free(p->arg);
+    free(p->stream);
+    free(p->body.d);
+    memset(p, 0, sizeof *p);
+}
 
 static struct {
     char tab[48], sid[64]; /* the tab attached to, and the DevTools session */
@@ -237,10 +248,8 @@ static void shell_close(void)
     SH.running = 0;
     SH.front[0] = 0;
     memset(&M, 0, sizeof M);
-    for (struct pending *p = PD; p < PD + 128; p++) {
-        free(p->arg);
-        memset(p, 0, sizeof *p);
-    }
+    for (struct pending *p = PD; p < PD + 128; p++)
+        pending_free(p);
     SH.retry_at = now_s() + 1;
 }
 
@@ -296,6 +305,7 @@ static int call(int kind, const char *method, cJSON *params, int session, const 
     p->gen = M.gen;
     p->arg = arg ? strdup(arg) : NULL;
     p->viewer = viewer;
+    called = p;
     shell_send(s);
     free(s);
     return next_id;
@@ -640,6 +650,18 @@ static void answer(struct pending *p, const cJSON *m)
         const cJSON *c = cJSON_GetObjectItem(res, "content");
         if (p->viewer < 0 || p->viewer >= MAX_VIEWERS || V[p->viewer].fd < 0)
             break;
+        if (!stale && !cJSON_IsString(c) && p->load) {
+            /* Chrome keeps no copy of a file of icons for the page's tools (2026-11-13, ChatGPT's): the browser
+             * loads it once more, as that page, from its cache when it is there. Nothing the page can see. */
+            cJSON *q = cJSON_CreateObject(), *o = cJSON_AddObjectToObject(q, "options");
+            cJSON_AddStringToObject(q, "frameId", M.tab);
+            cJSON_AddStringToObject(q, "url", p->arg);
+            cJSON_AddBoolToObject(o, "disableCache", 0);
+            cJSON_AddBoolToObject(o, "includeCredentials", 1);
+            if (!call(P_LOAD, "Network.loadNetworkResource", q, 1, p->arg, p->viewer))
+                res_none(p->viewer, p->arg);
+            break;
+        }
         if (stale || !cJSON_IsString(c)) {
             res_none(p->viewer, p->arg);
             break;
@@ -672,6 +694,55 @@ static void answer(struct pending *p, const cJSON *m)
             free(j);
         }
         resource_out(p->viewer, p->arg, mime, c->valuestring, n);
+        break;
+    }
+    case P_LOAD: { /* loaded: it is read from a stream, a piece at a time */
+        const cJSON *r = cJSON_GetObjectItem(res, "resource");
+        const char *stream = cJSON_GetStringValue(cJSON_GetObjectItem(r, "stream"));
+        if (p->viewer < 0 || p->viewer >= MAX_VIEWERS || V[p->viewer].fd < 0)
+            break;
+        cJSON *q = stream ? cJSON_CreateObject() : NULL;
+        if (q) {
+            cJSON_AddStringToObject(q, "handle", stream);
+            cJSON_AddNumberToObject(q, "size", 1 << 20);
+        }
+        if (stale || !cJSON_IsTrue(cJSON_GetObjectItem(r, "success")) || !q || !call(P_READ, "IO.read", q, 1, p->arg, p->viewer)) {
+            DBG("load %s: %s", p->arg, emsg ? emsg : "no");
+            res_none(p->viewer, p->arg);
+        } else
+            called->stream = strdup(stream);
+        break;
+    }
+    case P_READ: {
+        const cJSON *c = cJSON_GetObjectItem(res, "data");
+        int live = p->viewer >= 0 && p->viewer < MAX_VIEWERS && V[p->viewer].fd >= 0, more = 0;
+        if (cJSON_IsString(c) && p->stream && live) {
+            size_t n = cJSON_IsTrue(cJSON_GetObjectItem(res, "base64Encoded")) ? unbase64(c->valuestring) : strlen(c->valuestring);
+            int ok = p->body.n + n <= (4u << 20) && !buf_add(&p->body, c->valuestring, n);
+            cJSON *q = cJSON_CreateObject();
+            cJSON_AddStringToObject(q, "handle", p->stream);
+            if (ok && cJSON_IsTrue(cJSON_GetObjectItem(res, "eof")))
+                resource_out(p->viewer, p->arg, sniff((const unsigned char *)p->body.d, p->body.n, 1), p->body.d, p->body.n);
+            else if (ok && n) {
+                cJSON *r = cJSON_Duplicate(q, 1);
+                cJSON_AddNumberToObject(r, "size", 1 << 20);
+                if (call(P_READ, "IO.read", r, 1, p->arg, p->viewer)) { /* the next piece: it takes what there is along */
+                    called->stream = p->stream;
+                    called->body = p->body;
+                    p->stream = NULL;
+                    memset(&p->body, 0, sizeof p->body);
+                    more = 1;
+                }
+            } else
+                ok = 0;
+            if (!more) {
+                if (!ok)
+                    res_none(p->viewer, p->arg);
+                call(P_QUIET, "IO.close", q, 1, NULL, 0);
+            } else
+                cJSON_Delete(q);
+        } else if (live)
+            res_none(p->viewer, p->arg);
         break;
     }
     case P_OP: /* the recorder's answer to an operation: {t: touches for the agent, r: a reply for the viewer} */
@@ -739,8 +810,7 @@ static void shell_message(char *s, size_t len)
                 DBG("answer %d kind %d gen %d/%d%s (%zu bytes)", p->id, p->kind, p->gen, M.gen,
                     cJSON_GetObjectItem(m, "error") ? " ERROR" : "", len);
                 answer(p, m);
-                free(p->arg);
-                memset(p, 0, sizeof *p);
+                pending_free(p);
                 break;
             }
     } else if (method && M.sid[0]) {
@@ -872,6 +942,8 @@ static void viewer_message(struct viewer *v, const char *s, size_t len)
             cJSON_AddStringToObject(p, "url", u);
             if (!call(P_RES, "Page.getResourceContent", p, 1, u, (int)(v - V)))
                 res_none((int)(v - V), u);
+            else
+                called->load = cJSON_IsTrue(cJSON_GetObjectItem(m, "load"));
         } else if (u && strlen(u) < 8192)
             res_none((int)(v - V), u);
     } else if (!strcmp(k, "op") && M.ctx) { /* a tap, where the viewer is looking, a value: the recorder's business */

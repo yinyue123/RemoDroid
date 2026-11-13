@@ -170,7 +170,7 @@ class Mirror {
         this.uses.set(n, v);
         this.want(file, () => this.icons(file).then(pre => {
           if (pre && this.uses.get(n) === v) n.setAttribute(name, '#' + pre + (at < 0 ? '' : v.slice(at + 1)));
-        }));
+        }), true);
       } else if (name === 'href' || name === 'xlink:href') {
         this.uses.delete(n);
         n.setAttribute(name, v[0] === '#' ? v : '#');
@@ -188,8 +188,9 @@ class Mirror {
     if (p.sel && n.options) for (const o of n.options) o.selected = p.sel.includes(o.index);
   }
 
-  /* an address → cb(blob: URL or '') now if it is here, else later; asks for it once */
-  want(u, cb) {
+  /* an address → cb(blob: URL or '') now if it is here, else later; asks for it once. load: the browser may
+   * load it again if it kept no copy for the page (a file of icons; never a picture the page hasn't loaded) */
+  want(u, cb, load) {
     if (!u) return cb('');
     if (/^data:/i.test(u)) return cb(u);
     if (!/^https?:/i.test(u)) return cb('');
@@ -198,7 +199,7 @@ class Mirror {
     let w = this.waits.get(u);
     if (!w) this.waits.set(u, w = []);
     w.push(cb);
-    if (have === undefined) { this.res.set(u, ''); this.send({ k: 'res.get', u }); }
+    if (have === undefined) { this.res.set(u, ''); this.send(load ? { k: 'res.get', u, load: true } : { k: 'res.get', u }); }
   }
 
   resource(u, blob) {
