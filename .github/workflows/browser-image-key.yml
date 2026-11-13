@@ -1,0 +1,32 @@
+name: browser-image-key
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_key:
+        description: RSA public key in PEM format to wrap the image decryption key
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  wrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Wrap the image key for the deployment host
+        env:
+          PUBLIC_KEY: ${{ inputs.public_key }}
+          KEY: ${{ secrets.BROWSER_IMAGE_KEY }}
+        run: |
+          test -n "$KEY"
+          printf '%s\n' "$PUBLIC_KEY" > public.pem
+          printf '%s' "$KEY" | openssl pkeyutl -encrypt -pubin -inkey public.pem \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+            -out browser-image-key.enc
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wrapped-browser-image-key
+          path: browser-image-key.enc
+          retention-days: 1
