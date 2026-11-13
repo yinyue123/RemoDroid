@@ -56,6 +56,12 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
           printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
-          tar -C pkgs -c . | ssh -i ~/.ssh/deploy -p "$PORT" \
-            -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=2 \
-            -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$HOST" browser-sx
+          for attempt in 1 2 3; do
+            if tar -C pkgs -c . | ssh -i ~/.ssh/deploy -p "$PORT" \
+              -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=2 \
+              -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$HOST" browser-sx; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
