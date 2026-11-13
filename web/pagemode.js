@@ -210,6 +210,11 @@ async function inflate(u8) {
   w.write(u8); w.close();
   return new Response(ds.readable).text();
 }
+let dim = 0;
+function undim() {
+  clearTimeout(dim);
+  if (!bar || bar.running) frame.classList.remove('old');
+}
 function message(m) {
   PageMode.log.push(m.k === 'doc' ? 'doc ' + m.url : m.k === 'diff' ? 'diff ' + m.o.length : m.k);
   if (PageMode.log.length > 40) PageMode.log.shift();
@@ -228,13 +233,16 @@ function message(m) {
     break;
   case 'diff':
     mirror.on(m);
+    undim();
     richCaret();
     if (!fit.later) fit.later = setTimeout(() => { fit.later = 0; fit(); }, 500); /* the page's colours arrive late */
     break;
   case 'bar': {
     const nav = bar && (bar.front !== m.front || bar.url !== m.url);
     bar = m;
-    if (nav) frame.classList.add('old'); /* the old page, dimmed, until the new one's snapshot */
+    /* the old page, dimmed, until the new one's snapshot. A page that only changes its address (a chat opened
+     * from a list, by script) sends no snapshot: its next difference, or a moment, ends the dimming */
+    if (nav) { frame.classList.add('old'); clearTimeout(dim); dim = setTimeout(undim, 2500); }
     if (!m.running) { note('The browser is stopped'); frame.classList.add('old'); }
     showBar();
     fallback('windows', m.windows > 1); /* a prompt, a list, a download: only the picture can show it */
