@@ -217,9 +217,20 @@ mirror_socket = {d}/shell.sock
             res["photos_ok"] = (p1[2] == "image/webp" and p1[0] <= 1284 and p1[3] < os.path.getsize(f"{ROOT}/browser/test/mirror/pages/photo.jpg")
                                 and p2[0] == 900 and p2[3] > 0 and res["photos"]["logo"][2] == "image/svg+xml")
 
+            # an icon from a file of icons (<use href="icons.svg#dot">): the file came as bytes and is in the mirror
+            icon = lambda: page.evaluate("""() => { const d = document.querySelector('#pmFrame').contentDocument, u = d.querySelector('#icon use'),
+                h = u && u.getAttribute('href'), t = h && h[0] === '#' && d.getElementById(h.slice(1));
+                return [h, !!t, u ? Math.round(u.getBoundingClientRect().width) : 0]; }""")
+            await page.wait_for_function("() => { const u = document.querySelector('#pmFrame').contentDocument.querySelector('#icon use');"
+                                         " return u && /^#rd-i\\d+-dot$/.test(u.getAttribute('href') || ''); }", timeout=10000)
+            res["icon"] = await icon()
+
             # a tap on the mirror's button: a real, trusted tap on the real one, and the new text comes back
             await tap("#btn")
             await until("#btn", "taps: 1")
+            await page.wait_for_function("() => /-bar$/.test(document.querySelector('#pmFrame').contentDocument.querySelector('#icon use').getAttribute('href') || '')",
+                                         timeout=10000)  # the page changed the icon: the mirror's points at the other one
+            res["icon2"] = await icon()
             await tap("#btn")
             await until("#btn", "taps: 2")
             res["tap"] = await txt("#btn")
@@ -354,7 +365,7 @@ mirror_socket = {d}/shell.sock
             await browser.close()
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
-              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again (enter)" and res.get("select") == "picked: blue"
+              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again (enter)" and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
               and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("page_only_ok") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'

@@ -8,6 +8,7 @@ button,input,select{font:inherit;margin:8px;padding:8px}
 </style></head><body>
 <header id=head>ops test</header>
 <img id=logo src="logo.svg" width=80 height=24 alt="">
+<svg id=icon width=24 height=24 style="color:#c00"><use href="icons.svg#dot" fill="currentColor"></use></svg>
 <button id=btn>taps: 0</button>
 <input id=in placeholder="type here"><div id=echo>echo:</div>
 <div id=ed contenteditable style="margin:8px;padding:8px;border:1px solid #888;min-height:20px"><p><br></p></div>
@@ -21,7 +22,7 @@ button,input,select{font:inherit;margin:8px;padding:8px}
 <script>
 const $ = id => document.getElementById(id);
 let taps = 0, rows = 0;
-$('btn').addEventListener('click', e => { $('btn').textContent = 'taps: ' + (++taps) + (e.isTrusted ? '' : ' (untrusted)'); });
+$('btn').addEventListener('click', e => { $('icon').firstElementChild.setAttribute('href', 'icons.svg#bar'); $('btn').textContent = 'taps: ' + (++taps) + (e.isTrusted ? '' : ' (untrusted)'); });
 $('in').addEventListener('input', () => { $('echo').textContent = 'echo:' + $('in').value; });
 /* a chat's message box: an editable <div>, a button that works once there is text, Enter sends */
 const say = how => { const t = $('ed').innerText.trim(); if (!t) return; $('sent').textContent = 'sent: ' + t + ' (' + how + ')'; $('ed').innerHTML = '<p><br></p>'; $('send').disabled = true; };

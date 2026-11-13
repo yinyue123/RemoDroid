@@ -172,6 +172,7 @@ snapshot is turned into a **resource reference**, and the bytes come from the br
 | `adoptedStyleSheets`, shadow roots | the same, attached to the mirror's document or shadow root |
 | `url(…)` inside CSS, `<img>`, `srcset`, `<picture>`, `poster`, favicons | the address Chrome actually chose (`currentSrc`) → a reference `r:<n>`; the viewer asks for it when it needs it |
 | fonts (`@font-face`) | a reference too; sent as they are (already compressed) |
+| an icon from a file of icons (`<use href="icons.svg#id">`) | the file as a reference; the viewer copies its elements into the mirror, their ids prefixed, and points the `<use>` at the copy (a frame that can't fetch can't follow the address) |
 | the element's computed style | **not sent.** The rules are sent and Safari computes them. Sending computed styles would be exact but 10–50× the size |
 
 **A resource** is served only from what the real page already loaded (`Page.getResourceTree` lists it,

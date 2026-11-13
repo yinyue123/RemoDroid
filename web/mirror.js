@@ -23,6 +23,8 @@ class Mirror {
     this.waits = new Map();      /* address → the callbacks that want it */
     this.css = new Map();        /* <style> → { raw, base }: its rules before the addresses are swapped */
     this.dirty = new Set();      /* <style>s to write again, once a frame */
+    this.uses = new WeakMap();   /* <use> → the address it stands for, while its file of icons is on its way */
+    this.sprites = new Map();    /* a file of icons' address → { pre, node }: its copy in this document */
     this.view = { w: 0, h: 0 };
     const load = sandbox => new Promise(r => {
       frame.setAttribute('sandbox', sandbox);
@@ -48,6 +50,44 @@ class Mirror {
     else if (m.k === 'diff') for (const o of m.o) {
       try { this.op(o); } catch (e) { console.warn('mirror: ' + o.k, e); }
     }
+    this.keep();
+  }
+
+  /* A file of icons (an SVG whose parts <use> elements point at by id). A frame that can't fetch can't follow
+   * such an address, so the file's elements are copied into this document, out of sight, their ids given a
+   * prefix of their own (the page's ids stay the page's). → the prefix, or '' if there is no such file. */
+  icons(file) {
+    let s = this.sprites.get(file);
+    if (s) return s.pre;
+    const blob = this.blobs && this.blobs.get(file);
+    if (!blob) return Promise.resolve('');
+    const pre = 'rd-i' + (this.sprites.size + 1) + '-';
+    this.sprites.set(file, s = { node: null, pre: blob.text().then(text => {
+      const d = this.frame.contentDocument, src = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+      if (!src || src.localName !== 'svg') return '';
+      const box = d.importNode(src, true);
+      for (const e of [box, ...box.querySelectorAll('*')]) {
+        if (Mirror.NEVER.has(e.localName.toLowerCase()) || e.localName === 'foreignObject') { e.remove(); continue; }
+        for (const a of Array.from(e.attributes)) {
+          if (/^on/i.test(a.name)) e.removeAttribute(a.name);
+          else if (a.name === 'id') e.setAttribute('id', pre + a.value);
+          else if (a.localName === 'href') a.value[0] === '#' ? e.setAttribute(a.name, '#' + pre + a.value.slice(1)) : e.removeAttribute(a.name);
+          else if (a.value.indexOf('url(') >= 0) e.setAttribute(a.name, a.value.replace(/url\(\s*["']?#([^)"']+)["']?\s*\)/g, 'url(#' + pre + '$1)'));
+        }
+      }
+      box.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden');
+      box.setAttribute('aria-hidden', 'true');
+      s.node = box;
+      this.keep();
+      return pre;
+    }).catch(() => '') });
+    return s.pre;
+  }
+
+  /* the copies stay in the document through a new snapshot and whatever the page does to its own elements */
+  keep() {
+    const root = this.frame.contentDocument.documentElement;
+    if (root) for (const s of this.sprites.values()) if (s.node && s.node.parentNode !== root) root.appendChild(s.node);
   }
 
   doc(m) {
@@ -123,7 +163,16 @@ class Mirror {
       else if (name === 'src' || name === 'poster' || name === 'background' || ((name === 'href' || name === 'xlink:href') && tag === 'image')) {
         n.removeAttribute(name); /* until the bytes are here */
         this.want(v, u => { if (u) n.setAttribute(name, u); });
+      } else if ((name === 'href' || name === 'xlink:href') && tag === 'use' && /^https?:/i.test(v)) {
+        /* an icon in a file of icons: the file is fetched as bytes, put into this document, and pointed at there */
+        const at = v.indexOf('#'), file = at < 0 ? v : v.slice(0, at);
+        n.removeAttribute(name);
+        this.uses.set(n, v);
+        this.want(file, () => this.icons(file).then(pre => {
+          if (pre && this.uses.get(n) === v) n.setAttribute(name, '#' + pre + (at < 0 ? '' : v.slice(at + 1)));
+        }));
       } else if (name === 'href' || name === 'xlink:href') {
+        this.uses.delete(n);
         n.setAttribute(name, v[0] === '#' ? v : '#');
       } else if (name === 'style') n.setAttribute(name, this.swap(v, this.url, () => {
         if (n.isConnected) n.setAttribute(name, this.swap(v, this.url, null));

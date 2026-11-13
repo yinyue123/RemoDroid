@@ -36,7 +36,7 @@
  *            s: [scrollLeft, scrollTop], sr: {i, c, as} (an open shadow root)}
  *
  * Never sent: scripts, event-handler attributes, javascript: URLs, <base>, <meta>, where a link or a form
- * goes. Every address of a picture, a font or a stylesheet is made absolute; the viewer never fetches it,
+ * goes. Every address of a picture, a font, a stylesheet or a file of icons (<use>) is made absolute; the viewer never fetches it,
  * it asks rd-mirror for it by that address. */
 (() => {
   if (window.rd) return 1;
@@ -109,7 +109,7 @@
     if (name === 'href' || name === 'xlink:href') {
       if (tag === 'a' || tag === 'area') return '#';   /* a link stays a link (:link, the cursor); where to isn't sent */
       if (value[0] === '#') return value;               /* <use>, gradients, filters within the document */
-      return tag === 'image' ? abs(value) : null;
+      return tag === 'image' || tag === 'use' ? abs(value) : null; /* <use>: an icon in a file of icons */
     }
     if (name === 'src') {
       if (tag === 'img') return el.currentSrc || abs(value);
