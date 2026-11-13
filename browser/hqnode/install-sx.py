@@ -7,6 +7,7 @@ after pairing succeeds. Existing containers and /data are preserved.
 """
 
 import http.cookiejar
+import base64
 import json
 import os
 from pathlib import Path
@@ -17,10 +18,88 @@ import subprocess
 import sys
 import time
 import urllib.request
+import yaml
 
 
 STATE = Path('/etc/rd-browser-sx')
 NAME = 'browser-sx'
+
+
+def set_conf(path, values):
+    lines = path.read_text().splitlines()
+    remaining = dict(values)
+    for i, line in enumerate(lines):
+        key = line.split('=', 1)[0].strip()
+        if key in remaining:
+            lines[i] = f'{key} = {remaining.pop(key)}'
+    lines += [f'{key} = {value}' for key, value in remaining.items()]
+    path.write_text('\n'.join(lines) + '\n')
+
+
+def prepare_proxy():
+    """Give the browser the VM's US3 pool without restarting the VM."""
+    source = yaml.safe_load(Path('/etc/reality-vm.yaml').read_text())
+    source['inbounds'] = [{'tag': 'browser-socks', 'protocol': 'socks',
+                           'listen': '127.0.0.1', 'port': 1087, 'settings': {'udp': True}}]
+    source.pop('api', None)
+    for rule in source.get('routing', {}).get('rules', []):
+        if 'vm-tun' in rule.get('inboundTag', []):
+            rule['inboundTag'] = ['browser-socks']
+    proxy = Path('/etc/reality-browser.yaml')
+    proxy.write_text(yaml.safe_dump(source, sort_keys=False))
+    proxy.chmod(0o600)
+    unit = Path('/etc/containers/systemd/reality-browser.container')
+    unit.write_text('''[Unit]
+Description=Browser US3 pool copied from the VM
+After=network-online.target
+Wants=network-online.target
+[Container]
+ContainerName=reality-browser
+Image=ghcr.io/yinyue123/hub:charge
+Network=host
+Volume=/etc/reality-browser.yaml:/etc/reality-browser.yaml:ro
+Entrypoint=/usr/bin/xray
+Exec=run -c /etc/reality-browser.yaml
+[Service]
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+''')
+    run('podman', 'run', '--rm', '--network', 'none', '--entrypoint', '/usr/bin/xray',
+        '-v', '/etc/reality-browser.yaml:/etc/reality-browser.yaml:ro',
+        'ghcr.io/yinyue123/hub:charge', 'run', '-test', '-c', '/etc/reality-browser.yaml')
+    run('systemctl', 'daemon-reload')
+    run('systemctl', 'restart', 'reality-browser')
+    for _ in range(12):
+        try:
+            ip = run('curl', '-fsS', '--max-time', '8', '--proxy',
+                     'socks5h://127.0.0.1:1087', 'https://api.ipify.org', capture=True).strip()
+            if ip == '176.122.146.2':
+                print('US3 proxy verified:', ip, flush=True)
+                return
+        except subprocess.CalledProcessError:
+            pass
+        time.sleep(2)
+    raise RuntimeError('the copied VM pool did not return the expected US3 exit')
+
+
+def prepare_lan(cid):
+    path = Path('/etc/hqnode/config.json')
+    config = json.loads(path.read_text())
+    advanced = config.setdefault('advanced', {})
+    advanced['enabled'] = True
+    for key, value in [('caps', 'CAP_NET_ADMIN'), ('link_parents', 'enp3s0')]:
+        if value not in advanced.setdefault(key, []):
+            advanced[key].append(value)
+    path.write_text(json.dumps(config, indent=2) + '\n')
+    run('systemctl', 'restart', 'hqnode')
+    run('hqnode', 'cap', NAME, '--add', 'CAP_NET_ADMIN')
+    # Setting the same named link is an update in hqnode.
+    run('hqnode', 'link', NAME, '--macvlan', 'enp3s0', '--name', 'lan0')
+    encoded = base64.b64encode(Path('rd-lan').read_bytes()).decode()
+    inside('sh', '-ec', f'printf %s {encoded} | base64 -d > /usr/lib/rd-browser/rd-lan; chmod 755 /usr/lib/rd-browser/rd-lan')
+    run('hqnode', 'restart', NAME)
 
 
 def run(*args, capture=False):
@@ -77,17 +156,22 @@ def main():
     settings = STATE / 'browser.conf'
     if not settings.is_file():
         raise RuntimeError(f'missing {settings}')
-    archive = Path(sys.argv[1]).resolve()
-    upload = Path(api('GET', '/v1/images/sideload')['dir'])
-    upload.mkdir(parents=True, exist_ok=True)
-    destination = upload / 'remote-browser-amd64.tar'
-    shutil.copyfile(archive, destination.with_suffix('.tar.part'))
-    destination.with_suffix('.tar.part').replace(destination)
+    configure = sys.argv[1] == '--configure'
+    destination = None
+    if not configure:
+        archive = Path(sys.argv[1]).resolve()
+        upload = Path(api('GET', '/v1/images/sideload')['dir'])
+        upload.mkdir(parents=True, exist_ok=True)
+        destination = upload / 'remote-browser-amd64.tar'
+        shutil.copyfile(archive, destination.with_suffix('.tar.part'))
+        destination.with_suffix('.tar.part').replace(destination)
     machine = api('GET', '/v1/portal/machine')['machine']
     if machine['name'] != 'sx':
         raise RuntimeError('refusing to deploy to a different hqnode machine')
     existing = next((c for c in machine.get('containers', []) if c['name'] == NAME), None)
     if existing is None:
+        if configure:
+            raise RuntimeError('configure needs the existing browser-sx container')
         result = api('POST', '/v1/portal/containers', {
             'name': NAME, 'ssh_username': 'browser', 'ssh_password': secrets.token_urlsafe(32),
             'archive': destination.name, 'ports': [22],
@@ -104,17 +188,24 @@ def main():
     if not data.is_dir():
         raise RuntimeError(f'missing container data mount {data}')
     conf = data / 'browser.conf'
+    prepare_proxy()
+    if conf.exists():
+        shutil.copyfile(conf, settings)
+    set_conf(settings, {'proxy': 'socks5://192.168.1.1:1087',
+                        'timezone': 'America/Los_Angeles',
+                        'lan_gateway': '192.168.1.1', 'lan_webrtc': '1'})
     shutil.copyfile(settings, conf)
     owner = data.stat()
     os.chown(conf, owner.st_uid, owner.st_gid)
     conf.chmod(0o644)
+    prepare_lan(cid)
 
     # The same container-scoped egress policy as oect; no other host traffic is changed.
     shutil.copyfile('rd-killswitch', '/usr/local/sbin/rd-killswitch')
     Path('/usr/local/sbin/rd-killswitch').chmod(0o755)
     shutil.copyfile('rd-killswitch.service', '/etc/systemd/system/rd-killswitch.service')
     panel_addresses = {item[4][0] for item in socket.getaddrinfo('rm.11100.top', 443, type=socket.SOCK_STREAM)}
-    rules = [f'cid = {cid}', 'scope = container', 'allow = tcp 127.0.0.1 1084',
+    rules = [f'cid = {cid}', 'scope = container', 'allow = tcp 127.0.0.1 1087',
              'allow = udp 127.0.0.1', 'allow = udp public 3478', 'allow = tcp public 3478']
     rules += [f'allow = tcp {address} 443' for address in sorted(panel_addresses)]
     for line in Path('/etc/resolv.conf').read_text().splitlines():

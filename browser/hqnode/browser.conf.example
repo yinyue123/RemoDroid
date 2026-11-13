@@ -64,6 +64,8 @@ one_tab = 1
 # unless lan_gateway is given).
 #lan_address = 192.168.10.44/24
 #lan_gateway = 192.168.10.2
+# Let the trusted desktop agent's ICE/media UDP use lan0 for P2P. Browser traffic keeps its proxy.
+#lan_webrtc = 1
 
 # Page mode (browser/dom-mirror.md): the socket rd-mirror reaches the browser and the bar through.
 # "off": no Page mode, and nothing ever attaches to a page.

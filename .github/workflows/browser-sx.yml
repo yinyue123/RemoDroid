@@ -2,6 +2,12 @@ name: browser-sx
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [install, configure]
+        default: install
+        description: Build and install, or configure the existing container
 
 permissions:
   contents: read
@@ -16,7 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
+        if: inputs.mode != 'configure'
       - name: Build the amd64 hqnode browser
+        if: inputs.mode != 'configure'
         run: |
           mkdir pkgs
           docker buildx build --platform linux/amd64 --build-arg CLOAKBROWSER=free \
@@ -24,10 +32,18 @@ jobs:
             --output type=oci,dest=pkgs/remote-browser-amd64.tar .
       # CloakBrowser stays on the runner and the user's machines; no public image or artifact.
       - name: Prepare the deployment
+        env:
+          MODE: ${{ inputs.mode }}
         run: |
+          mkdir -p pkgs
+          printf '%s\n' "$MODE" > pkgs/mode
           cp browser/hqnode/install-sx.py pkgs/browser-install.py
+          cp browser/hqnode/rd-lan pkgs/
           cp browser/host/rd-killswitch browser/host/rd-killswitch.service pkgs/
-          (cd pkgs && sha256sum remote-browser-amd64.tar browser-install.py rd-killswitch rd-killswitch.service > SHA256SUMS)
+          (cd pkgs && sha256sum mode browser-install.py rd-lan rd-killswitch rd-killswitch.service > SHA256SUMS)
+          if [ -f pkgs/remote-browser-amd64.tar ]; then
+            (cd pkgs && sha256sum remote-browser-amd64.tar >> SHA256SUMS)
+          fi
       - name: Install browser-sx through nl
         env:
           KEY: ${{ secrets.BROWSER_SX_DEPLOY_KEY }}

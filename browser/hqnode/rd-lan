@@ -21,6 +21,15 @@ IF=lan0 T=100
 
 conf() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p" /data/browser.conf 2>/dev/null | tail -n 1; }
 
+agent_route() {
+	# Only the trusted desktop agent's UDP (ICE/media) uses the LAN. Its
+	# signalling and every browser connection retain the main-table route.
+	while ip rule del pref 102 2>/dev/null; do :; done
+	if [ "$(conf lan_webrtc)" = 1 ]; then
+		id=$(id -u rdagent) && ip rule add uidrange "$id-$id" ipproto udp lookup "$1" pref 102
+	fi
+}
+
 addr_set() { # address/prefix
 	ip -4 -o addr show dev "$IF" | grep -q " $1 " && return 0
 	ip -4 addr flush dev "$IF"
@@ -38,6 +47,7 @@ table_set() { # address/prefix gateway
 		ip route add unreachable default table $T
 	fi
 	echo "rd-lan: $IF $1, gateway ${2:-none}"
+	agent_route "$T"
 }
 
 case "${1:-}" in
@@ -85,6 +95,7 @@ if [ -n "$t" ]; then
 		id=$(id -u $u) && ip rule add uidrange "$id-$id" lookup "$t" pref 101
 	done
 	echo "$have $t" > /run/rd-lan.hqnode
+	agent_route "$t"
 	echo "rd-lan: $IF $have, from hqnode, table $t: for the sound server and avahi only"
 	exit 0
 fi
