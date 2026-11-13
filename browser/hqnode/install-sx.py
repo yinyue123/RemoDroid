@@ -108,6 +108,16 @@ def prepare_lan(cid):
     encoded = base64.b64encode(Path('rd-lan').read_bytes()).decode()
     inside('sh', '-ec', f'printf %s {encoded} | base64 -d > /usr/lib/rd-browser/rd-lan; chmod 755 /usr/lib/rd-browser/rd-lan')
     run('hqnode', 'restart', NAME)
+    for _ in range(30):
+        route = inside('sh', '-c', 'ip -4 route get 1.1.1.1 uid 994 ipproto 17 2>/dev/null || true', capture=True)
+        if 'dev lan0' in route:
+            browser_route = inside('ip', '-4', 'route', 'get', '1.1.1.1', 'uid', '995', 'ipproto', '6', capture=True)
+            if 'dev tap0' not in browser_route:
+                raise RuntimeError('the browser unexpectedly acquired the LAN route')
+            print('Verified agent UDP via lan0; browser via tap0', flush=True)
+            return
+        time.sleep(1)
+    raise RuntimeError('the agent UDP route through macvlan did not become ready')
 
 
 def run(*args, capture=False):
