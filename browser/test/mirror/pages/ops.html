@@ -9,7 +9,7 @@ button,input,select{font:inherit;margin:8px;padding:8px}
 <header id=head>ops test</header>
 <img id=logo src="logo.svg" width=80 height=24 alt="">
 <svg id=icon width=24 height=24 style="color:#c00"><use href="icons.svg#dot" fill="currentColor"></use></svg>
-<button id=btn>taps: 0</button>
+<button id=btn>taps: 0</button><button id=hid style="display:none">hid: -</button><span id=corner></span>
 <input id=in placeholder="type here"><div id=echo>echo:</div>
 <div id=ed contenteditable style="margin:8px;padding:8px;border:1px solid #888;min-height:20px"><p><br></p></div>
 <button id=send disabled>send</button><div id=sent>sent: -</div>
@@ -29,6 +29,8 @@ const say = how => { const t = $('ed').innerText.trim(); if (!t) return; $('sent
 $('ed').addEventListener('input', () => { $('send').disabled = !$('ed').innerText.trim(); });
 $('ed').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); say('enter'); } });
 $('send').addEventListener('click', () => say('button'));
+$('hid').addEventListener('click', e => { $('hid').textContent = 'hid: clicked' + (e.isTrusted ? ' (trusted)' : ''); });
+addEventListener('click', e => { if (e.isTrusted && e.clientX < 8 && e.clientY < 8) $('corner').textContent = 'corner tapped'; }, true);
 $('sel').addEventListener('change', () => { $('picked').textContent = 'picked: ' + $('sel').value; });
 $('ask').addEventListener('click', () => { $('ask').textContent = confirm('Are you sure?') ? 'said yes' : 'said no'; });
 $('play').addEventListener('click', () => { /* a video that really plays, with no file: a canvas's stream; it pauses after 3 s */

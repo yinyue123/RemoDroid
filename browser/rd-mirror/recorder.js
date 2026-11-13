@@ -25,7 +25,8 @@
  *   rd.op(json)  → a JSON string {t: [[action, finger, x, y, delay ms]…]}: what the viewer did, by element.
  *                  t are the touches rd-mirror has the agent make (x, y: 0…1 across the window; action 0 down,
  *                  1 up, 2 move, 3 cancel), so the page gets real, trusted touch events
- *     {o:'tap', i, fx, fy, hold}             a tap on node i, at that fraction of its box
+ *     {o:'tap', i, fx, fy, hold}             a tap on node i, at that fraction of its box (a node with no
+ *                                            box here gets a click of its own instead: no touch can reach it)
  *     {o:'touch', ph, id, i, fx, fy, dx, dy} a finger down on a node, then moved by dx, dy from there
  *     {o:'view', i, a, off, offx, top, left, lead}   where the viewer is looking: scroller i shows node a
  *                                            off pixels below its top edge (lead: ahead by so much)
@@ -391,6 +392,10 @@
   const place = m => {
     const el = nodes.get(m.i);
     if (!el || el.nodeType !== 1 || !el.isConnected) return null;
+    /* Shown in the viewer and not here (a button a site shows only to a mouse, where this is a touch screen):
+     * it has no box, and a place worked out from none is the window's corner, where a tap opened whatever
+     * sits there (ChatGPT's sidebar, 2026-11-13). No touch can reach it. */
+    if (!el.getClientRects().length) return null;
     const at = () => { const r = el.getBoundingClientRect(); return [r.left + m.fx * r.width, r.top + m.fy * r.height]; };
     let p = at();
     if (p[0] < 0 || p[1] < 0 || p[0] > innerWidth || p[1] > innerHeight) {
@@ -404,7 +409,9 @@
   const op = json => {
     const m = JSON.parse(json), t = [];
     if (m.o === 'tap') {
-      const p = place(m);
+      const p = place(m), el = nodes.get(m.i);
+      /* no box to touch: the click is made on the element itself (not a trusted one, as with a <select>) */
+      if (!p && el && el.nodeType === 1 && el.isConnected && typeof el.click === 'function') el.click();
       if (p) { const f = frac(p[0], p[1]); t.push([0, 0, f[0], f[1], 0], [1, 0, f[0], f[1], Math.min(900, Math.max(40, m.hold | 0))]); }
     } else if (m.o === 'touch') {
       const id = m.id & 7;

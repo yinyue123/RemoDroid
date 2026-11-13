@@ -241,6 +241,15 @@ mirror_socket = {d}/shell.sock
             await until("#btn", "taps: 2")
             res["tap"] = await txt("#btn")
 
+            # something the viewer shows and the real page doesn't (a button a site keeps for a mouse): a tap on it
+            # is a click on that element, and never a touch at the corner of the window
+            await page.evaluate("() => { document.querySelector('#pmFrame').contentDocument.getElementById('hid').style.display = 'inline-block'; }")
+            await tap("#hid")
+            await asyncio.sleep(1.5)
+            res["hidden"] = await page.evaluate("() => { const d = document.querySelector('#pmFrame').contentDocument;"
+                                                " return [d.getElementById('hid').textContent, d.getElementById('corner').textContent]; }")
+            await page.evaluate("() => { document.querySelector('#pmFrame').contentDocument.getElementById('hid').style.display = 'none'; }")
+
             # typing into the mirror's field: the real field gets the keys, and the page's echo comes back
             await tap("#in")
             await asyncio.sleep(0.5)
@@ -427,7 +436,7 @@ mirror_socket = {d}/shell.sock
             await browser.close()
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
-              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again乔布斯好 (enter)" and res.get("typed_zh") and res.get("typed_zh_video") and res.get("composed", "").strip() == "again乔布斯好" and res.get("proxy_ok") and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
+              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again乔布斯好 (enter)" and res.get("typed_zh") and res.get("typed_zh_video") and res.get("composed", "").strip() == "again乔布斯好" and res.get("proxy_ok") and res.get("hidden") == ["hid: clicked", ""] and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
               and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("page_only_ok") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'
