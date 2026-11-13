@@ -400,7 +400,7 @@ const pagePref = () => {
 PageMode.init({
   dom: () => st.ch.dom,
   ctrl: (t, d) => sendCtrl(t, d).catch(() => {}),
-  key: hid => { sendKey(true, hid, 0); sendKey(false, hid, 0); },
+  key: (hid, mods) => { sendKey(true, hid, mods | 0); sendKey(false, hid, mods | 0); },
   toast: m => toast(m),
   saveMode: m => { try { localStorage.setItem(pageKey(), m); } catch (e) {} },
   changed: () => syncMenuStates()

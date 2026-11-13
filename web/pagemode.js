@@ -228,6 +228,7 @@ function message(m) {
     break;
   case 'diff':
     mirror.on(m);
+    richCaret();
     if (!fit.later) fit.later = setTimeout(() => { fit.later = 0; fit(); }, 500); /* the page's colours arrive late */
     break;
   case 'bar': {
@@ -289,6 +290,33 @@ const op = m => send(Object.assign({ k: 'op' }, m));
 const ptr = new Map(); /* pointerId → the gesture: where it began, whether it became a drag sent as a touch */
 const view = { sent: '', raf: 0, last: 0, moved: new Set(), y: 0, t: 0, v: 0 };
 const typing = { el: null, value: '', at: 0, held: null };
+/* a box the page made editable itself (contenteditable: a chat's message box, an editor), or null */
+const rich = t => {
+  for (; t; t = t.parentNode) if (t.nodeType === 1) return t.isContentEditable && !isTexty(t) ? t : null;
+  return null;
+};
+const richly = { at: 0 }; /* when the last key went to such a box */
+function richText(text) {
+  if (!text) return;
+  richly.at = performance.now();
+  /* several lines are pasted there in one piece: as keys, each new line would be an Enter (a chat sends on it) */
+  if (/[\r\n]/.test(text)) api.ctrl('clip.set', { text, paste: true });
+  else api.ctrl('text', { text, keys: true });
+}
+function richKey(hid, mods) { richly.at = performance.now(); api.key(hid, mods); }
+/* The caret in such a box is this device's own, and the text under it is replaced by the real page's. After a
+ * difference that follows a key, a caret left on an element (the first letter of a line, a line made again)
+ * goes to the end of it; one inside a text is kept in place by mirror.js. */
+function richCaret() {
+  if (performance.now() - richly.at > 1500) return;
+  const d = frame.contentDocument, s = d.getSelection(), box = rich(d.activeElement);
+  if (!box || !s || !s.rangeCount || !s.isCollapsed) return;
+  let a = s.anchorNode;
+  if (!a || a.nodeType !== 1 || !box.contains(a) || !a.textContent) return;
+  if (a === box && s.anchorOffset > 0 && a.childNodes[s.anchorOffset - 1]) a = a.childNodes[s.anchorOffset - 1];
+  s.selectAllChildren(a);
+  s.collapseToEnd();
+}
 
 function listen() {
   const d = frame.contentDocument, w = frame.contentWindow;
@@ -356,7 +384,39 @@ function listen() {
     typing.value = b;
     typing.at = performance.now();
   }, true);
+  /* A box the page made editable itself is not an <input>: nothing is typed into the mirror's copy, which
+   * the real page would never hear of. What the keyboard was about to do goes to the real box as keys, and
+   * what that makes of it comes back as differences. */
+  d.addEventListener('beforeinput', e => {
+    if (!rich(e.target)) return;
+    const k = e.inputType;
+    if (/Composition/.test(k)) return; /* an input method at work can't be stopped: its result is sent when it ends */
+    e.preventDefault();
+    if (k === 'insertParagraph') richKey(0x28, 0);
+    else if (k === 'insertLineBreak') richKey(0x28, 2); /* Shift+Enter */
+    else if (/^delete/.test(k)) richKey(/Forward$/.test(k) ? 0x4c : 0x2a, 0);
+    else if (/^insert/.test(k)) {
+      const text = e.data != null ? e.data : e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
+      if (text && k === 'insertReplacementText') { /* a correction: the word it stands for goes first */
+        let n = 0;
+        try {
+          const t = e.getTargetRanges()[0], r = d.createRange();
+          r.setStart(t.startContainer, t.startOffset);
+          r.setEnd(t.endContainer, t.endOffset);
+          n = Array.from(r.toString()).length;
+        } catch (x) {}
+        for (let i = 0; i < n; i++) richKey(0x2a, 0);
+      }
+      richText(text);
+    }
+  }, true);
+  d.addEventListener('compositionend', e => { if (rich(e.target)) richText(e.data); }, true);
   d.addEventListener('keydown', e => {
+    if (!typing.el && rich(e.target) && !e.isComposing && e.keyCode !== 229) {
+      const mods = (e.ctrlKey ? 1 : 0) | (e.shiftKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+      const key = { Enter: 0x28, Backspace: 0x2a, Delete: 0x4c }[e.key];
+      if (key) { e.preventDefault(); richKey(key, mods); return; }
+    }
     const hid = { Enter: 0x28, Tab: 0x2b, Escape: 0x29, ArrowLeft: 0x50, ArrowRight: 0x4f, ArrowUp: 0x52, ArrowDown: 0x51 }[e.key];
     if (!hid) return;
     if (e.key === 'Enter' && typing.el && typing.el.localName === 'textarea') return; /* a new line: the input event has it */

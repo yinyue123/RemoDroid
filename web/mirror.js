@@ -7,8 +7,9 @@
  *   m.on(msg);                             a 'doc' or a 'diff' from the recorder
  *   m.resource(url, blob | null);          the answer to a res.get
  *
- * Two locks keep the site off this device: the frame can't run scripts (sandbox without allow-scripts) and
- * can't fetch (its Content-Security-Policy allows blob: and data: only). So even a <script> or an address
+ * Two locks keep the site off this device: the frame can't run scripts (sandbox without allow-scripts; in
+ * Safari, where that would silence the viewer's own listeners too, its Content-Security-Policy, which has
+ * no script-src) and can't fetch (the policy allows blob: and data: only). So even a <script> or an address
  * the recorder let through would do nothing here. Pictures, fonts and unreadable stylesheets are asked for
  * by their address and arrive as bytes. */
 'use strict';
@@ -23,11 +24,22 @@ class Mirror {
     this.css = new Map();        /* <style> → { raw, base }: its rules before the addresses are swapped */
     this.dirty = new Set();      /* <style>s to write again, once a frame */
     this.view = { w: 0, h: 0 };
-    frame.setAttribute('sandbox', 'allow-same-origin');
-    this.ready = new Promise(r => {
+    const load = sandbox => new Promise(r => {
+      frame.setAttribute('sandbox', sandbox);
       frame.addEventListener('load', () => r(), { once: true });
       frame.srcdoc = '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="' + Mirror.CSP +
         '"></head><body></body></html>';
+    });
+    /* Safari runs nobody's listeners in a frame that may not run scripts, the viewer's own included: a tap,
+     * a key, a scroll in the mirror would reach no one. There the frame is allowed scripts, and the policy
+     * alone refuses every one of the page's (inline, handlers, javascript: addresses, eval). */
+    this.ready = load('allow-same-origin').then(() => {
+      let heard = false;
+      const d = frame.contentDocument, h = () => { heard = true; };
+      d.addEventListener('rd-probe', h);
+      d.dispatchEvent(new Event('rd-probe'));
+      d.removeEventListener('rd-probe', h);
+      if (!heard) return load('allow-same-origin allow-scripts');
     });
   }
 
@@ -239,7 +251,14 @@ class Mirror {
       break;
     }
     case 'attr': if (n) this.attr(n, o.n, o.v); break;
-    case 'text': if (n) n.data = o.x; break;
+    case 'text': {
+      if (!n) break;
+      /* a caret in this text (a box the person is typing in, pagemode.js) stays as far from its end as it was */
+      const s = n.ownerDocument.getSelection(), end = s && s.isCollapsed && s.anchorNode === n ? n.data.length - s.anchorOffset : -1;
+      n.data = o.x;
+      if (end >= 0) s.collapse(n, Math.max(0, n.data.length - end));
+      break;
+    }
     case 'css': if (n) this.setCss(n, o); break;
     case 'prop': if (n) this.prop(n, o.p); break;
     case 'shadow': if (n) this.shadow(n, o.sr); break;

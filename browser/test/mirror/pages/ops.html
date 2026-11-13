@@ -10,9 +10,11 @@ button,input,select{font:inherit;margin:8px;padding:8px}
 <img id=logo src="logo.svg" width=80 height=24 alt="">
 <button id=btn>taps: 0</button>
 <input id=in placeholder="type here"><div id=echo>echo:</div>
+<div id=ed contenteditable style="margin:8px;padding:8px;border:1px solid #888;min-height:20px"><p><br></p></div>
+<button id=send disabled>send</button><div id=sent>sent: -</div>
 <select id=sel><option>red<option>green<option>blue</select><div id=picked>picked: -</div>
 <button id=ask>ask</button><button id=play>play</button><video id=vid width=120 height=68 muted playsinline></video>
-<img id=photo src="photo.jpg" style="width:100%"><img id=photo2 src="photo.png" style="width:50%">
+<img id=photo src="photo.jpg" style="width:50%"><img id=photo2 src="photo.png" style="width:50%">
 <a id=lnk href="ops.html?next=1">next page</a>
 <div id=drag>drag: -</div>
 <div id=rows></div><div id=more>loading more…</div>
@@ -21,6 +23,11 @@ const $ = id => document.getElementById(id);
 let taps = 0, rows = 0;
 $('btn').addEventListener('click', e => { $('btn').textContent = 'taps: ' + (++taps) + (e.isTrusted ? '' : ' (untrusted)'); });
 $('in').addEventListener('input', () => { $('echo').textContent = 'echo:' + $('in').value; });
+/* a chat's message box: an editable <div>, a button that works once there is text, Enter sends */
+const say = how => { const t = $('ed').innerText.trim(); if (!t) return; $('sent').textContent = 'sent: ' + t + ' (' + how + ')'; $('ed').innerHTML = '<p><br></p>'; $('send').disabled = true; };
+$('ed').addEventListener('input', () => { $('send').disabled = !$('ed').innerText.trim(); });
+$('ed').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); say('enter'); } });
+$('send').addEventListener('click', () => say('button'));
 $('sel').addEventListener('change', () => { $('picked').textContent = 'picked: ' + $('sel').value; });
 $('ask').addEventListener('click', () => { $('ask').textContent = confirm('Are you sure?') ? 'said yes' : 'said no'; });
 $('play').addEventListener('click', () => { /* a video that really plays, with no file: a canvas's stream; it pauses after 3 s */

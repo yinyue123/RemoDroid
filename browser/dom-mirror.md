@@ -318,6 +318,13 @@ The X bar stays where it is, so the real page keeps its size and Video mode show
   navigation** — holding a document with `Content-Security-Policy: default-src 'none'; style-src
   'unsafe-inline'; img-src blob: data:; font-src blob: data:; media-src 'none'`. So even if a script or a
   URL slipped past the recorder, Safari would neither run it nor fetch it.
+  **Safari is the exception to the sandbox (2026-11-13):** WebKit runs no listener at all in a frame that
+  may not run scripts, the viewer's own included, so a tap, a key or a scroll in the mirror reached nobody.
+  `mirror.js` asks the frame whether it hears an event; where it doesn't, the frame gets `allow-scripts`
+  and the policy alone (no `script-src`) refuses the page's scripts, handlers, `javascript:` and `eval`.
+- **A box the page made editable itself** (`contenteditable`: a chat's message box, an editor) is not an
+  `<input>`: what is typed there is stopped in the mirror (`beforeinput`) and sent to the real box as keys;
+  the text comes back as differences. An input method's result is sent when it ends.
 - The frame is laid out at **the real page's size in CSS pixels** (440 × 860 on the OECT's `light`
   screen, so the site's phone layout and its media queries choose the same rules), then scaled to the
   viewer's width. On an iPhone 14 Plus that is 428/440: 3% smaller than Safari would draw it.
