@@ -103,8 +103,12 @@ def prepare_lan(cid):
     else:
         raise RuntimeError('hqnode API did not become ready after restart')
     run('hqnode', 'cap', NAME, '--add', 'CAP_NET_ADMIN')
-    # Setting the same named link is an update in hqnode.
-    run('hqnode', 'link', NAME, '--macvlan', 'enp3s0', '--name', 'lan0')
+    view = api('GET', f'/v1/containers/{cid}/advanced')
+    link = next((item for item in view['settings'].get('links', []) if item.get('name') == 'lan0'), None)
+    if link is None:
+        run('hqnode', 'link', NAME, '--macvlan', 'enp3s0', '--name', 'lan0')
+    elif link.get('parent') != 'enp3s0':
+        raise RuntimeError('lan0 is already attached to a different parent')
     encoded = base64.b64encode(Path('rd-lan').read_bytes()).decode()
     inside('sh', '-ec', f'printf %s {encoded} | base64 -d > /usr/lib/rd-browser/rd-lan; chmod 755 /usr/lib/rd-browser/rd-lan')
     run('hqnode', 'restart', NAME)
