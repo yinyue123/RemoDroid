@@ -354,6 +354,39 @@ mirror_socket = {d}/shell.sock
                                                  " return e ? f.contentWindow.getComputedStyle(e).backgroundImage.slice(0, 10) : null; }")
             res["requests_for_the_site"] = asked[:5]
 
+            # the user's own proxy, typed in the viewer's menu: kept in their config beside the profile, the browser
+            # started again through it; something that isn't a proxy is refused; nothing typed takes it away
+            conf_file = f"{d}/users/Alice/config"
+            open(conf_file, "w").write("# mine\ntimezone = Europe/Berlin\n")
+            def chrome_proxy():
+                out = subprocess.run(["pgrep", "-af", "--", f"--user-data-dir={d}/users/Alice"], capture_output=True, text=True).stdout
+                m = re.search(r"--proxy-server=(\S+)", out)
+                return m.group(1) if m else ("" if out.strip() else None)
+            async def set_proxy(text):
+                await page.evaluate("t => { window.prompt = () => t; }", text)
+                await page.evaluate("""() => { document.querySelector('#pmBar button[title=Menu]').click();
+                    [...document.querySelectorAll('#pmMenu button')].find(b => /^Proxy:/.test(b.textContent)).click(); }""")
+            async def wait_proxy(want):
+                for _ in range(40):
+                    if chrome_proxy() == want:
+                        return True
+                    await asyncio.sleep(0.25)
+                return False
+            await set_proxy("not a proxy")
+            await asyncio.sleep(1)
+            px = {"refused": "proxy" not in open(conf_file).read() and chrome_proxy() == ""}
+            await set_proxy("127.0.0.1:9")
+            px["set"] = await wait_proxy("socks5://127.0.0.1:9")
+            px["file"] = open(conf_file).read()
+            await asyncio.sleep(1)
+            await set_proxy("")
+            px["unset"] = await wait_proxy("")
+            px["file_after"] = open(conf_file).read()
+            res["proxy"] = px
+            res["proxy_ok"] = (px["refused"] and px["set"] and px["unset"] and px["file"] == "# mine\ntimezone = Europe/Berlin\nproxy = socks5://127.0.0.1:9\n"
+                               and px["file_after"] == "# mine\ntimezone = Europe/Berlin\n")
+            await until("#h", "Mirror test", 20000)  # the browser is back, with the page it had
+
             # Video mode again: the picture comes back
             f0 = await page.evaluate("() => document.querySelector('#video').getVideoPlaybackQuality().totalVideoFrames")
             await page.evaluate("() => PageMode.choose('video')")
@@ -365,7 +398,7 @@ mirror_socket = {d}/shell.sock
             await browser.close()
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
-              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again (enter)" and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
+              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again (enter)" and res.get("proxy_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
               and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("page_only_ok") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'

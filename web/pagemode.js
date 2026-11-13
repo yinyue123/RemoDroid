@@ -138,19 +138,25 @@ function drawMenu() {
   const m = root.querySelector('#pmMenu'), s = bar || { tabs: [], users: [] };
   m.textContent = '';
   m.append(item('Home', () => cmd('home')), item('New tab', () => cmd('tab.new')));
-  if (s.tabs.length > 1) {
+  if (s.tabs.length) {
     m.append(el('hr'));
     for (const t of s.tabs) m.append(Object.assign(item(t.title || t.url, () => cmd('tab.select', { id: t.id })), { className: t.id === s.front ? 'cur' : '' }));
-    m.append(item('Close tab', () => cmd('tab.close')));
+    if (s.tabs.length > 1) m.append(item('Close tab', () => cmd('tab.close')));
   }
   m.append(el('hr'), item('Favourites', () => cmd('list', { kind: 'favourites' })), item('History', () => cmd('list', { kind: 'history' })),
     item('User: ' + (s.user || ''), () => users()), el('hr'),
     twice('cookies', 'Clear cookies', () => cmd('clear.cookies')), twice('all', 'Clear history & data', () => cmd('clear.all')),
     twice('id', 'New identity', () => cmd('identity.new')), item('Restart browser', () => cmd('restart')),
     item(s.running ? 'Stop browser' : 'Start browser', () => cmd(s.running ? 'stop' : 'start')), el('hr'),
-    item('Proxy: ' + (s.proxy === 1 ? 'ok' : s.proxy === 0 ? 'down' : s.proxy === -2 ? 'none set' : '…'), () => {}, true),
+    item('Proxy: ' + (s.proxy === 1 ? 'ok' : s.proxy === 0 ? 'down' : s.proxy === -2 ? 'none set' : '…'), () => setProxy(s)),
     ...Object.keys(MODES).map(k => Object.assign(item((k === mode ? '● ' : '○ ') + MODES[k] + ' mode', () => PageMode.choose(k)),
       { className: k === mode ? 'cur' : '' })));
+}
+/* the user's own proxy, typed here; a browser too old to take it (no proxy_own in its state) only shows it */
+function setProxy(s) {
+  if (typeof s.proxy_own !== 'string') return;
+  const t = window.prompt('Proxy for ' + (s.user || 'this user') + ': socks5://host:port\nEmpty: the default again. The browser restarts.', s.proxy_own);
+  if (t !== null && t.trim() !== s.proxy_own) cmd('proxy.set', { text: t.trim() });
 }
 function users() {
   const l = root.querySelector('#pmList');

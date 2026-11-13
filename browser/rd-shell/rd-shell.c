@@ -3,9 +3,8 @@
  *
  *   - The bar: a strip 44 CSS px tall across the top of the screen (88 px at 2x, 44 pt on the iPhone):
  *     back, forward, reload, the page's title (tap it to type a URL), a star that saves the page to the
- *     favourites (or takes it out), and a menu with Home, New tab, the tabs (listed only when there is
- *     more than one), Favourites, History, the user, the sound, Desktop mode, New identity, Restart and
- *     Stop/Start, then the container's CPU, memory and disk. Taps arrive as the touch screen's emulated
+ *     favourites (or takes it out), and a menu with Home, New tab, the open tabs, Favourites, History, the user, the sound, Desktop mode, New identity, Restart and
+ *     Stop/Start, the proxy (tap it to type the user's own), then the container's CPU, memory and disk. Taps arrive as the touch screen's emulated
  *     pointer events.
  *   - The pages: Users, History (with Clear history & data, Clear cookies) and Favourites (each with a
  *     close button that deletes it), drawn over the browser below the bar. A drag scrolls them.
@@ -79,16 +78,15 @@ static struct {
     int n;
 } C = { "/data/browser.conf" };
 
-static void conf_load(void)
+/* a file of "key = value" lines into two tables → how many, or -1 if it can't be read */
+static int conf_read(const char *path, char key[][48], char val[][512], int max)
 {
-    C.n = 0;
-    FILE *f = fopen(C.path, "r");
-    if (!f) {
-        LOG("%s: %s (using defaults)", C.path, strerror(errno));
-        return;
-    }
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return -1;
+    int n = 0;
     char line[700];
-    while (fgets(line, sizeof line, f) && C.n < 64) {
+    while (fgets(line, sizeof line, f) && n < max) {
         char *p = line;
         while (*p == ' ' || *p == '\t')
             p++;
@@ -101,14 +99,24 @@ static void conf_load(void)
         *e = 0;
         while (*v == ' ' || *v == '\t')
             v++;
-        size_t n = strlen(v);
-        while (n && (v[n - 1] == '\n' || v[n - 1] == '\r' || v[n - 1] == ' ' || v[n - 1] == '\t'))
-            v[--n] = 0;
-        snprintf(C.key[C.n], sizeof C.key[0], "%s", k);
-        snprintf(C.val[C.n], sizeof C.val[0], "%s", v);
-        C.n++;
+        size_t l = strlen(v);
+        while (l && (v[l - 1] == '\n' || v[l - 1] == '\r' || v[l - 1] == ' ' || v[l - 1] == '\t'))
+            v[--l] = 0;
+        snprintf(key[n], 48, "%s", k);
+        snprintf(val[n], 512, "%s", v);
+        n++;
     }
     fclose(f);
+    return n;
+}
+
+static void conf_load(void)
+{
+    C.n = conf_read(C.path, C.key, C.val, 64);
+    if (C.n < 0) {
+        LOG("%s: %s (using defaults)", C.path, strerror(errno));
+        C.n = 0;
+    }
 }
 
 static const char *conf(const char *k, const char *def)
@@ -133,10 +141,28 @@ static struct {
 
 static const char *user(void) { return U.name[U.cur]; }
 
-/* The setting for the user in use: "key.Name = …" before "key = …" (a proxy, timezone or language each). */
+/* The user's own settings: <data>/<name>/config, beside their profile, in browser.conf's form. The proxy
+ * typed in the bar's menu is kept there ("proxy = …"); a timezone or a language can be given there too. */
+static struct {
+    char key[16][48], val[16][512];
+    int n;
+} UC;
+
+static const char *own(const char *k)
+{
+    for (int i = UC.n - 1; i >= 0; i--)
+        if (!strcmp(UC.key[i], k) && UC.val[i][0])
+            return UC.val[i];
+    return "";
+}
+
+/* The setting for the user in use: their own config first, then browser.conf's "key.Name = …", then its
+ * "key = …" (a proxy, timezone or language each). */
 static const char *uconf(const char *k, const char *def)
 {
     char uk[96];
+    if (*own(k))
+        return own(k);
     snprintf(uk, sizeof uk, "%s.%s", k, user());
     const char *v = conf(uk, NULL);
     return v ? v : conf(k, def);
@@ -508,9 +534,8 @@ static void random_seed(char *out, size_t cap)
 }
 
 /* host and port out of socks5://[user:pass@]host:port (or http://…) */
-static int proxy_hostport(char *host, size_t hcap, char *port, size_t pcap)
+static int proxy_parts(const char *p, char *host, size_t hcap, char *port, size_t pcap)
 {
-    const char *p = uconf("proxy", "");
     const char *s = strstr(p, "://");
     s = s ? s + 3 : p;
     const char *at = strrchr(s, '@');
@@ -534,6 +559,11 @@ static int proxy_hostport(char *host, size_t hcap, char *port, size_t pcap)
         return -1;
     snprintf(port, pcap, "%.*s", (int)(end - colon - 1), colon + 1);
     return 0;
+}
+
+static int proxy_hostport(char *host, size_t hcap, char *port, size_t pcap)
+{
+    return proxy_parts(uconf("proxy", ""), host, hcap, port, pcap);
 }
 
 /* urls: the tabs to open (0: the home page; -1: none, Chromium reopens the last session) */
@@ -1118,6 +1148,10 @@ static void user_open(void)
     BR.seed[0] = 0;
     seed_load(0);
     lists_load();
+    upath(p, sizeof p, "config");
+    UC.n = conf_read(p, UC.key, UC.val, 16);
+    if (UC.n < 0)
+        UC.n = 0;
     rm_tree(conf("cache", "/tmp/rd-cache"));
     snprintf(p, sizeof p, "%s/current", U.dir);
     write_line(p, user());
@@ -1300,6 +1334,82 @@ static void probe_done(int ok)
     }
 }
 
+/* The proxy typed in the menu, for the user in use only: socks5://host:port (a bare host:port is SOCKS5), or
+ * http://. Nothing typed: browser.conf's again. It is kept in the user's config, whose other lines stay as
+ * they are, and the browser starts again through it. One with a password isn't taken: Chrome sends none to
+ * a proxy named on its command line. */
+static void browser_stop(void);
+static void proxy_set(const char *t)
+{
+    char v[512], was[512], p[PATH_MAX], tmp[PATH_MAX + 8], host[256], port[16];
+    while (*t == ' ')
+        t++;
+    snprintf(v, sizeof v, strstr(t, "://") || !*t ? "%s" : "socks5://%s", t);
+    size_t n = strlen(v);
+    while (n && (v[n - 1] == ' ' || v[n - 1] == '/'))
+        v[--n] = 0;
+    snprintf(was, sizeof was, "%s", own("proxy"));
+    if (!strcmp(v, was)) {
+        show_note("The proxy is as it was");
+        return;
+    }
+    if (*v) {
+        static const char *const ok[] = { "socks5://", "socks5h://", "socks4://", "http://", "https://" };
+        int known = 0;
+        for (size_t i = 0; i < sizeof ok / sizeof *ok; i++)
+            known |= !strncmp(v, ok[i], strlen(ok[i]));
+        if (!known || strpbrk(v, " \t\"'@#") || proxy_parts(v, host, sizeof host, port, sizeof port) || !*port ||
+            port[strspn(port, "0123456789")] || atoi(port) < 1 || atoi(port) > 65535) {
+            show_note(strchr(v, '@') ? "A proxy with a password isn't supported" : "Not a proxy: socks5://host:port");
+            return;
+        }
+    }
+    /* the file again, without its proxy line, and the new one at the end */
+    upath(p, sizeof p, "config");
+    char *keep = NULL;
+    size_t kn = 0;
+    FILE *in = fopen(p, "r"), *mem = open_memstream(&keep, &kn);
+    char line[700];
+    while (in && mem && fgets(line, sizeof line, in)) {
+        const char *q = line + strspn(line, " \t");
+        if (strncmp(q, "proxy", 5) || q[5 + strspn(q + 5, " \t")] != '=')
+            fputs(line, mem);
+    }
+    if (in)
+        fclose(in);
+    if (mem)
+        fclose(mem);
+    FILE *f = save_begin(p, tmp, sizeof tmp);
+    if (f) {
+        if (keep && kn)
+            fprintf(f, "%s%s", keep, keep[kn - 1] == '\n' ? "" : "\n");
+        if (*v)
+            fprintf(f, "proxy = %s\n", v);
+    }
+    save_end(f, tmp, p);
+    free(keep);
+    UC.n = conf_read(p, UC.key, UC.val, 16);
+    if (UC.n < 0)
+        UC.n = 0;
+    if (strcmp(own("proxy"), v)) { /* it couldn't be written */
+        show_note("Can't save the proxy");
+        return;
+    }
+    LOG("user %s: proxy %s", user(), *v ? v : "as browser.conf has it");
+    if (PX.fd >= 0)
+        close(PX.fd);
+    PX.fd = -1;
+    PX.ok = -1;
+    PX.next = 0;
+    browser_stop();
+    title[0] = 0;
+    BR.fails = 0;
+    browser_start();
+    char s[100];
+    snprintf(s, sizeof s, *v ? "%s's proxy set" : "%s's proxy: the default again", user());
+    show_note(s);
+}
+
 /* ---------------- drawing ---------------- */
 
 /* fs: a pair, the main font and the CJK one for what it lacks (font, or font_s: the small size) */
@@ -1446,7 +1556,7 @@ static void draw_bar(void)
         if (*edit)
             text(bar_draw, &c_text, tx - shift, base, edit, 0);
         else
-            text(bar_draw, &c_dim, tx, base, "Search or type a URL", maxw);
+            text(bar_draw, &c_dim, tx, base, editing == 2 ? "Proxy: socks5://host:port (empty: the default)" : "Search or type a URL", maxw);
         XftDrawSetClip(bar_draw, NULL);
         XSetForeground(dpy, gc, c_text.pixel);
         XFillRectangle(dpy, bar, gc, tx + (*edit ? w - shift : 0) + S, fy + S * 6, (unsigned)S, (unsigned)(fh - S * 12));
@@ -1827,8 +1937,7 @@ static void sound_pick(int i)
     show_note(s);
 }
 
-/* The menu's rows. The tabs are listed only when there is more than one, with Close tab under them; one tab
- * shows none of it. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W).
+/* The menu's rows. The open tabs are listed, with Close tab under them when there is more than one. Without DevTools the count isn't known, and the blind keys stand in (Ctrl+Tab, Ctrl+W).
  * The last three only show the container's CPU, memory and disk. */
 enum { M_HOME, M_NEW_TAB, M_TAB, M_CLOSE_TAB, M_NEXT_TAB, M_FAVS, M_HISTORY, M_USER, M_SOUND, M_VOL, M_DESKTOP, M_NEW_ID,
        M_RESTART, M_STARTSTOP, M_PROXY, M_CPU, M_MEM, M_DISK };
@@ -1847,11 +1956,12 @@ static void menu_layout(void)
     ITEM(M_HOME, -1);
     if (BR.pid > 0)
         ITEM(M_NEW_TAB, -1);
-    if (T.ntabs > 1) {
+    if (T.ntabs > 0) {
         int room = (H - B) / B - 16; /* the rows that fit on the screen beside the others */
-        for (int i = 0; i < T.ntabs && i < room; i++)
+        for (int i = 0; i < T.ntabs && (i < room || !i); i++)
             ITEM(M_TAB, i);
-        ITEM(M_CLOSE_TAB, -1);
+        if (T.ntabs > 1) /* the last one isn't closed: that would end the browser */
+            ITEM(M_CLOSE_TAB, -1);
     } else if (T.ntabs < 0 && BR.pid > 0) {
         ITEM(M_NEXT_TAB, -1);
         ITEM(M_CLOSE_TAB, -1);
@@ -1973,7 +2083,7 @@ static void draw_menu(void)
             draw_gauge(i, l, v, max ? (double)used / (double)max : 0);
         } else {
             int base = i * B + B / 2 + (font[0]->ascent - font[0]->descent) / 2, x = tab ? S * 24 : S * 12;
-            text(menu_draw, kind == M_PROXY ? &c_dim : &c_text, x, base, l, mw - x - S * 12);
+            text(menu_draw, &c_text, x, base, l, mw - x - S * 12);
         }
         int after_front = i && items[i - 1].kind == M_TAB && !strcmp(T.tab[items[i - 1].tab].id, T.cur);
         if (i && !front && !after_front) { /* no line against the highlighted row */
@@ -1991,7 +2101,7 @@ static void menu_show(int on)
     menu_open = on;
     if (on) {
         /* the events carry a tab's title only when it navigates, not when the page sets it */
-        if (T.ntabs > 1)
+        if (T.ntabs > 0)
             T.list_id = cdp_send("Target.getTargets", NULL);
         stats_sample(); /* the CPU needs a second reading: in a second, then every two */
         ST.next = now_s() + 1;
@@ -2514,10 +2624,11 @@ static void send_keys(const KeySym *mods, int nmods, KeySym key)
     XFlush(dpy);
 }
 
-static void edit_begin(void)
+/* what: 1 an address to open; 2 the user's proxy, starting from the one they set */
+static void edit_begin(int what)
 {
-    editing = 1;
-    edit[0] = 0;
+    editing = what;
+    snprintf(edit, sizeof edit, "%s", what == 2 ? own("proxy") : "");
     XSetInputFocus(dpy, bar, RevertToPointerRoot, CurrentTime);
     if (xic)
         XSetICFocus(xic);
@@ -2566,12 +2677,17 @@ static void edit_end(int go)
 {
     if (!editing)
         return;
+    int what = editing;
     editing = 0;
     if (xic)
         XUnsetICFocus(xic);
-    if (go)
-        open_typed(edit);
     focus(active);
+    if (go && what == 2)
+        proxy_set(edit);
+    else if (go)
+        open_typed(edit);
+    else
+        draw_bar();
 }
 
 static void edit_key(XKeyEvent *ev)
@@ -2795,7 +2911,7 @@ static void menu_action(int i, int x)
             browser_start();
         }
         break;
-    case M_PROXY: probe_start(); break;
+    case M_PROXY: edit_begin(2); break;
     }
 }
 
@@ -2807,7 +2923,7 @@ static void bar_tap(int x)
     if (P.kind && x < W - B) { /* a page is open: back closes it, and so does the field, to type a URL */
         panel_show(P_NONE);
         if (x >= 3 * B && x < W - 2 * B && BR.pid > 0)
-            edit_begin();
+            edit_begin(1);
         return;
     }
     if (x < B)
@@ -2821,7 +2937,7 @@ static void bar_tap(int x)
     else if (x >= W - 2 * B)
         fav_toggle();
     else if (!editing && BR.pid > 0)
-        edit_begin();
+        edit_begin(1);
 }
 
 /* ---------------- Page mode: rd-mirror's socket (dom-mirror.md §9, §11) ---------------- */
@@ -2977,6 +3093,7 @@ static void link_state(void)
         cJSON_AddItemToArray(a, t);
     }
     cJSON_AddNumberToObject(m, "proxy", !*uconf("proxy", "") ? -2 : PX.ok); /* 1 ok, 0 down, -1 not known yet, -2 none set */
+    cJSON_AddStringToObject(m, "proxy_own", own("proxy")); /* the one this user typed; "": browser.conf's */
     cJSON_AddNumberToObject(m, "windows", nclients); /* over one: a window of the browser's own is up (a prompt, a list) */
     int page[4] = { 0, B, W, H - B };
     cJSON_AddItemToObject(m, "screen", cJSON_CreateIntArray((int[]){ W, H }, 2));
@@ -3045,6 +3162,8 @@ static void link_command(const char *msg)
         for (int i = 0; i < U.n; i++)
             if (!strcmp(U.name[i], name))
                 user_switch(i);
+    } else if (!strcmp(c, "proxy.set") && text) {
+        proxy_set(text);
     } else if (!strcmp(c, "fav.toggle")) {
         fav_toggle();
     } else if (!strcmp(c, "fav.delete") && url) {

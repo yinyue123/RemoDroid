@@ -35,6 +35,8 @@ cache = /tmp/rd-cache
 # language for Bob, so his exit address isn't Alice's. Add each proxy to the host's kill switch too
 # (/etc/rd-killswitch.conf).
 #   proxy.Bob = socks5://198.51.100.20:1080
+# A user can also type a proxy of their own in the bar's menu (Proxy: …); it is kept in <data>/<name>/config (proxy = …), beside their profile,
+# and comes before both. The kill switch has to allow that one too, or it shows as "down".
 #   timezone.Bob = Europe/Berlin
 #   lang.Bob = de-DE
 
