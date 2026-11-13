@@ -45,6 +45,7 @@ jobs:
             (cd pkgs && sha256sum remote-browser-amd64.tar >> SHA256SUMS)
           fi
       - name: Install browser-sx through nl
+        timeout-minutes: 10
         env:
           KEY: ${{ secrets.BROWSER_SX_DEPLOY_KEY }}
           HOST: ${{ secrets.BROWSER_SX_DEPLOY_HOST }}
@@ -56,4 +57,5 @@ jobs:
           chmod 600 ~/.ssh/deploy
           printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
           tar -C pkgs -c . | ssh -i ~/.ssh/deploy -p "$PORT" \
-            -o BatchMode=yes -o ServerAliveInterval=15 "$HOST" browser-sx
+            -o BatchMode=yes -o ConnectTimeout=20 -o ConnectionAttempts=2 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$HOST" browser-sx
