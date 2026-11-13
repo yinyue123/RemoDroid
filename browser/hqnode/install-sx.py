@@ -17,6 +17,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import yaml
@@ -136,20 +137,33 @@ def reinstall(machine, cid, archive):
     """Rebuild through the panel, retaining its recorded advanced settings and /data."""
     login = STATE / 'hqnode-login.json'
     settings = json.loads(login.read_text())
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    cookie_fd, cookie = tempfile.mkstemp(prefix='browser-hq-session-')
+    os.close(cookie_fd)
 
     def request(method, path, body=None):
-        req = urllib.request.Request('https://hqno.de/api/v1' + path, method=method,
-                                     data=json.dumps(body).encode() if body is not None else None,
-                                     headers={'Content-Type': 'application/json', 'Origin': 'https://hqno.de'})
-        with opener.open(req, timeout=1800) as response:
-            return json.load(response)
+        args = ['curl', '-sS', '--connect-timeout', '15', '--max-time', '1800',
+                '--proxy', 'socks5h://127.0.0.1:1084', '-b', cookie, '-c', cookie,
+                '-H', 'Content-Type: application/json', '-H', 'Origin: https://hqno.de',
+                '-X', method, '-w', '\n%{http_code}', 'https://hqno.de/api/v1' + path]
+        if body is not None:
+            args += ['--data-binary', '@-']
+        response = subprocess.run(args, input=json.dumps(body) if body is not None else None,
+                                  text=True, capture_output=True)
+        if response.returncode:
+            raise RuntimeError(f'panel request failed: {response.stderr.strip()}')
+        raw, status = response.stdout.rsplit('\n', 1)
+        if not status.startswith('2'):
+            raise RuntimeError(f'panel {method} {path}: HTTP {status}: {raw[:300]}')
+        return json.loads(raw) if raw.strip() else {}
 
-    request('POST', '/auth/login', settings)
-    base = f'/machines/{machine["id"]}/containers/{cid}'
-    view = api('GET', f'/v1/containers/{cid}/advanced')
-    request('PUT', base + '/advanced', {'settings': view['settings'], 'profiles': view.get('profiles', [])})
-    request('POST', base + '/reinstall', {'archive': archive, 'confirm': True})
+    try:
+        request('POST', '/auth/login', settings)
+        base = f'/machines/{machine["id"]}/containers/{cid}'
+        view = api('GET', f'/v1/containers/{cid}/advanced')
+        request('PUT', base + '/advanced', {'settings': view['settings'], 'profiles': view.get('profiles', [])})
+        request('POST', base + '/reinstall', {'archive': archive, 'confirm': NAME})
+    finally:
+        Path(cookie).unlink(missing_ok=True)
     print('Panel reinstall completed; /data retained', flush=True)
 
 
