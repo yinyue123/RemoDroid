@@ -270,10 +270,17 @@ mirror_socket = {d}/shell.sock
             await asyncio.sleep(1)
             await page.evaluate("() => { document.querySelector('#kbText').value = '视频'; document.querySelector('#kbSend').click(); }")
             await asyncio.sleep(1.5)
+            # ⌘C on a Mac: the browser reports C going down and never coming up. The viewer lets it go when ⌘ is
+            # let go; left down, the computer's keyboard repeats it ("cccc…")
+            await page.evaluate("""() => { document.activeElement && document.activeElement.blur();
+                const k = (type, code, key, meta) => document.dispatchEvent(new KeyboardEvent(type, { code, key, metaKey: meta, bubbles: true, cancelable: true }));
+                k('keydown', 'MetaLeft', 'Meta', true); k('keydown', 'KeyC', 'c', true); k('keyup', 'MetaLeft', 'Meta', false); }""")
+            await asyncio.sleep(2)
             await page.evaluate("() => PageMode.choose('auto')")
             await page.wait_for_function("() => PageMode.on && !document.querySelector('#pm').hidden", timeout=10000)
             await until("#echo", "echo:Hello world，你好视频", 12000)
             res["typed_zh_video"] = await txt("#echo")
+            res["key_let_go"] = "cc" not in res["typed_zh_video"]
             await asyncio.sleep(1.5)  # the page is new here: let its first scroll settle before the next tap
 
             # a box the page made editable itself (a chat's message box): what is typed in the mirror's is typed
@@ -436,7 +443,7 @@ mirror_socket = {d}/shell.sock
             await browser.close()
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
-              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again乔布斯好 (enter)" and res.get("typed_zh") and res.get("typed_zh_video") and res.get("composed", "").strip() == "again乔布斯好" and res.get("proxy_ok") and res.get("hidden") == ["hid: clicked", ""] and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
+              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again乔布斯好 (enter)" and res.get("typed_zh") and res.get("typed_zh_video") and res.get("key_let_go") and res.get("composed", "").strip() == "again乔布斯好" and res.get("proxy_ok") and res.get("hidden") == ["hid: clicked", ""] and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
               and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("page_only_ok") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'

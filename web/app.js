@@ -812,14 +812,26 @@ function onKey(e, down) {
   if (!e.metaKey) held &= ~0x88;
   const hid = swapCmd() && SWAP[local] ? SWAP[local] : local;
   const mods = remoteMods(held);
+  /* macOS never says that a key pressed with ⌘ came up again (⌘C: C down, then nothing). Left down on the
+   * computer, it repeats by itself as soon as ⌘ is let go ("cccc…"). So those keys are let go here, when
+   * ⌘ is, or at the next key without it. */
+  if (local < 0xE0) {
+    if (down && e.metaKey) underMeta.set(e.code, hid); else underMeta.delete(e.code);
+  }
+  if (!e.metaKey && underMeta.size) {
+    for (const h of underMeta.values()) sendKey(false, h, mods);
+    underMeta.clear();
+  }
   if (!down && hid >= 0xE0 && mods & (1 << (hid - 0xE0))) return; /* Ctrl and ⌘ both map here; the other is still down */
   sendKey(down, hid, mods);
 }
+const underMeta = new Map(); /* the key's code → what was sent for it, for keys pressed while ⌘ is down */
 document.addEventListener('keydown', e => onKey(e, true));
 document.addEventListener('keyup', e => onKey(e, false));
 function releaseAll() {
   if (!desk()) return;
   held = 0;
+  underMeta.clear();
   const b = new ArrayBuffer(5), v = new DataView(b);
   v.setUint8(0, 5); v.setUint32(1, Math.floor(now()) >>> 0);
   sendInput(new Uint8Array(b), 'reset');
