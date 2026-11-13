@@ -481,10 +481,16 @@ static void control(cJSON *m)
         else
             reply(m, NULL);
     } else if (!strcmp(t, "text")) { /* "keys": typed on the on-screen keyboard, for the input method */
-        if (!D.view_only && msg_bool(d, "keys", 0))
-            input_type(msg_str(d, "text", ""));
-        else if (!D.view_only)
-            dsk_text(msg_str(d, "text", ""));
+        const char *txt = msg_str(d, "text", "");
+        int keyed = 1; /* nothing in it but what a key types */
+        for (const char *c = txt; *c; c++)
+            keyed &= !(*c & 0x80);
+        if (D.view_only) {
+        } else if (!keyed && mirror_available() && mirror_text(txt) == 0) { /* the remote browser puts it in itself */
+        } else if (msg_bool(d, "keys", 0))
+            input_type(txt);
+        else
+            dsk_text(txt);
         reply(m, NULL);
     } else if (!strcmp(t, "clip.set")) {
         const char *text = msg_str(d, "text", "");

@@ -6,8 +6,9 @@
  *     favourites (or takes it out), and a menu with Home, New tab, the open tabs, Favourites, History, the user, the sound, Desktop mode, New identity, Restart and
  *     Stop/Start, the proxy (tap it to type the user's own), then the container's CPU, memory and disk. Taps arrive as the touch screen's emulated
  *     pointer events.
- *   - The pages: Users, History (with Clear history & data, Clear cookies) and Favourites (each with a
- *     close button that deletes it), drawn over the browser below the bar. A drag scrolls them.
+ *   - The pages: Users, History (with Clear history & data, Clear cookies), Favourites (each with a
+ *     close button that deletes it), Sound and Proxy (the user's own: what it is, typing another, the
+ *     default again), drawn over the browser below the bar. A drag scrolls them.
  *   - The users (Alice … Frank by default): each has a profile of their own (cookies, site data), a
  *     fingerprint seed, the tabs they had open, a history and favourites, in <data>/<name>. Switching
  *     closes the browser completely and starts it again as the other user, with that user's tabs.
@@ -150,7 +151,7 @@ static struct {
 
 static const char *own(const char *k)
 {
-    for (int i = UC.n - 1; i >= 0; i--)
+    for (int i = UC.n - 1; i >= 0; i--) /* none when UC.n is negative: a look at browser.conf's alone */
         if (!strcmp(UC.key[i], k) && UC.val[i][0])
             return UC.val[i];
     return "";
@@ -341,6 +342,7 @@ static void draw_bar(void);
 static void draw_menu(void);
 static void menu_layout(void);
 static void panel_refresh(void);
+static void edit_begin(int what);
 
 static void show_note(const char *s)
 {
@@ -1331,6 +1333,7 @@ static void probe_done(int ok)
         draw_bar();
         if (menu_open)
             draw_menu();
+        panel_refresh();
     }
 }
 
@@ -1408,6 +1411,7 @@ static void proxy_set(const char *t)
     char s[100];
     snprintf(s, sizeof s, *v ? "%s's proxy set" : "%s's proxy: the default again", user());
     show_note(s);
+    panel_refresh();
 }
 
 /* ---------------- drawing ---------------- */
@@ -1484,8 +1488,8 @@ static void icon_star(Drawable dr, GC gc, int cx, int cy, int r, int filled)
 
 /* The pages drawn over the browser, below the bar. Drawn into a pixmap first: a drag redraws the whole
  * page for every move, and the video would show it half drawn. */
-enum { P_NONE, P_USERS, P_HISTORY, P_FAVS, P_SOUND };
-static const char *PAGE_NAME[] = { "", "Users", "History", "Favourites", "Sound" };
+enum { P_NONE, P_USERS, P_HISTORY, P_FAVS, P_SOUND, P_PROXY };
+static const char *PAGE_NAME[] = { "", "Users", "History", "Favourites", "Sound", "Proxy" };
 
 static struct {
     int kind;
@@ -2121,7 +2125,8 @@ static void menu_show(int on)
 
 /* ---------------- the pages: Users, History, Favourites ---------------- */
 
-enum { R_HEAD, R_CLEAR_ALL, R_CLEAR_COOKIES, R_USER, R_HIST, R_FAV, R_EMPTY, R_OUT, R_VOL, R_NO_SPEAKER };
+enum { R_HEAD, R_CLEAR_ALL, R_CLEAR_COOKIES, R_USER, R_HIST, R_FAV, R_EMPTY, R_OUT, R_VOL, R_NO_SPEAKER,
+       R_PX_NOW, R_PX_EDIT, R_PX_DEFAULT, R_PX_HELP };
 
 static struct {
     int kind, ref, y, h; /* ref: the user, history entry or favourite; y: from the top of the list */
@@ -2170,6 +2175,13 @@ static void panel_layout(void)
             ROW(R_VOL, SO.cur, B);
         if (SO.n < 2)
             ROW(R_NO_SPEAKER, 0, tall);
+        break;
+    case P_PROXY: /* the user's proxy: what it is, typing another, the default again */
+        ROW(R_PX_NOW, 0, tall);
+        ROW(R_PX_EDIT, 0, tall);
+        if (*own("proxy"))
+            ROW(R_PX_DEFAULT, 0, tall);
+        ROW(R_PX_HELP, 0, tall);
         break;
     case P_FAVS: /* the newest first */
         if (!nfavs)
@@ -2276,6 +2288,39 @@ static void panel_draw(void)
             XSetLineAttributes(dpy, gc, 0, LineSolid, CapButt, JoinMiter);
             break;
         }
+        case R_PX_NOW: {
+            const char *px = uconf("proxy", "");
+            snprintf(s, sizeof s, "%s's proxy: %s", user(), !*px ? "none" : PX.ok > 0 ? "ok" : PX.ok == 0 ? "down" : "checking…");
+            text(P.d, !*px || PX.ok == 0 ? &c_bad : &c_text, x, top, s, tw);
+            snprintf(s, sizeof s, "%s%s", *px ? px : "The browser doesn't start without one", !*px ? "" : *own("proxy") ? " · their own" : " · the default");
+            text_in(font_s, P.d, &c_dim, x, low, s, tw);
+            break;
+        }
+        case R_PX_EDIT:
+            if (editing == 2) {
+                XSetForeground(dpy, gc, px_press);
+                XFillRectangle(dpy, P.pm, gc, 0, y, (unsigned)W, (unsigned)h);
+                text(P.d, &c_text, x, top, *edit ? edit : "socks5://host:port", tw);
+                text_in(font_s, P.d, &c_dim, x, low, "Type it, then Enter (Return). Esc leaves it as it was", tw);
+            } else {
+                text(P.d, &c_text, x, top, *own("proxy") ? "Change it" : "Set a proxy for this user", tw);
+                text_in(font_s, P.d, &c_dim, x, low, "Tap, then type: socks5://host:port", tw);
+            }
+            break;
+        case R_PX_DEFAULT: {
+            const char *def;
+            UC.n = -UC.n; /* a look past the user's own, at what browser.conf has */
+            def = uconf("proxy", "");
+            snprintf(s, sizeof s, "%s", *def ? def : "none: the browser won't start");
+            UC.n = -UC.n;
+            text(P.d, &c_text, x, top, "Use the default again", tw);
+            text_in(font_s, P.d, &c_dim, x, low, s, tw);
+            break;
+        }
+        case R_PX_HELP:
+            text_in(font_s, P.d, &c_dim, x, top, "SOCKS5 or http://, without a password. Kept in this user's config.", tw);
+            text_in(font_s, P.d, &c_dim, x, low, "The machine's kill switch must allow it, or it shows as down.", tw);
+            break;
         case R_NO_SPEAKER:
             text(P.d, &c_dim, x, top, SO.lan ? "No AirPlay speaker found yet" : "No AirPlay here", tw);
             text_in(font_s, P.d, &c_dim, x, low,
@@ -2384,6 +2429,14 @@ static void panel_tap(int x, int y)
     case R_USER:
         panel_show(P_NONE);
         user_switch(ref);
+        break;
+    case R_PX_EDIT:
+        if (editing != 2)
+            edit_begin(2);
+        panel_draw();
+        break;
+    case R_PX_DEFAULT:
+        proxy_set("");
         break;
     case R_OUT:
         sound_pick(ref);
@@ -2688,6 +2741,7 @@ static void edit_end(int go)
         open_typed(edit);
     else
         draw_bar();
+    panel_refresh();
 }
 
 static void edit_key(XKeyEvent *ev)
@@ -2717,6 +2771,7 @@ static void edit_key(XKeyEvent *ev)
         strcat(edit, buf);
     }
     draw_bar();
+    panel_refresh(); /* the Proxy page shows what is being typed */
 }
 
 /* The bar's fonts at scale S: again when S changes */
@@ -2876,10 +2931,12 @@ static void menu_action(int i, int x)
     if (kind == M_CPU || kind == M_MEM || kind == M_DISK) /* nothing to do: the menu stays */
         return;
     menu_show(0);
-    if (kind == M_FAVS || kind == M_HISTORY || kind == M_USER || kind == M_SOUND) {
+    if (kind == M_FAVS || kind == M_HISTORY || kind == M_USER || kind == M_SOUND || kind == M_PROXY) {
         if (kind == M_SOUND)
             SO.next = now_s() + 3;
-        panel_show(kind == M_FAVS ? P_FAVS : kind == M_HISTORY ? P_HISTORY : kind == M_USER ? P_USERS : P_SOUND);
+        if (kind == M_PROXY)
+            probe_start();
+        panel_show(kind == M_FAVS ? P_FAVS : kind == M_HISTORY ? P_HISTORY : kind == M_USER ? P_USERS : kind == M_SOUND ? P_SOUND : P_PROXY);
         return;
     }
     panel_show(P_NONE);
@@ -2911,7 +2968,6 @@ static void menu_action(int i, int x)
             browser_start();
         }
         break;
-    case M_PROXY: edit_begin(2); break;
     }
 }
 

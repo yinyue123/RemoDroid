@@ -187,6 +187,7 @@ int  mirror_on(void);         /* 0, or -1: rd-mirror isn't there */
 void mirror_off(void);
 int  mirror_is_on(void);
 void mirror_message(const uint8_t *d, size_t n); /* the viewer's, from "dom" */
+int  mirror_text(const char *utf8); /* text no key types, put into the page by the browser; -1: no rd-mirror */
 
 /* input.c */
 void input_handle(const uint8_t *d, size_t n);

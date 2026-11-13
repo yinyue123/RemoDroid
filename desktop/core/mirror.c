@@ -22,6 +22,7 @@ int mirror_on(void) { return -1; }
 void mirror_off(void) {}
 int mirror_is_on(void) { return 0; }
 void mirror_message(const uint8_t *d, size_t n) {}
+int mirror_text(const char *utf8) { return -1; }
 
 #else
 
@@ -268,6 +269,47 @@ void mirror_message(const uint8_t *d, size_t n)
     struct msghdr mh = { .msg_iov = v, .msg_iovlen = 2 };
     if (sendmsg(M->fd, &mh, MSG_NOSIGNAL) != (ssize_t)(n + 5))
         session_mirror(0, "the browser's Page mode stopped");
+}
+
+/* Text no key types (Chinese, an emoji), for the remote browser. The X way — a spare key given the character,
+ * then pressed — reached the browser on the OECT as nothing (2026-11-13); rd-mirror has the browser put it
+ * into the page as an input method's finished word. In Page mode over the connection there is; in Video
+ * mode over one made for this message, and rd-mirror attaches to the tab for as long as that takes. */
+int mirror_text(const char *utf8)
+{
+    const char *path = desk_conf("mirror", "socket", "");
+    struct sockaddr_un a = { .sun_family = AF_UNIX };
+    if (!*path || strlen(path) >= sizeof a.sun_path)
+        return -1;
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "k", "text");
+    cJSON_AddStringToObject(o, "text", utf8);
+    char *s = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    if (!s)
+        return -1;
+    size_t n = strlen(s);
+    int ok = -1;
+    if (M) {
+        mirror_message((const uint8_t *)s, n);
+        ok = 0;
+    } else {
+        memcpy(a.sun_path, path, strlen(path));
+        int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        struct timeval tv = { 2, 0 };
+        uint8_t h[5] = { 'v', (uint8_t)(n >> 24), (uint8_t)(n >> 16), (uint8_t)(n >> 8), (uint8_t)n };
+        struct iovec v[2] = { { h, 5 }, { s, n } };
+        struct msghdr mh = { .msg_iov = v, .msg_iovlen = 2 };
+        if (fd >= 0 && !connect(fd, (struct sockaddr *)&a, sizeof a)) {
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+            if (sendmsg(fd, &mh, MSG_NOSIGNAL) == (ssize_t)(n + 5))
+                ok = 0;
+        }
+        if (fd >= 0)
+            close(fd);
+    }
+    free(s);
+    return ok;
 }
 
 #endif

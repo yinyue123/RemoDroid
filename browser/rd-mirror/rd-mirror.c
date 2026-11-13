@@ -210,7 +210,8 @@ static struct {
     double page[4], screen[2]; /* where the page is on the X screen, in pixels */
 } SH = { .path = "/run/rd-shell/sock", .fd = -1 };
 
-enum { P_NONE, P_ATTACH, P_WORLD, P_INJECT, P_POLL, P_RES, P_LOAD, P_READ, P_OP, P_QUIET };
+enum { P_NONE, P_ATTACH, P_WORLD, P_INJECT, P_POLL, P_RES, P_LOAD, P_READ, P_OP, P_QUIET, P_ONCE, P_ONCE_DONE };
+static const char *call_sid; /* a call for another session than the mirror's (P_ONCE) */
 static struct pending {
     int id, kind, gen;
     char *arg; /* P_RES, P_LOAD, P_READ: the address asked for */
@@ -297,7 +298,7 @@ static int call(int kind, const char *method, cJSON *params, int session, const 
     cJSON_AddStringToObject(m, "method", method);
     cJSON_AddItemToObject(m, "params", params ? params : cJSON_CreateObject());
     if (session)
-        cJSON_AddStringToObject(m, "sessionId", M.sid);
+        cJSON_AddStringToObject(m, "sessionId", call_sid ? call_sid : M.sid);
     char *s = cJSON_PrintUnformatted(m);
     cJSON_Delete(m);
     if (!s)
@@ -698,6 +699,24 @@ static void answer(struct pending *p, const cJSON *m)
         resource_out(p->viewer, p->arg, mime, c->valuestring, n);
         break;
     }
+    case P_ONCE: { /* attached for one piece of text (nobody is in Page mode): put it in, then leave */
+        const char *sid = cJSON_GetStringValue(cJSON_GetObjectItem(res, "sessionId"));
+        if (!sid || !p->arg)
+            break;
+        cJSON *q = cJSON_CreateObject();
+        cJSON_AddStringToObject(q, "text", p->arg);
+        call_sid = sid;
+        call(P_ONCE_DONE, "Input.insertText", q, 1, sid, 0);
+        call_sid = NULL;
+        break;
+    }
+    case P_ONCE_DONE:
+        if (p->arg) {
+            cJSON *q = cJSON_CreateObject();
+            cJSON_AddStringToObject(q, "sessionId", p->arg);
+            call(P_QUIET, "Target.detachFromTarget", q, 0, NULL, 0);
+        }
+        break;
     case P_LOAD: { /* loaded: it is read from a stream, a piece at a time */
         const cJSON *r = cJSON_GetObjectItem(res, "resource");
         const char *stream = cJSON_GetStringValue(cJSON_GetObjectItem(r, "stream"));
@@ -948,14 +967,20 @@ static void viewer_message(struct viewer *v, const char *s, size_t len)
                 called->load = cJSON_IsTrue(cJSON_GetObjectItem(m, "load"));
         } else if (u && strlen(u) < 8192)
             res_none((int)(v - V), u);
-    } else if (!strcmp(k, "text") && M.sid[0]) {
+    } else if (!strcmp(k, "text")) {
         /* Text no key types. The agent's way (a spare key given the character, then pressed) reaches this
          * browser as nothing (2026-11-13, the OECT); this is what an input method's finished word does. */
         const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(m, "text"));
-        if (t && *t && strlen(t) < 65536) {
+        if (t && *t && strlen(t) < 65536 && M.sid[0]) {
             cJSON *p = cJSON_CreateObject();
             cJSON_AddStringToObject(p, "text", t);
             call(P_QUIET, "Input.insertText", p, 1, NULL, 0);
+        } else if (t && *t && strlen(t) < 65536 && SH.running && SH.front[0]) {
+            /* Video mode (the agent, over a connection of its own): attached to the tab for this alone */
+            cJSON *p = cJSON_CreateObject();
+            cJSON_AddStringToObject(p, "targetId", SH.front);
+            cJSON_AddBoolToObject(p, "flatten", 1);
+            call(P_ONCE, "Target.attachToTarget", p, 0, t, 0);
         }
     } else if (!strcmp(k, "op") && M.ctx) { /* a tap, where the viewer is looking, a value: the recorder's business */
         char *arg = cJSON_PrintUnformatted(m), *expr = NULL;
