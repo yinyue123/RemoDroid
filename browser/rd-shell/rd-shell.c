@@ -1960,9 +1960,20 @@ static void menu_layout(void)
     ITEM(M_HOME, -1);
     if (BR.pid > 0)
         ITEM(M_NEW_TAB, -1);
+    int gauges = 1;
     if (T.ntabs > 0) {
-        int room = (H - B) / B - 16; /* the rows that fit on the screen beside the others */
-        for (int i = 0; i < T.ntabs && (i < room || !i); i++)
+        /* The rows that fit on the screen beside the others (11, the volume, Close tab, the three gauges). On
+         * a short screen (Desktop mode) the gauges make way for the tabs; and if they still don't all fit,
+         * the ones listed are those up to the tab in front, which is always there. */
+        int room = (H - B) / B - 11 - is_speaker(SO.cur) - (T.ntabs > 1) - 3, front = tab_find(T.cur);
+        if (room < T.ntabs) {
+            gauges = 0;
+            room += 3;
+        }
+        if (room < 1)
+            room = 1;
+        int first = front >= room ? front - room + 1 : 0;
+        for (int i = first; i < T.ntabs && i < first + room; i++)
             ITEM(M_TAB, i);
         if (T.ntabs > 1) /* the last one isn't closed: that would end the browser */
             ITEM(M_CLOSE_TAB, -1);
@@ -1981,9 +1992,11 @@ static void menu_layout(void)
     ITEM(M_RESTART, -1);
     ITEM(M_STARTSTOP, -1);
     ITEM(M_PROXY, -1);
-    ITEM(M_CPU, -1);
-    ITEM(M_MEM, -1);
-    ITEM(M_DISK, -1);
+    if (gauges) {
+        ITEM(M_CPU, -1);
+        ITEM(M_MEM, -1);
+        ITEM(M_DISK, -1);
+    }
 #undef ITEM
     XResizeWindow(dpy, menu, (unsigned)menu_w(), (unsigned)(B * nitems));
 }
