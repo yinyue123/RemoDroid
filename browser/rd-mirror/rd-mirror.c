@@ -7,10 +7,12 @@
  * While a viewer is in Page mode it attaches to the tab in front (rd-shell says which), puts recorder.js
  * into an isolated world of the page and waits on its rd.next(): a snapshot, then each batch of
  * differences, which go to the viewers deflated. It answers their requests for a picture, a font or a
- * stylesheet from what the page itself loaded (Page.getResourceContent), never by fetching. Only these
- * DevTools calls are made, and no Runtime.enable: Target.attachToTarget / detachFromTarget, Page.enable,
- * Page.createIsolatedWorld, Runtime.evaluate (in that world), Page.getResourceContent,
- * Page.handleJavaScriptDialog (with Page enabled the browser shows no alert of its own: the viewer does).
+ * stylesheet from what the page itself loaded (Page.getResourceContent), never by fetching; only a file of
+ * icons that Chrome kept no copy of is loaded once more by the browser (Network.loadNetworkResource, IO.read).
+ * Only these DevTools calls are made, and no Runtime.enable: Target.attachToTarget / detachFromTarget,
+ * Page.enable, Page.createIsolatedWorld, Runtime.evaluate (in that world), Page.getResourceContent,
+ * Page.handleJavaScriptDialog (with Page enabled the browser shows no alert of its own: the viewer does),
+ * and Input.insertText for text no key types (Chinese, an emoji): it goes in as an input method's does.
  *
  * Towards rd-shell (its socket, mirror_socket in browser.conf): JSON messages ending with a NUL; ours carry
  * ids from 1 000 000 000 and pass through it to the browser, {"rd":…} ones are for rd-shell itself.
@@ -946,6 +948,15 @@ static void viewer_message(struct viewer *v, const char *s, size_t len)
                 called->load = cJSON_IsTrue(cJSON_GetObjectItem(m, "load"));
         } else if (u && strlen(u) < 8192)
             res_none((int)(v - V), u);
+    } else if (!strcmp(k, "text") && M.sid[0]) {
+        /* Text no key types. The agent's way (a spare key given the character, then pressed) reaches this
+         * browser as nothing (2026-11-13, the OECT); this is what an input method's finished word does. */
+        const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(m, "text"));
+        if (t && *t && strlen(t) < 65536) {
+            cJSON *p = cJSON_CreateObject();
+            cJSON_AddStringToObject(p, "text", t);
+            call(P_QUIET, "Input.insertText", p, 1, NULL, 0);
+        }
     } else if (!strcmp(k, "op") && M.ctx) { /* a tap, where the viewer is looking, a value: the recorder's business */
         char *arg = cJSON_PrintUnformatted(m), *expr = NULL;
         cJSON *str = arg ? cJSON_CreateStringReference(arg) : NULL;

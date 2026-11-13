@@ -252,6 +252,9 @@ mirror_socket = {d}/shell.sock
             await page.keyboard.type("orld", delay=30)
             await until("#echo", "echo:Hello world")
             res["typed"] = await txt("#echo")
+            await page.keyboard.insert_text("，你好")  # no key types these: the browser puts them in
+            await until("#echo", "echo:Hello world，你好")
+            res["typed_zh"] = await txt("#echo")
 
             # a box the page made editable itself (a chat's message box): what is typed in the mirror's is typed
             # in the real one; its button, dead while the box is empty, sends it; then Enter does
@@ -271,8 +274,17 @@ mirror_socket = {d}/shell.sock
             await fr.locator("#ed").focus()
             await page.keyboard.type("again", delay=30)
             await until("#ed", "again")
+            await page.keyboard.insert_text("乔布斯")
+            await until("#ed", "again乔布斯")
+            # an input method at work: the letters it composes from stay here, its finished word goes over
+            await cdp.send("Input.imeSetComposition", {"text": "hao", "selectionStart": 3, "selectionEnd": 3})
+            await asyncio.sleep(0.3)
+            await cdp.send("Input.insertText", {"text": "好"})
+            await until("#ed", "again乔布斯好")
+            await asyncio.sleep(0.8)
+            res["composed"] = await txt("#ed")
             await page.keyboard.press("Enter")
-            await until("#sent", "sent: again (enter)")
+            await until("#sent", "sent: again乔布斯好 (enter)")
             res["editable"] = await txt("#sent")
 
             # a <select>: picked with this device's control, set on the real page
@@ -404,7 +416,7 @@ mirror_socket = {d}/shell.sock
             await browser.close()
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
-              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again (enter)" and res.get("proxy_ok") and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
+              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again乔布斯好 (enter)" and res.get("typed_zh") and res.get("composed", "").strip() == "again乔布斯好" and res.get("proxy_ok") and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
               and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("page_only_ok") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'

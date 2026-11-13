@@ -315,7 +315,13 @@ function richText(text) {
   richly.at = performance.now();
   /* several lines are pasted there in one piece: as keys, each new line would be an Enter (a chat sends on it) */
   if (/[\r\n]/.test(text)) api.ctrl('clip.set', { text, paste: true });
-  else api.ctrl('text', { text, keys: true });
+  else typed(text);
+}
+/* What was typed, to the real page: as keys when keys type it; text no key types (Chinese, an emoji) is put
+ * in by the browser itself, as an input method's finished word is. */
+function typed(text) {
+  if (/^[\x20-\x7e]*$/.test(text)) api.ctrl('text', { text, keys: true });
+  else send({ k: 'text', text });
 }
 function richKey(hid, mods) { richly.at = performance.now(); api.key(hid, mods); }
 /* The caret in such a box is this device's own, and the text under it is replaced by the real page's. After a
@@ -394,7 +400,7 @@ function listen() {
     while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
     const gone = Array.from(a.slice(pre, a.length - suf)).length, added = b.slice(pre, b.length - suf);
     for (let k = 0; k < gone; k++) api.key(0x2a); /* Backspace */
-    if (added) api.ctrl('text', { text: added, keys: true });
+    if (added) typed(added);
     typing.value = b;
     typing.at = performance.now();
   }, true);
