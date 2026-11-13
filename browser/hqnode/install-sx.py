@@ -8,6 +8,7 @@ after pairing succeeds. Existing containers and /data are preserved.
 
 import http.cookiejar
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -112,6 +113,10 @@ def prepare_lan(cid):
     encoded = base64.b64encode(Path('rd-lan').read_bytes()).decode()
     inside('sh', '-ec', f'printf %s {encoded} | base64 -d > /usr/lib/rd-browser/rd-lan; chmod 755 /usr/lib/rd-browser/rd-lan')
     run('hqnode', 'restart', NAME)
+    verify_lan()
+
+
+def verify_lan():
     for _ in range(30):
         route = inside('sh', '-c', 'ip -4 route get 1.1.1.1 uid 994 ipproto 17 2>/dev/null || true', capture=True)
         if 'dev lan0' in route:
@@ -125,6 +130,27 @@ def prepare_lan(cid):
             return
         time.sleep(1)
     raise RuntimeError('the agent UDP route through macvlan did not become ready')
+
+
+def reinstall(machine, cid, archive):
+    """Rebuild through the panel, retaining its recorded advanced settings and /data."""
+    login = STATE / 'hqnode-login.json'
+    settings = json.loads(login.read_text())
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+    def request(method, path, body=None):
+        req = urllib.request.Request('https://hqno.de/api/v1' + path, method=method,
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={'Content-Type': 'application/json', 'Origin': 'https://hqno.de'})
+        with opener.open(req, timeout=1800) as response:
+            return json.load(response)
+
+    request('POST', '/auth/login', settings)
+    base = f'/machines/{machine["id"]}/containers/{cid}'
+    view = api('GET', f'/v1/containers/{cid}/advanced')
+    request('PUT', base + '/advanced', {'settings': view['settings'], 'profiles': view.get('profiles', [])})
+    request('POST', base + '/reinstall', {'archive': archive, 'confirm': True})
+    print('Panel reinstall completed; /data retained', flush=True)
 
 
 def run(*args, capture=False):
@@ -182,12 +208,15 @@ def main():
     if not settings.is_file():
         raise RuntimeError(f'missing {settings}')
     configure = sys.argv[1] == '--configure'
+    update = sys.argv[1] == '--update'
     destination = None
     if not configure:
-        archive = Path(sys.argv[1]).resolve()
+        archive = Path(sys.argv[2] if update else sys.argv[1]).resolve()
         upload = Path(api('GET', '/v1/images/sideload')['dir'])
         upload.mkdir(parents=True, exist_ok=True)
         destination = upload / 'remote-browser-amd64.tar'
+        if destination.exists() and hashlib.file_digest(destination.open('rb'), 'sha256').digest() != hashlib.file_digest(archive.open('rb'), 'sha256').digest():
+            destination.replace(upload / 'remote-browser-amd64.previous.tar')
         shutil.copyfile(archive, destination.with_suffix('.tar.part'))
         destination.with_suffix('.tar.part').replace(destination)
     machine = api('GET', '/v1/portal/machine')['machine']
@@ -195,7 +224,7 @@ def main():
         raise RuntimeError('refusing to deploy to a different hqnode machine')
     existing = next((c for c in machine.get('containers', []) if c['name'] == NAME), None)
     if existing is None:
-        if configure:
+        if configure or update:
             raise RuntimeError('configure needs the existing browser-sx container')
         result = api('POST', '/v1/portal/containers', {
             'name': NAME, 'ssh_username': 'browser', 'ssh_password': secrets.token_urlsafe(32),
@@ -213,17 +242,30 @@ def main():
     if not data.is_dir():
         raise RuntimeError(f'missing container data mount {data}')
     conf = data / 'browser.conf'
-    prepare_proxy()
-    if conf.exists():
-        shutil.copyfile(conf, settings)
-    set_conf(settings, {'proxy': 'socks5://192.168.1.1:1087',
-                        'timezone': 'America/Los_Angeles',
-                        'lan_gateway': '192.168.1.1', 'lan_webrtc': '1'})
-    shutil.copyfile(settings, conf)
-    owner = data.stat()
-    os.chown(conf, owner.st_uid, owner.st_gid)
-    conf.chmod(0o644)
-    prepare_lan(cid)
+    if update:
+        pairing = data / 'remodroid/desktop.ini'
+        before = {p: hashlib.sha256(p.read_bytes()).digest() for p in (conf, pairing)}
+        user_dirs = [p for p in (data / 'users').iterdir() if p.is_dir()]
+        reinstall(machine, cid, destination.name)
+        for path, digest in before.items():
+            if hashlib.sha256(path.read_bytes()).digest() != digest:
+                raise RuntimeError(f'update changed persisted settings: {path.name}')
+        if not all(p.is_dir() for p in user_dirs):
+            raise RuntimeError('update lost a user directory')
+        verify_lan()
+        print('Verified browser settings, pairing and user directories retained', flush=True)
+    else:
+        prepare_proxy()
+        if conf.exists():
+            shutil.copyfile(conf, settings)
+        set_conf(settings, {'proxy': 'socks5://192.168.1.1:1087',
+                            'timezone': 'America/Los_Angeles',
+                            'lan_gateway': '192.168.1.1', 'lan_webrtc': '1'})
+        shutil.copyfile(settings, conf)
+        owner = data.stat()
+        os.chown(conf, owner.st_uid, owner.st_gid)
+        conf.chmod(0o644)
+        prepare_lan(cid)
 
     # The same container-scoped egress policy as oect; no other host traffic is changed.
     shutil.copyfile('rd-killswitch', '/usr/local/sbin/rd-killswitch')
@@ -258,6 +300,10 @@ def main():
         raise RuntimeError('browser services did not become active')
     inside('sh', '-ec', 'DISPLAY=:0 XAUTHORITY=/run/rd-xorg.auth xdpyinfo | grep dimensions')
     inside('runuser', '-u', 'browser', '--', '/opt/cloakbrowser/chrome', '--version')
+    if update and Path('image-meta.json').exists():
+        shutil.copyfile('image-meta.json', STATE / 'deployed-image.json')
+    if update:
+        (STATE / 'hqnode-login.json').unlink(missing_ok=True)
     print(f'Installed {NAME} ({cid}); all browser services active', flush=True)
 
 

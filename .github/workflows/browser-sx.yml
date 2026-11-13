@@ -5,12 +5,16 @@ on:
     inputs:
       mode:
         type: choice
-        options: [install, configure]
+        options: [install, update, configure]
         default: install
-        description: Build and install, or configure the existing container
+        description: Install, update while keeping data, or configure the existing container
+      image_run:
+        description: Use the amd64 image from this successful browser-image run instead of rebuilding
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: browser-sx
@@ -22,14 +26,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
-        if: inputs.mode != 'configure'
+        if: inputs.mode != 'configure' && inputs.image_run == ''
       - name: Build the amd64 hqnode browser
-        if: inputs.mode != 'configure'
+        if: inputs.mode != 'configure' && inputs.image_run == ''
         run: |
           mkdir pkgs
           docker buildx build --platform linux/amd64 --build-arg CLOAKBROWSER=free \
             -f browser/hqnode/Dockerfile -t localhost/remote-browser-hqnode:amd64 \
             --output type=oci,dest=pkgs/remote-browser-amd64.tar .
+      - name: Fetch the existing amd64 image
+        if: inputs.mode != 'configure' && inputs.image_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_RUN: ${{ inputs.image_run }}
+          KEY: ${{ secrets.BROWSER_IMAGE_KEY }}
+        run: |
+          mkdir -p pkgs image
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN" > pkgs/image-meta.json
+          python3 -c 'import json; d=json.load(open("pkgs/image-meta.json")); assert d["conclusion"] == "success" and d["path"] == ".github/workflows/browser-image.yml"'
+          gh run download "$IMAGE_RUN" -R "$GITHUB_REPOSITORY" -n remote-browser-amd64 -D image
+          (cd image && sha256sum -c remote-browser-amd64.tar.enc.sha256)
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:KEY \
+            -in image/remote-browser-amd64.tar.enc -out pkgs/remote-browser-amd64.tar
       # CloakBrowser stays on the runner and the user's machines; no public image or artifact.
       - name: Prepare the deployment
         env:
@@ -43,6 +61,9 @@ jobs:
           (cd pkgs && sha256sum mode browser-install.py rd-lan rd-killswitch rd-killswitch.service > SHA256SUMS)
           if [ -f pkgs/remote-browser-amd64.tar ]; then
             (cd pkgs && sha256sum remote-browser-amd64.tar >> SHA256SUMS)
+          fi
+          if [ -f pkgs/image-meta.json ]; then
+            (cd pkgs && sha256sum image-meta.json >> SHA256SUMS)
           fi
       - name: Install browser-sx through nl
         timeout-minutes: 10
