@@ -94,6 +94,14 @@ def prepare_lan(cid):
             advanced[key].append(value)
     path.write_text(json.dumps(config, indent=2) + '\n')
     run('systemctl', 'restart', 'hqnode')
+    for _ in range(60):
+        try:
+            api('GET', '/v1/healthz')
+            break
+        except RuntimeError:
+            time.sleep(0.5)
+    else:
+        raise RuntimeError('hqnode API did not become ready after restart')
     run('hqnode', 'cap', NAME, '--add', 'CAP_NET_ADMIN')
     # Setting the same named link is an update in hqnode.
     run('hqnode', 'link', NAME, '--macvlan', 'enp3s0', '--name', 'lan0')
