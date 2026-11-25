@@ -3,7 +3,7 @@
  * bar of its own (address, back, forward, tabs, users, cookies), and sends what the person does back by
  * element: a tap, where they are looking, what they type, what they pick.
  *
- *   PageMode.init({ dom(), ctrl(t, d), key(hid), toast(msg), video() })   app.js's side
+ *   PageMode.init({ dom(), ctrl(t, d, wait), key(hid), toast(msg), video() })   app.js's side
  *   PageMode.offered(yes)    this device has it (caps.mirror)
  *   PageMode.choose(mode)    'auto': the page, and the picture by itself while the page can't show something
  *                            (a playing video, a prompt of the browser's, a page too big); 'page': the page
@@ -305,7 +305,7 @@ const where = (target, x, y) => {
 const op = m => send(Object.assign({ k: 'op' }, m));
 const ptr = new Map(); /* pointerId → the gesture: where it began, whether it became a drag sent as a touch */
 const view = { sent: '', raf: 0, last: 0, moved: new Set(), y: 0, t: 0, v: 0 };
-const typing = { el: null, value: '', at: 0, held: null };
+const typing = { el: null, value: '', at: 0, held: null, out: 0 };
 /* a box the page made editable itself (contenteditable: a chat's message box, an editor), or null */
 const rich = t => {
   for (; t; t = t.parentNode) if (t.nodeType === 1) return t.isContentEditable && !isTexty(t) ? t : null;
@@ -348,13 +348,36 @@ function richText(text) {
   if (/[\r\n]/.test(text)) api.ctrl('clip.set', { text, paste: true });
   else typed(text);
 }
-/* What was typed, to the real page: as keys when keys type it; text no key types (Chinese, an emoji) is put
- * in by the browser itself, as an input method's finished word is. */
-function typed(text) {
-  if (/^[\x20-\x7e]*$/.test(text)) api.ctrl('text', { text, keys: true });
-  else send({ k: 'text', text });
+/* Everything typed goes over the ctrl channel, which keeps its order: over two channels, a Backspace or an
+ * Enter could overtake the letters before it on a slow network (an Enter sent the message without its last
+ * word). The agent answers each piece once it has typed it; typing.out counts those still on their way. */
+function out(t, d) {
+  typing.out++;
+  Promise.resolve(api.ctrl(t, d, true)).then(() => {
+    typing.out--;
+    typing.at = performance.now();
+    heldLater();
+  });
 }
-function richKey(hid, mods) { richly.at = performance.now(); api.key(hid, mods); }
+/* the keys typing needs, as the ctrl channel's Android key codes (desktop/core/keymap.c) */
+const ACODE = { 0x28: 66, 0x2a: 67, 0x4c: 112, 0x2b: 61, 0x29: 111, 0x4f: 22, 0x50: 21, 0x51: 20, 0x52: 19 };
+const AMODS = [[1, 113], [2, 59], [4, 57], [8, 117]]; /* Ctrl, Shift, Alt, Meta */
+function key(hid, mods) {
+  const code = ACODE[hid];
+  if (!code) { api.key(hid, mods); return; }
+  const held = AMODS.filter(([bit]) => mods & bit).map(([, c]) => c);
+  for (const c of held) out('key', { action: 'down', code: c });
+  out('key', { action: 'press', code });
+  for (const c of held.reverse()) out('key', { action: 'up', code: c });
+}
+/* What was typed, to the real page: as keys when keys type it; text no key types (Chinese, an emoji) is put
+ * in by the browser itself, as an input method's finished word is (the agent hands it to rd-mirror). */
+function typed(text) {
+  if (/^[\x20-\x7e]*$/.test(text)) out('text', { text, keys: true });
+  else if (/[\x00-\x1f\x7f]/.test(text)) send({ k: 'text', text }); /* a new line: put in, never a Return (a chat sends on it) */
+  else out('text', { text });
+}
+function richKey(hid, mods) { richly.at = performance.now(); key(hid, mods); }
 /* The caret in such a box is this device's own, and the text under it is replaced by the real page's. After a
  * difference that follows a key, a caret left on an element (the first letter of a line, a line made again)
  * goes to the end of it; one inside a text is kept in place by mirror.js. */
@@ -430,7 +453,7 @@ function listen() {
     while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
     while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
     const gone = Array.from(a.slice(pre, a.length - suf)).length, added = b.slice(pre, b.length - suf);
-    for (let k = 0; k < gone; k++) api.key(0x2a); /* Backspace */
+    for (let k = 0; k < gone; k++) key(0x2a, 0); /* Backspace */
     if (added) typed(added);
     typing.value = b;
     typing.at = performance.now();
@@ -492,7 +515,7 @@ function listen() {
     if (!hid) return;
     if (e.key === 'Enter' && typing.el && typing.el.localName === 'textarea') return; /* a new line: the input event has it */
     if (e.key === 'Enter' || e.key === 'Tab') e.preventDefault();
-    api.key(hid);
+    key(hid, 0);
   }, true);
   /* a select, a date, a colour, a slider: this device's own picker, and the value goes over */
   d.addEventListener('change', e => {
@@ -505,19 +528,25 @@ function listen() {
 const isTexty = t => t && (t.localName === 'textarea' || (t.localName === 'input' && TEXTY.has((t.getAttribute('type') || '').toLowerCase())));
 
 /* The real field's value comes back as a difference. While the person is typing in it, theirs stays; if the
- * page's is still different 300 ms after the last key (a page that reformats what is typed), it wins. */
+ * page's is still different 300 ms after the last key reached the page (a page that reformats what is typed),
+ * it wins. Not before: on a slow network the page's value is from before the keys still on their way, and
+ * taking it put back a box without the last letters, which the person then typed again (twice on the page). */
 function holdProp(n, p) {
   if (n !== typing.el || !('value' in p)) return false;
   typing.held = p;
-  clearTimeout(typing.timer);
-  typing.timer = setTimeout(applyHeld, Math.max(0, 300 - (performance.now() - typing.at)));
+  heldLater();
   return true;
+}
+function heldLater() {
+  clearTimeout(typing.timer);
+  if (typing.held) typing.timer = setTimeout(applyHeld, Math.max(0, 300 - (performance.now() - typing.at)));
 }
 function applyHeld() {
   const p = typing.held, t = typing.el;
+  if (!p || !t) { typing.held = null; return; }
+  if (typing.out > 0) return; /* the answer to the last piece calls again */
+  if (performance.now() - typing.at < 300) { heldLater(); return; }
   typing.held = null;
-  if (!p || !t) return;
-  if (performance.now() - typing.at < 300) { typing.timer = setTimeout(applyHeld, 300); typing.held = p; return; }
   if (t.value !== p.value) { t.value = p.value; typing.value = p.value; }
 }
 

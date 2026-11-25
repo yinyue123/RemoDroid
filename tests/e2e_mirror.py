@@ -264,6 +264,20 @@ mirror_socket = {d}/shell.sock
             await page.keyboard.insert_text("，你好")  # no key types these: the browser puts them in
             await until("#echo", "echo:Hello world，你好")
             res["typed_zh"] = await txt("#echo")
+            # a slow network (everything the viewer sends 700 ms late): the box keeps what was typed until the page
+            # has it, and never shows the page's value from before the keys (typed again, they came out twice)
+            await page.evaluate("() => { const o = RTCDataChannel.prototype.send; window.__send = o;"
+                                " RTCDataChannel.prototype.send = function (m) { setTimeout(() => o.call(this, m), 700); }; }")
+            await page.keyboard.type(" abc", delay=30)
+            seen = []
+            for _ in range(50):
+                seen.append(await page.evaluate("() => document.querySelector('#pmFrame').contentDocument.getElementById('in').value"))
+                await asyncio.sleep(0.05)
+            await page.evaluate("() => { RTCDataChannel.prototype.send = window.__send; }")
+            await until("#echo", "echo:Hello world，你好 abc")
+            res["slow_box"] = sorted(set(seen))
+            res["slow_kept"] = all(v.endswith(" abc") for v in seen)
+            res["slow_echo"] = await txt("#echo")
             # the same in Video mode (the viewer's "Send text"): the agent hands it to rd-mirror, which attaches for it
             await page.evaluate("() => PageMode.choose('video')")
             await page.wait_for_function("() => !PageMode.on", timeout=10000)
@@ -278,7 +292,7 @@ mirror_socket = {d}/shell.sock
             await asyncio.sleep(2)
             await page.evaluate("() => PageMode.choose('auto')")
             await page.wait_for_function("() => PageMode.on && !document.querySelector('#pm').hidden", timeout=10000)
-            await until("#echo", "echo:Hello world，你好视频", 12000)
+            await until("#echo", "echo:Hello world，你好 abc视频", 12000)
             res["typed_zh_video"] = await txt("#echo")
             res["key_let_go"] = "cc" not in res["typed_zh_video"]
             await asyncio.sleep(1.5)  # the page is new here: let its first scroll settle before the next tap
@@ -443,7 +457,7 @@ mirror_socket = {d}/shell.sock
             await browser.close()
         ok = (res.get("pair") and res.get("offered") and res.get("shown") == "taps: 0" and "ops test" in res.get("bar", "")
               and res["frame"][:2] == [440, 860] and res["frame"][2] == "allow-same-origin" and res["frame"][3] == 0
-              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again乔布斯好 (enter)" and res.get("typed_zh") and res.get("typed_zh_video") and res.get("key_let_go") and res.get("composed", "").strip() == "again乔布斯好" and res.get("proxy_ok") and res.get("hidden") == ["hid: clicked", ""] and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
+              and res.get("tap") == "taps: 2" and res.get("typed") == "echo:Hello world" and res.get("editable") == "sent: again乔布斯好 (enter)" and res.get("typed_zh") and res.get("slow_kept") and res.get("slow_echo") == "echo:Hello world，你好 abc" and res.get("typed_zh_video") and res.get("key_let_go") and res.get("composed", "").strip() == "again乔布斯好" and res.get("proxy_ok") and res.get("hidden") == ["hid: clicked", ""] and res.get("loaded_ok") and res.get("icon", [0, 0, 0])[1:] == [True, 19] and res.get("icon2", [0, 0])[1] and res.get("select") == "picked: blue"
               and res.get("photos_ok") and res.get("dialog") == "said yes" and res.get("video_while_playing") and res.get("page_only_ok") and res.get("drag_ok") and res["rows_before"] == 20 and res["rows_after"] >= 80
               and res.get("link") == "second page" and res.get("frame_url") == "about:srcdoc"
               and "mirror test" in res.get("address", "").lower() and res.get("picture") == 'url("blob:'

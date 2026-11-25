@@ -399,7 +399,7 @@ const pagePref = () => {
 };
 PageMode.init({
   dom: () => st.ch.dom,
-  ctrl: (t, d) => sendCtrl(t, d).catch(() => {}),
+  ctrl: (t, d, wait) => sendCtrl(t, d, wait).catch(() => {}),
   key: (hid, mods) => sendTap(hid, mods | 0, 30),
   toast: m => toast(m),
   saveMode: m => { try { localStorage.setItem(pageKey(), m); } catch (e) {} },
