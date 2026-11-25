@@ -618,6 +618,33 @@ notify = false
             await page.keyboard.press("Enter")
             ev = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keysym"] == "Return")
             res["enter_ok"] = bool(ev)
+            # a quick key (let go within 100 ms) is one tap, held on the computer as long as it was here;
+            # a long one goes down at 100 ms and up when let go, and the computer adds no repeats of its own
+            await page.wait_for_timeout(300)
+            probe.drain()
+            await page.keyboard.down("KeyB")
+            await page.wait_for_timeout(40)
+            await page.keyboard.up("KeyB")
+            dn = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 1 and e["keysym"] == "b")
+            up = await probe.wait(lambda e: e["ev"] == "key" and e["down"] == 0 and e["keysym"] == "b")
+            res["tap_ms"] = dn and up and up["t"] - dn["t"]
+            probe.drain()
+            await page.keyboard.down("KeyC")
+            await page.wait_for_timeout(1500)
+            await page.keyboard.up("KeyC")
+            await page.wait_for_timeout(300)
+            cs = [e for e in probe.events if e["ev"] == "key" and e["keysym"] == "c"]
+            res["hold"] = [(e["down"], e["t"]) for e in cs]
+            res["hold_ok"] = len(cs) == 2 and cs[0]["down"] == 1 and cs[1]["down"] == 0 and 1300 <= cs[1]["t"] - cs[0]["t"] <= 1700
+            # typed fast, overlapping: every key once, in order
+            probe.drain()
+            for k in ("KeyD", "KeyE", "KeyF"):
+                await page.keyboard.down(k)
+                await page.wait_for_timeout(20)
+            for k in ("KeyD", "KeyE", "KeyF"):
+                await page.keyboard.up(k)
+            await page.wait_for_timeout(500)
+            res["fast"] = [e["keysym"] for e in probe.events if e["ev"] == "key" and e["down"] == 1]
             # nothing left held down
             await page.wait_for_timeout(300)
             # text from the Keyboard sheet (⋯ on the floating keyboard), including a character no key types
@@ -923,7 +950,8 @@ notify = false
             await browser.close()
         ok = (res.get("pair") and res.get("platform") == "linux" and res["video"]["w"] == 1280 and res.get("colours_ok") and res.get("click_ok")
               and res.get("right_click_ok") and res.get("wheel_ok") and res.get("key_a") == "a" and res.get("shift_1") == "exclam"
-              and res.get("enter_ok") and res.get("text") == ["H", "i", "space", "eacute"] and res.get("ctrl_c_ok") and res.get("clip_to_viewer")
+              and res.get("enter_ok") and res.get("tap_ms") is not None and 30 <= res["tap_ms"] <= 60
+              and res.get("hold_ok") and res.get("fast") == ["d", "e", "f"] and res.get("text") == ["H", "i", "space", "eacute"] and res.get("ctrl_c_ok") and res.get("clip_to_viewer")
               and res.get("clip_to_computer") == "sent from the browser" and res.get("upload_ok") and res.get("transfer_logged")
               and res.get("touch_tap_ok") and res.get("touch_long_press_ok") and res.get("touch_scroll") == 5
               and res.get("fkb_fits") and res.get("fkb") == ["h", "I", "1", "BackSpace", "c+ctrl"]

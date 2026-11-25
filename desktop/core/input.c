@@ -4,6 +4,8 @@
  *   0x02 scroll  (13 bytes)  x, y, h, v in 1/256 notches
  *   0x03 mouse   (12 bytes)  action, button, buttons, x, y
  *   0x04 key     (10 bytes)  action, HID usage, modifier state
+ *                (12 bytes)  action 2 "tap": pressed and released quickly on the viewer, with how long it was
+ *                            held; it is held exactly that long here, however late the network brought it
  *   0x05 reset   (5 bytes)   release everything
  *   0x06 gamepad (20 bytes)  index, buttons, lx, ly, rx, ry, lt, rt: one pad's whole state
  * Coordinates are 0..65535 across the video frame, i.e. the captured screen.
@@ -93,6 +95,39 @@ static void key(int hid, int down)
     dsk_key(hid, down);
 }
 
+/* A tap (0x04 action 2): down now, up after the time the viewer held it. Any other key message ends it first,
+ * so a burst of taps the network held back is still typed in order. */
+#define TAP_MAX_MS 100
+static ev_timer tap_timer;
+static int tap_hid;
+
+static void tap_end(void)
+{
+    if (!tap_hid)
+        return;
+    int h = tap_hid;
+    tap_hid = 0;
+    if (D.loop)
+        ev_timer_stop(D.loop, &tap_timer);
+    key(h, 0);
+}
+
+static void on_tap(struct ev_loop *loop, ev_timer *w, int revents) { tap_end(); }
+
+static void tap(int hid, int ms)
+{
+    if (!keymap_find(hid))
+        return;
+    key(hid, 1);
+    if (!D.loop || ms <= 0) {
+        key(hid, 0);
+        return;
+    }
+    tap_hid = hid;
+    ev_timer_init(&tap_timer, on_tap, (ms > TAP_MAX_MS ? TAP_MAX_MS : ms) / 1000.0, 0);
+    ev_timer_start(D.loop, &tap_timer);
+}
+
 /* Virtual gamepads appear on a pad's first state and stay plugged in until the session ends. */
 static void pad(int i, const dsk_pad_t *p)
 {
@@ -106,6 +141,7 @@ static void pad(int i, const dsk_pad_t *p)
 
 void input_release_all(void)
 {
+    tap_end();
     for (int b = 0; b < 5; b++)
         if (buttons_down & (1u << b))
             button(b, 0);
@@ -177,11 +213,16 @@ void input_handle(const uint8_t *d, size_t n)
                     button(b, 0);
         }
         break;
-    case 0x04: /* key: action, usage, mods, ts */
+    case 0x04: /* key: action, usage, mods, ts[, held ms] */
         if (n >= 10) {
             int hid = rd_get_be16(d + 2);
+            tap_end();
             sync_mods(rd_get_be16(d + 4), hid);
-            key(hid, d[1] == 0);
+            if (d[1] == 2) {
+                if (n >= 12)
+                    tap(hid, rd_get_be16(d + 10));
+            } else
+                key(hid, d[1] == 0);
         }
         break;
     case 0x05:

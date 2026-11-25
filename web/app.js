@@ -400,7 +400,7 @@ const pagePref = () => {
 PageMode.init({
   dom: () => st.ch.dom,
   ctrl: (t, d) => sendCtrl(t, d).catch(() => {}),
-  key: (hid, mods) => { sendKey(true, hid, mods | 0); sendKey(false, hid, mods | 0); },
+  key: (hid, mods) => sendTap(hid, mods | 0, 30),
   toast: m => toast(m),
   saveMode: m => { try { localStorage.setItem(pageKey(), m); } catch (e) {} },
   changed: () => syncMenuStates()
@@ -789,6 +789,28 @@ function sendKey(down, hid, mods) {
   v.setUint8(0, 4); v.setUint8(1, down ? 0 : 1); v.setUint16(2, hid); v.setUint16(4, mods); v.setUint32(6, Math.floor(now()) >>> 0);
   sendInput(new Uint8Array(b), down ? `key 0x${hid.toString(16)}` : null);
 }
+/* A key let go within TAP_MS goes as one message, a tap with how long it was held (0x04 action 2): the
+ * computer presses it and lets it go after that time, so a key-up the network brings late can't hold it
+ * down longer there. A key still down at TAP_MS goes down then, and up when it is let go. Anything else
+ * typed meanwhile sends the waiting key down first, so the computer gets everything in the order typed.
+ * Agents from before taps (no caps.key_tap) get down and up as they happen. */
+const TAP_MS = 100;
+const canTap = () => !!(st.ready && st.ready.caps && st.ready.caps.key_tap);
+function sendTap(hid, mods, ms) {
+  if (!canTap()) { sendKey(true, hid, mods); sendKey(false, hid, mods); return; }
+  const b = new ArrayBuffer(12), v = new DataView(b);
+  v.setUint8(0, 4); v.setUint8(1, 2); v.setUint16(2, hid); v.setUint16(4, mods); v.setUint32(6, Math.floor(now()) >>> 0);
+  v.setUint16(10, Math.max(1, Math.min(TAP_MS, Math.round(ms))));
+  sendInput(new Uint8Array(b), `key 0x${hid.toString(16)} tap ${Math.round(ms)} ms`);
+}
+let tapWait = null; /* the key pressed less than TAP_MS ago: { code, hid, mods, at, timer } */
+function tapFlush() {
+  const w = tapWait;
+  if (!w) return;
+  tapWait = null;
+  clearTimeout(w.timer);
+  sendKey(true, w.hid, w.mods);
+}
 function remoteMods(m) {
   if (!swapCmd()) return m;
   const ctrl = m & 0x11, meta = m & 0x88;
@@ -815,6 +837,8 @@ function onKey(e, down) {
   /* macOS never says that a key pressed with ⌘ came up again (⌘C: C down, then nothing). Left down on the
    * computer, it repeats by itself as soon as ⌘ is let go ("cccc…"). So those keys are let go here, when
    * ⌘ is, or at the next key without it. */
+  const ending = !down && tapWait && tapWait.code === e.code ? tapWait : null;
+  if (ending) { tapWait = null; clearTimeout(ending.timer); } else tapFlush();
   if (local < 0xE0) {
     if (down && e.metaKey) underMeta.set(e.code, hid); else underMeta.delete(e.code);
   }
@@ -822,7 +846,12 @@ function onKey(e, down) {
     for (const h of underMeta.values()) sendKey(false, h, mods);
     underMeta.clear();
   }
+  if (ending) return sendTap(ending.hid, ending.mods, e.timeStamp - ending.at);
   if (!down && hid >= 0xE0 && mods & (1 << (hid - 0xE0))) return; /* Ctrl and ⌘ both map here; the other is still down */
+  if (down && !e.repeat && local < 0xE0 && canTap()) {
+    tapWait = { code: e.code, hid, mods, at: e.timeStamp, timer: setTimeout(tapFlush, TAP_MS) };
+    return;
+  }
   sendKey(down, hid, mods);
 }
 const underMeta = new Map(); /* the key's code → what was sent for it, for keys pressed while ⌘ is down */
@@ -830,6 +859,7 @@ document.addEventListener('keydown', e => onKey(e, true));
 document.addEventListener('keyup', e => onKey(e, false));
 function releaseAll() {
   if (!desk()) return;
+  if (tapWait) { const w = tapWait; tapWait = null; clearTimeout(w.timer); sendTap(w.hid, w.mods, performance.now() - w.at); }
   held = 0;
   underMeta.clear();
   const b = new ArrayBuffer(5), v = new DataView(b);

@@ -477,12 +477,13 @@ existing ones:
   6  u16  y
   8  u32  ts          viewer ms (low 32 bits)
 
-0x04 key (10 bytes)
+0x04 key (10 bytes; 12 for a tap)
   0  u8   0x04
-  1  u8   action      0 down · 1 up
+  1  u8   action      0 down · 1 up · 2 tap (caps.key_tap)
   2  u16  usage       USB HID usage, keyboard page 0x07 (from KeyboardEvent.code; 0xE0–0xE7 modifiers)
   4  u16  mods        HID modifier byte in bits 0–7; bit 8 CapsLock; bit 9 NumLock (for resync)
   6  u32  ts
+  10 u16  held        tap only: ms the key was down on the viewer (1–100)
 
 0x05 reset (5 bytes)  release every held key and button (viewer lost focus, tab hidden)
   0  u8   0x05
@@ -497,6 +498,12 @@ existing ones:
   14 u8   lt, rt      triggers 0..255 (0 with bit 6/7 set = fully pulled)
   16 u32  ts
 ```
+
+Keys on a slow network: a key let go within 100 ms is one tap, and the computer holds it for `held` ms, so a
+late or resent packet can't hold it longer. A key still down at 100 ms goes as down then, and up when it is
+let go. A key pressed meanwhile sends the waiting one down first, so the order stays as typed. The viewer's
+own repeats of a held key are the only repeats: on X11 the server's auto-repeat is off for the XTEST keyboard
+(`input_x11.c`). Before that, a key-up delayed by an SCTP resend made X type the key again and again until it arrived.
 
 A pad is plugged in on its first 0x06 and unplugged when the session ends; 0x05 centres it. Backends:
 Linux creates a uinput device that is a wired Xbox 360 pad to Steam, SDL and games (`pad_uinput.c`,

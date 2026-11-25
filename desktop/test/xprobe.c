@@ -122,7 +122,7 @@ int main(void)
                 const char *name = XKeysymToString(ks);
                 printf("{\"ev\":\"key\",\"down\":%d,\"keycode\":%u,\"keysym\":", e.type == KeyPress, e.xkey.keycode);
                 json_str(name ? name : "");
-                printf(",\"state\":%u}\n", e.xkey.state);
+                printf(",\"state\":%u,\"t\":%lu}\n", e.xkey.state, (unsigned long)e.xkey.time);
             } else if (e.type == SelectionRequest) {
                 serve(&e.xselectionrequest);
             } else if (e.type == SelectionNotify) {

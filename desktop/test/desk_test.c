@@ -197,6 +197,32 @@ static void test_input(void)
     uint8_t reset[5] = { 5 };
     input_handle(reset, sizeof reset);
     CHECK(has("button 0 up") && has("key 0x19 up") && has("key 0xe1 up"), "reset");
+    /* a tap (action 2): held as long as the viewer held it, from when it arrives */
+    D.loop = EV_DEFAULT;
+    uint8_t tp[12] = { 4, 2 };
+    rd_put_be16(tp + 2, 0x04);
+    rd_put_be16(tp + 10, 30);
+    STUB.n = 0;
+    input_handle(tp, sizeof tp);
+    CHECK(has("key 0x04 down") && !has("key 0x04 up"), "tap: down at once");
+    double t0 = ev_time();
+    ev_run(D.loop, EVRUN_ONCE);
+    double held = ev_time() - t0;
+    CHECK(has("key 0x04 up") && held > 0.02 && held < 0.2, "tap: up after its 30 ms (%.0f ms)", held * 1000);
+    /* taps the network held back and brought together: each ends before the next */
+    STUB.n = 0;
+    input_handle(tp, sizeof tp);
+    rd_put_be16(tp + 2, 0x05);
+    input_handle(tp, sizeof tp);
+    CHECK(STUB.n == 3 && !strcmp(STUB.ev[0], "key 0x04 down") && !strcmp(STUB.ev[1], "key 0x04 up") &&
+          !strcmp(STUB.ev[2], "key 0x05 down"), "taps in a burst, in order");
+    uint8_t rs[5] = { 5 };
+    input_handle(rs, sizeof rs);
+    CHECK(has("key 0x05 up"), "reset ends a tap");
+    STUB.n = 0;
+    input_handle(tp, 10); /* a tap without its time: ignored */
+    CHECK(STUB.n == 0, "short tap ignored");
+    D.loop = NULL;
     /* the on-screen keyboard: keys where the layout has them (the input method composes), text elsewhere */
     STUB.n = 0;
     input_type("aB中");

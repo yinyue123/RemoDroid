@@ -1,12 +1,19 @@
 /* X11 input with XTest, on the agent thread's own connection. Keys are
  * physical (X keycode = Linux evdev code + 8); text that no key types is sent by
- * mapping its keysym onto a spare keycode (what xdotool does). */
+ * mapping its keysym onto a spare keycode (what xdotool does).
+ *
+ * The X server repeats a key that stays down (after 660 ms, 25 a second). On a slow network the key's up
+ * arrives late (SCTP resends a lost packet only after its timeout, a second or more), and the server typed
+ * the key again and again until it came ("cccc…"). Its repeat is turned off for the XTEST keyboard, which
+ * only injected keys use (the computer's own keyboard keeps its repeat), and a key held on the viewer
+ * repeats there instead: each of its repeated downs is a release and a press here, as X's own repeat is. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <X11/Xlib.h>
 #include <X11/XKBlib.h>
+#include <X11/extensions/XKBstr.h>
 #include <X11/extensions/XTest.h>
 #include <X11/keysym.h>
 
@@ -15,6 +22,33 @@
 
 static Display *dpy;
 static double acc_x, acc_y; /* fractional scroll notches */
+static uint8_t key_held[256]; /* by X keycode, pressed by dsk_key */
+
+static XErrorHandler prev_handler;
+static int quiet(Display *d, XErrorEvent *e) { return d == dpy || !prev_handler ? 0 : prev_handler(d, e); }
+
+/* No repeat by the server for the XTEST keyboards ("Virtual core XTEST keyboard"); a device id that doesn't
+ * exist is an X error, ignored here. */
+static void no_server_repeat(Display *d)
+{
+    int op, ev, er, maj = XkbMajorVersion, min = XkbMinorVersion;
+    if (!XkbQueryExtension(d, &op, &ev, &er, &maj, &min))
+        return;
+    prev_handler = XSetErrorHandler(quiet);
+    int n = 0;
+    for (unsigned id = 2; id < 128; id++) {
+        XkbDeviceInfoPtr i = XkbGetDeviceInfo(d, 0, id, 0, 0);
+        if (!i)
+            continue;
+        if (i->name && strstr(i->name, "XTEST keyboard") && XkbChangeEnabledControls(d, id, XkbRepeatKeysMask, 0))
+            n++;
+        XkbFreeDeviceInfo(i, XkbXI_AllDeviceFeaturesMask, True);
+    }
+    XSync(d, False);
+    XSetErrorHandler(prev_handler);
+    if (!n)
+        LOGW("input: no XTEST keyboard found; a key whose up comes late may repeat");
+}
 
 static Display *conn(void)
 {
@@ -25,6 +59,9 @@ static Display *conn(void)
             LOGW("input: the X server has no XTEST extension; mouse and keyboard won't work");
             XCloseDisplay(dpy);
             dpy = NULL;
+        } else if (dpy) {
+            no_server_repeat(dpy);
+            memset(key_held, 0, sizeof key_held);
         }
     }
     return dpy;
@@ -79,7 +116,13 @@ void dsk_key(int hid, int down)
     Display *d = conn();
     if (!d || !k || !k->evdev)
         return;
-    XTestFakeKeyEvent(d, (unsigned)k->evdev + 8, down ? True : False, CurrentTime);
+    unsigned kc = (unsigned)k->evdev + 8;
+    if (kc > 255)
+        return;
+    if (down && key_held[kc]) /* the viewer's repeat: X ignores a press of a key that is down */
+        XTestFakeKeyEvent(d, kc, False, CurrentTime);
+    key_held[kc] = (uint8_t)down;
+    XTestFakeKeyEvent(d, kc, down ? True : False, CurrentTime);
     XFlush(d);
 }
 

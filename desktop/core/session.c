@@ -277,6 +277,7 @@ void session_channel_open(const char *label)
     cJSON_AddNumberToObject(caps, "max_fps", desk_conf_int("video", "max_fps", 60));
     cJSON_AddBoolToObject(caps, "audio", S.audio_ok && audio_available());
     cJSON_AddBoolToObject(caps, "keyboard", 1);
+    cJSON_AddBoolToObject(caps, "key_tap", 1); /* 0x04 action 2: a quick key as one message (input.c) */
     cJSON_AddBoolToObject(caps, "mouse", 1);
     cJSON_AddNumberToObject(caps, "touch", dsk_touch_points()); /* > 0: send every finger as 0x01 */
     cJSON_AddBoolToObject(caps, "mirror", mirror_available());  /* the remote browser's Page mode (mirror.set) */
